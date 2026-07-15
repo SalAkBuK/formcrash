@@ -41,6 +41,7 @@ export const runEventEnvelopeSchema = z.object({
   eventId: z.string().min(1),
   runId: z.string().min(1),
   eventType: z.string().min(1),
+  sequence: z.number().int().positive(),
   relativeTimestampMs: z.number().int().nonnegative(),
   recordedAt: z.iso.datetime({ offset: true }),
   schemaVersion: z.literal(1),

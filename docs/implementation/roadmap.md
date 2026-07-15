@@ -56,6 +56,10 @@ both UI and server boundaries.
 
 ## Chunk 2: Hardcoded Priority 0 journey and Impatient User runner
 
+**Status:** Complete. Unit tests and real headless-Chromium integration prove the
+vulnerable failure, fixed pass, event ordering, failure classification, and
+single-active-run boundary.
+
 **User-visible outcome:** A control-server command opens visible Chromium and
 replays the seeded checkout through repeated Submit Order actions.
 

@@ -25,7 +25,7 @@ evidence. An item is complete only when its stated verification can be repeated.
 
 - [ ] First launch exposes a seeded Sample Checkout project, saved checkout
       journey, and Impatient User experiment without manual creation.
-- [ ] The saved journey lists every action in execution order and targets the final
+- [x] The saved journey lists every action in execution order and targets the final
       Submit Order step explicitly.
 - [ ] The saved experiment records trigger count and allowed interval; replay uses
       those exact values rather than random timing.
@@ -39,21 +39,21 @@ evidence. An item is complete only when its stated verification can be repeated.
 
 - [ ] A run command launches headed Chromium from the control server process and
       no dashboard code imports Playwright.
-- [ ] A second run command while one is active returns a documented conflict and
+- [x] A second run command while one is active returns a documented conflict and
       does not create or queue another browser run.
-- [ ] The runner executes saved actions in order and records the step number for
+- [x] The runner executes saved actions in order and records the step number for
       every start and completion event.
-- [ ] A missing selector terminates as an inspectable replay/runner error and no
+- [x] A missing selector terminates as an inspectable replay/runner error and no
       later journey step executes.
-- [ ] The Impatient User injector triggers only at Submit Order and records each
+- [x] The Impatient User injector triggers only at Submit Order and records each
       attempted trigger with a relative timestamp.
 - [ ] Stop closes browser resources and transitions `running -> stopping ->
 incomplete` in an integration test.
-- [ ] Chromium launch or control failures end as `runner_error`, never `failed`.
+- [x] Chromium launch or control failures end as `runner_error`, never `failed`.
 
 ## Evidence, assertions, and persistence
 
-- [ ] The server captures matching submission-request count, response status, and
+- [x] The server captures matching submission-request count, response status, and
       created-order count from actual run behavior.
 - [ ] Every persisted run event has a unique ID, run ID, server sequence, event
       type, non-negative relative time, recorded time, schema version, and JSON

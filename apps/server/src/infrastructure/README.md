@@ -1,5 +1,9 @@
 # Infrastructure boundary
 
-Future adapters for Chromium, SQLite, and the local filesystem belong here. The
-control server is their sole owner. No adapter is created during Chunk 0 because
-there is no current runtime use for those dependencies.
+Adapters for Chromium, SQLite, and the local filesystem belong to the control
+server. The server is their sole owner; application packages must not import one
+another to reach infrastructure.
+
+Chunk 2 adds the focused Playwright adapter under
+`runner/infrastructure/playwright-browser.ts`, beside the browser-session port it
+implements. SQLite and filesystem artifact adapters remain deferred to Chunk 3.

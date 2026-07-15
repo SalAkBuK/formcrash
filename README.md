@@ -13,8 +13,9 @@ Priority 0 is the duplicate checkout-submission demonstration described there.
 - `apps/dashboard` — Next.js interface for future project, experiment, run, and
   result workflows. It communicates with the control server over HTTP and never
   launches browsers or reads the FormCrash database.
-- `apps/server` — Fastify modular monolith that will own commands, live events,
-  Playwright, persistence, assertions, and evidence. Chunk 0 exposes only health.
+- `apps/server` — Fastify modular monolith that owns health, the hardcoded
+  sample-run API, Playwright execution, assertions, and in-memory evidence.
+  Persistence and live event delivery remain deferred.
 - `apps/sample-checkout` — independent Next.js target application implementing
   the bundled vulnerable-versus-fixed checkout demonstration.
 - `packages/contracts` — runtime-validated cross-boundary schemas and inferred
@@ -35,9 +36,14 @@ corepack prepare pnpm@11.13.0 --activate
 pnpm install
 ```
 
-Playwright and Chromium are intentionally not dependencies yet. A later runner
-chunk will document and run the browser installation command when browser
-execution has a concrete implementation.
+Install the server-owned Chromium binary explicitly after dependencies:
+
+```sh
+pnpm --filter @formcrash/server exec playwright install chromium
+```
+
+Normal application startup never downloads browsers. Playwright Library belongs
+only to the control server; the dashboard and sample checkout do not own it.
 
 ## Development
 
@@ -59,6 +65,14 @@ reads environment variables; it does not load `.env` files implicitly.
 
 The dashboard's browser-visible server URL is configured separately with
 `NEXT_PUBLIC_FORMCRASH_SERVER_URL`.
+
+Runner configuration:
+
+| Variable                       | Default                 | Purpose                                                    |
+| ------------------------------ | ----------------------- | ---------------------------------------------------------- |
+| `FORMCRASH_BROWSER_HEADLESS`   | `false`                 | Use visible Chromium by default; set `true` in automation. |
+| `FORMCRASH_BROWSER_TIMEOUT_MS` | `10000`                 | Bounded target, action, and evidence timeout.              |
+| `SAMPLE_CHECKOUT_BASE_URL`     | `http://localhost:4200` | Already-running bundled checkout target.                   |
 
 ## Verification
 
@@ -97,6 +111,35 @@ See
 [`apps/sample-checkout/src/checkout/README.md`](apps/sample-checkout/src/checkout/README.md)
 for the selector contract and repeatable vulnerable/fixed verification steps.
 
+## Hardcoded Priority 0 browser run
+
+With the control server and sample checkout already running, invoke the one
+predefined experiment from PowerShell:
+
+```powershell
+$vulnerable = Invoke-RestMethod -Method Post `
+  -Uri http://localhost:4100/api/sample-runs `
+  -ContentType 'application/json' `
+  -Body '{"mode":"vulnerable"}'
+$vulnerable | ConvertTo-Json -Depth 12
+
+$fixed = Invoke-RestMethod -Method Post `
+  -Uri http://localhost:4100/api/sample-runs `
+  -ContentType 'application/json' `
+  -Body '{"mode":"fixed"}'
+$fixed | ConvertTo-Json -Depth 12
+```
+
+The endpoint awaits completion. Vulnerable mode returns HTTP 200 with run status
+`failed` and two orders; fixed mode returns HTTP 200 with status `passed` and one
+order. Assertion failure is a test result, not an HTTP error. The latest result is
+available only in memory at `GET /api/sample-runs/latest`.
+
+The current runner allows one browser run at a time. A concurrent request receives
+HTTP 409 and is not queued. The hardcoded experiment triggers Submit Order twice,
+100 ms apart, and checks exactly one assertion: no more than one order should be
+created.
+
 ## Runtime storage
 
 Local generated state belongs under `var/`:
@@ -111,12 +154,14 @@ of the FormCrash database and artifact layout.
 
 ## Current implementation status
 
-Chunks 0 and 1 are implemented. The bundled checkout now supports the complete
+Chunks 0 through 2 are implemented. The bundled checkout supports the complete
 fake cart-to-confirmation journey, intentional vulnerable duplicate creation,
 fixed client locking, fixed server idempotency, visible local evidence, and reset.
-It does **not** implement journey recording or replay, browser control, FormCrash
-failure injection, assertions, run persistence, screenshots, reports, exports, or
-comparisons.
+The control server now runs the one hardcoded checkout journey in Chromium,
+injects the first Impatient User experiment, captures in-memory evidence, and
+evaluates the duplicate-order assertion. It does **not** implement recording,
+editable journeys or experiments, persistence, SSE, screenshots, dashboard run
+workflows, reports, exports, or comparisons.
 
 Priority 0 must be built in this order:
 

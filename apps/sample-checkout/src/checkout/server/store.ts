@@ -8,7 +8,7 @@ import type {
   SampleCheckoutState,
 } from '../domain/models';
 
-const PROCESSING_DELAY_MS = 80;
+const PROCESSING_DELAY_MS = 250;
 
 function waitForProcessing(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, PROCESSING_DELAY_MS));

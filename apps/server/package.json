@@ -13,6 +13,7 @@
   "dependencies": {
     "@formcrash/contracts": "workspace:*",
     "fastify": "5.10.0",
+    "playwright": "1.61.1",
     "zod": "4.4.3"
   }
 }

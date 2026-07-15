@@ -4,9 +4,12 @@ import { createApp } from '../src/app/create-app.js';
 
 const app = createApp({
   config: {
+    browserHeadless: true,
+    browserTimeoutMs: 10_000,
     host: '127.0.0.1',
     logLevel: 'silent',
     port: 4100,
+    sampleCheckoutBaseUrl: 'http://localhost:4200',
     varDirectory: './var',
   },
   logger: false,

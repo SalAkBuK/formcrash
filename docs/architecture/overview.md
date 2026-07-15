@@ -9,8 +9,9 @@ independently while sharing explicit contracts.
    commands to the server and will subscribe to Server-Sent Events (SSE). It does
    not own Playwright, SQLite, run orchestration, or evidence files.
 2. **Control server (`apps/server`)** — a long-running Fastify modular monolith.
-   It is the only process that will launch visible Chromium, mutate FormCrash
-   metadata, evaluate assertions, and write evidence.
+   It is the only process that launches visible Chromium and evaluates the first
+   in-memory assertion. It will later mutate FormCrash metadata and write durable
+   evidence.
 3. **Bundled sample checkout (`apps/sample-checkout`)** — an independent Next.js
    target application. It exposes a realistic but fake controlled checkout for
    the guaranteed demonstration path and must remain usable without the control
@@ -21,7 +22,7 @@ flowchart LR
   User[Developer] --> Dashboard[Dashboard<br/>Next.js :3000]
   Dashboard -->|REST commands| Server[Control server<br/>Fastify :4100]
   Server -->|SSE progress| Dashboard
-  Server -->|future Playwright control| Chromium[Visible Chromium]
+  Server -->|Playwright control| Chromium[Visible Chromium]
   Chromium -->|normal browser HTTP| Checkout[Sample checkout<br/>Next.js :4200]
   Server -->|sole owner| SQLite[(SQLite metadata)]
   Server -->|sole owner| Files[(Filesystem artifacts)]
@@ -53,7 +54,8 @@ and make the guaranteed demo path less representative.
 
 ## Intentionally deferred
 
-Chunk 0 has no Playwright dependency, database schema, browser adapter, product
-routes, SSE stream, checkout domain, recording, replay, injection, assertion,
-evidence, screenshot, report, or comparison implementation. Those additions are
-sequenced in the implementation roadmap so each slice is demonstrable and tested.
+Chunks 1 and 2 add the independent checkout plus one hardcoded Playwright replay,
+Impatient User injector, request/application evidence, and duplicate-order
+assertion. Database schema, durable events/artifacts, SSE, recording, editable
+models, screenshots, reports, comparisons, and dashboard run workflows remain
+deferred.
