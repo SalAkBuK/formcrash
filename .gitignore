@@ -1,0 +1,32 @@
+# Dependencies and package-manager state
+node_modules/
+.pnpm-store/
+
+# Build and test output
+.next/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Local environment files
+.env
+.env.local
+.env.*.local
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local FormCrash runtime data (retain directory markers only)
+var/*
+!var/README.md
+!var/database/
+!var/database/.gitkeep
+!var/runs/
+!var/runs/.gitkeep
+!var/screenshots/
+!var/screenshots/.gitkeep
+!var/exports/
+!var/exports/.gitkeep
