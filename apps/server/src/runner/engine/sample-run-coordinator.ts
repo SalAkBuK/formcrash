@@ -5,6 +5,7 @@ import {
 } from '@formcrash/contracts';
 
 import type { SampleRunExecutor } from '../sample/types.js';
+import { BrowserOwnership } from '../infrastructure/browser-ownership.js';
 
 export class ActiveSampleRunError extends Error {
   constructor() {
@@ -17,16 +18,20 @@ export class ActiveSampleRunError extends Error {
 
 export interface SampleRunCoordinatorOptions {
   readonly onAsyncError?: (error: unknown, runId: string) => void;
+  readonly browserOwnership?: BrowserOwnership;
 }
 
 export class SampleRunCoordinator {
   private active = false;
   private activeCompletion: Promise<void> | null = null;
+  private readonly browserOwnership: BrowserOwnership;
 
   constructor(
     private readonly executor: SampleRunExecutor,
     private readonly options: SampleRunCoordinatorOptions = {},
-  ) {}
+  ) {
+    this.browserOwnership = options.browserOwnership ?? new BrowserOwnership();
+  }
 
   get isActive(): boolean {
     return this.active;
@@ -34,6 +39,7 @@ export class SampleRunCoordinator {
 
   start(mode: SampleRunMode): StartSampleRunAccepted {
     if (this.active) throw new ActiveSampleRunError();
+    const releaseOwnership = this.browserOwnership.acquire('sample_execution');
     this.active = true;
 
     let execution: ReturnType<SampleRunExecutor['prepare']>;
@@ -41,6 +47,7 @@ export class SampleRunCoordinator {
       execution = this.executor.prepare(mode);
     } catch (error: unknown) {
       this.active = false;
+      releaseOwnership();
       throw error;
     }
 
@@ -56,6 +63,7 @@ export class SampleRunCoordinator {
       .finally(() => {
         this.active = false;
         this.activeCompletion = null;
+        releaseOwnership();
       });
     this.activeCompletion = completion;
 

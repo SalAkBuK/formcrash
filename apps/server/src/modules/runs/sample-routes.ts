@@ -7,6 +7,7 @@ import type { RunEventBroker } from '../../events/run-event-broker.js';
 import type { RunRepository } from '../../persistence/run-repository.js';
 import { ActiveSampleRunError } from '../../runner/engine/sample-run-coordinator.js';
 import type { SampleRunCoordinator } from '../../runner/engine/sample-run-coordinator.js';
+import { BrowserOwnershipConflictError } from '../../runner/infrastructure/browser-ownership.js';
 import { parseLastEventId, streamRunEvents } from './run-events-sse.js';
 
 const runListQuerySchema = z.object({
@@ -44,10 +45,16 @@ export function registerSampleRunRoutes(
     try {
       return reply.status(202).send(coordinator.start(parsed.data.mode));
     } catch (error: unknown) {
-      if (error instanceof ActiveSampleRunError) {
+      if (
+        error instanceof ActiveSampleRunError ||
+        error instanceof BrowserOwnershipConflictError
+      ) {
         return reply.status(409).send({
           error: {
-            code: 'SAMPLE_RUN_ACTIVE',
+            code:
+              error instanceof ActiveSampleRunError
+                ? 'SAMPLE_RUN_ACTIVE'
+                : 'BROWSER_ACTIVE',
             message: error.message,
           },
         });

@@ -37,6 +37,177 @@ export const journeyActionTypeSchema = z.enum([
   'submit',
 ]);
 
+export const controlledTargetUrlSchema = z
+  .string()
+  .trim()
+  .url()
+  .superRefine((value, context) => {
+    const url = new URL(value);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      context.addIssue({
+        code: 'custom',
+        message: 'Only HTTP and HTTPS target URLs are supported.',
+      });
+    }
+    if (url.username !== '' || url.password !== '') {
+      context.addIssue({
+        code: 'custom',
+        message: 'Target URLs must not contain credentials.',
+      });
+    }
+  });
+
+export const projectSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().trim().min(1).max(120),
+  targetUrl: controlledTargetUrlSchema,
+  description: z.string().max(1_000),
+  createdAt: z.iso.datetime({ offset: true }),
+  updatedAt: z.iso.datetime({ offset: true }),
+});
+
+export const createProjectRequestSchema = z.object({
+  name: projectSchema.shape.name,
+  targetUrl: controlledTargetUrlSchema,
+  description: projectSchema.shape.description.optional().default(''),
+});
+
+export const projectListSchema = z.object({
+  items: z.array(projectSchema),
+});
+
+export const recordingSessionStatusSchema = z.enum([
+  'created',
+  'launching',
+  'recording',
+  'stopping',
+  'completed',
+  'runner_error',
+]);
+
+export const replayLocatorSchema = z.discriminatedUnion('strategy', [
+  z.object({ strategy: z.literal('data-formcrash'), value: z.string().min(1) }),
+  z.object({ strategy: z.literal('data-testid'), value: z.string().min(1) }),
+  z.object({ strategy: z.literal('id'), value: z.string().min(1) }),
+  z.object({
+    strategy: z.literal('role'),
+    role: z.string().min(1),
+    name: z.string().min(1),
+  }),
+  z.object({ strategy: z.literal('name'), value: z.string().min(1) }),
+  z.object({ strategy: z.literal('label'), value: z.string().min(1) }),
+  z.object({ strategy: z.literal('text'), value: z.string().min(1) }),
+  z.object({ strategy: z.literal('css'), value: z.string().min(1) }),
+]);
+
+export const targetFingerprintSchema = z.object({
+  tagName: z.string().min(1),
+  inputType: z.string().nullable(),
+  dataFormcrash: z.string().nullable(),
+  dataTestId: z.string().nullable(),
+  id: z.string().nullable(),
+  role: z.string().nullable(),
+  accessibleName: z.string().nullable(),
+  name: z.string().nullable(),
+  label: z.string().nullable(),
+  text: z.string().nullable(),
+  cssPath: z.string().min(1),
+});
+
+export const recordedValueSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('safe'), value: z.string().max(10_000) }),
+  z.object({
+    kind: z.literal('sensitive'),
+    variableName: z.string().regex(/^[A-Z][A-Z0-9_]*$/u),
+  }),
+]);
+
+export const recordedJourneyStepSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().trim().min(1).max(160),
+  type: journeyActionTypeSchema,
+  timestamp: z.number().int().nonnegative(),
+  url: controlledTargetUrlSchema,
+  locator: replayLocatorSchema.nullable(),
+  fingerprint: targetFingerprintSchema.nullable(),
+  value: recordedValueSchema.nullable(),
+  sensitive: z.boolean(),
+});
+
+export const recordingWarningCodeSchema = z.enum([
+  'new_tab',
+  'iframe',
+  'file_upload',
+  'captcha',
+  'third_party_payment',
+  'drag_and_drop',
+  'contenteditable',
+  'shadow_dom',
+]);
+
+export const recordingWarningSchema = z.object({
+  code: recordingWarningCodeSchema,
+  message: z.string().min(1),
+  timestamp: z.number().int().nonnegative(),
+  url: controlledTargetUrlSchema,
+});
+
+export const recordingSessionSchema = z.object({
+  id: z.string().min(1),
+  projectId: z.string().min(1),
+  status: recordingSessionStatusSchema,
+  steps: z.array(recordedJourneyStepSchema),
+  warnings: z.array(recordingWarningSchema),
+  errorMessage: z.string().nullable(),
+  startedAt: z.iso.datetime({ offset: true }),
+  completedAt: z.iso.datetime({ offset: true }).nullable(),
+});
+
+export const startRecordingResponseSchema = recordingSessionSchema;
+
+export const saveRecordedJourneyRequestSchema = z.object({
+  name: z.string().trim().min(1).max(160),
+  steps: z.array(recordedJourneyStepSchema).min(1).optional(),
+});
+
+export const journeyRecordingMetadataSchema = z.object({
+  recordingSessionId: z.string().min(1).nullable(),
+  recordedAt: z.iso.datetime({ offset: true }),
+  warningCount: z.number().int().nonnegative(),
+  normalizationRule: z.string().min(1),
+});
+
+export const persistedJourneySchema = z.object({
+  id: z.string().min(1),
+  projectId: z.string().min(1),
+  name: z.string().min(1),
+  version: z.number().int().positive(),
+  steps: z.array(recordedJourneyStepSchema).min(1),
+  recordingMetadata: journeyRecordingMetadataSchema,
+  createdAt: z.iso.datetime({ offset: true }),
+});
+
+export const journeyListSchema = z.object({
+  items: z.array(persistedJourneySchema),
+});
+
+export const replayFailureSchema = z.object({
+  stepId: z.string().min(1),
+  stepName: z.string().min(1),
+  stepNumber: z.number().int().positive(),
+  actionType: journeyActionTypeSchema,
+  message: z.string().min(1),
+});
+
+export const replayResultSchema = z.object({
+  replayId: z.string().min(1),
+  journeyId: z.string().min(1),
+  status: z.enum(['passed', 'failed', 'runner_error']),
+  failedStep: replayFailureSchema.nullable(),
+  startedAt: z.iso.datetime({ offset: true }),
+  completedAt: z.iso.datetime({ offset: true }),
+});
+
 export const assertionResultStatusSchema = z.enum([
   'passed',
   'failed',
@@ -282,6 +453,30 @@ export function isTerminalRunStatus(
 }
 export type ExperimentType = z.infer<typeof experimentTypeSchema>;
 export type JourneyActionType = z.infer<typeof journeyActionTypeSchema>;
+export type ControlledTargetUrl = z.infer<typeof controlledTargetUrlSchema>;
+export type Project = z.infer<typeof projectSchema>;
+export type CreateProjectRequest = z.infer<typeof createProjectRequestSchema>;
+export type ProjectList = z.infer<typeof projectListSchema>;
+export type RecordingSessionStatus = z.infer<
+  typeof recordingSessionStatusSchema
+>;
+export type ReplayLocator = z.infer<typeof replayLocatorSchema>;
+export type TargetFingerprint = z.infer<typeof targetFingerprintSchema>;
+export type RecordedValue = z.infer<typeof recordedValueSchema>;
+export type RecordedJourneyStep = z.infer<typeof recordedJourneyStepSchema>;
+export type RecordingWarningCode = z.infer<typeof recordingWarningCodeSchema>;
+export type RecordingWarning = z.infer<typeof recordingWarningSchema>;
+export type RecordingSession = z.infer<typeof recordingSessionSchema>;
+export type SaveRecordedJourneyRequest = z.infer<
+  typeof saveRecordedJourneyRequestSchema
+>;
+export type JourneyRecordingMetadata = z.infer<
+  typeof journeyRecordingMetadataSchema
+>;
+export type PersistedJourney = z.infer<typeof persistedJourneySchema>;
+export type JourneyList = z.infer<typeof journeyListSchema>;
+export type ReplayFailure = z.infer<typeof replayFailureSchema>;
+export type ReplayResult = z.infer<typeof replayResultSchema>;
 export type AssertionResultStatus = z.infer<typeof assertionResultStatusSchema>;
 export type RunEventEnvelope = z.infer<typeof runEventEnvelopeSchema>;
 export type SampleRunMode = z.infer<typeof sampleRunModeSchema>;

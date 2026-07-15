@@ -179,6 +179,29 @@ Persisted inspection endpoints:
 - `GET /api/runs/:runId/artifacts/:artifactId` — PNG content located through
   run-owned database metadata, never a client filesystem path.
 
+External target and journey endpoints:
+
+- `POST /api/projects`, `GET /api/projects`, and `GET /api/projects/:projectId`
+  — create and inspect controlled HTTP/HTTPS targets, including localhost.
+- `POST /api/projects/:projectId/recordings` — acquire exclusive Chromium
+  ownership, open a fresh visible context, and start a server-owned recording.
+- `GET /api/projects/:projectId/recordings/:sessionId` and
+  `POST .../stop` — inspect lifecycle state and stop with validated ordered steps.
+- `POST /api/projects/:projectId/recordings/:sessionId/journeys` — save an
+  reviewed recording as a new immutable journey version.
+- `GET /api/projects/:projectId/journeys` and `GET /api/journeys/:journeyId`
+  — list and read saved generic journeys.
+- `POST /api/journeys/:journeyId/replay` — replay persisted steps in a fresh
+  context and return the exact failed step when an action cannot complete.
+
+Recording intentionally supports only top-frame navigation, click, text input,
+checkbox/radio change, dropdown selection, and form submission. New tabs,
+iframes, file uploads, CAPTCHA, third-party payment pages, drag and drop,
+contenteditable editors, and unsupported Shadow DOM targets produce explicit
+warnings and are not silently recorded. Consecutive input events for one locator
+are coalesced; a top-frame navigation immediately caused by a recorded click or
+submit is omitted to avoid replaying the same transition twice.
+
 Each successful browser run attempts three full-page PNG captures: immediately
 before disruption, immediately after both triggers, and after settled final-state
 evidence is read. Artifact metadata includes byte size and a SHA-256 checksum. A
@@ -221,15 +244,19 @@ checkout's process-local order attempts, orders, and idempotency state.
 
 ## Current implementation status
 
-Chunks 0 through 4 are implemented. The bundled checkout supports the complete
+Chunks 0 through 5 are implemented. The bundled checkout supports the complete
 fake cart-to-confirmation journey, intentional vulnerable duplicate creation,
 fixed client locking, fixed server idempotency, visible local evidence, and reset.
 The control server now runs the one hardcoded checkout journey in Chromium,
 injects the first Impatient User experiment, persists immutable run snapshots,
 ordered events and assertion results, captures three filesystem screenshots, and
-publishes replayable live progress to the sample-only dashboard. It does **not**
-implement recording, editable journeys or experiments, reports, exports,
-failed-versus-fixed comparison, or arbitrary external application support.
+publishes replayable live progress. The dashboard now creates persisted projects,
+records supported manual same-tab journeys in visible Chromium, reviews safe or
+masked steps and their ranked locators, saves immutable journey versions, and
+replays them with exact failed-step reporting. The recorder is verified against
+both the separate `fixtures/external-target` application and the bundled sample
+checkout. It does **not** implement experiment attachment to recorded journeys,
+comparison, reports, exports, authentication, or cloud execution.
 
 Priority 0 must be built in this order:
 
@@ -237,8 +264,9 @@ Priority 0 must be built in this order:
 2. Hardcoded checkout journey and Impatient User browser runner.
 3. Duplicate assertion, persistence, and evidence.
 4. Dashboard run control and live progress.
-5. Failed-versus-fixed comparison.
-6. Report export and demonstration hardening.
+5. External target and journey capture.
+6. Attach Impatient User plus matching browser/network assertions to a saved
+   local journey.
 
 See [`docs/implementation/roadmap.md`](docs/implementation/roadmap.md) for chunk
 boundaries and objective exit criteria.

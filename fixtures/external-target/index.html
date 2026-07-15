@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>External profile fixture</title>
+    <style>
+      body {
+        max-width: 42rem;
+        margin: 3rem auto;
+        padding: 0 1rem;
+        font: 16px/1.5 system-ui;
+      }
+      form,
+      fieldset {
+        display: grid;
+        gap: 1rem;
+      }
+      label {
+        display: grid;
+        gap: 0.25rem;
+      }
+      .complete {
+        border: 2px solid #27833d;
+        padding: 1rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>External profile fixture</h1>
+      <a data-testid="details-link" href="/details">Open profile form</a>
+      <form data-testid="profile-form">
+        <label for="display-name">Display name</label>
+        <input
+          id="display-name"
+          data-formcrash="display-name"
+          name="displayName"
+        />
+
+        <label for="password">Temporary password</label>
+        <input id="password" name="password" type="password" />
+
+        <label for="plan">Plan</label>
+        <select id="plan" data-testid="plan-select" name="plan">
+          <option value="starter">Starter</option>
+          <option value="team">Team</option>
+        </select>
+
+        <label
+          ><input data-testid="terms" name="terms" type="checkbox" /> Accept
+          fixture terms</label
+        >
+        <button data-testid="save-profile" type="submit">Save profile</button>
+      </form>
+      <section id="complete" class="complete" hidden>
+        Profile fixture completed.
+      </section>
+
+      <input id="upload" type="file" />
+      <div id="editor" contenteditable="true">Unsupported editor</div>
+      <div id="shadow-host"></div>
+      <iframe
+        title="fixture frame"
+        srcdoc="<button id='frame-button'>Iframe action</button>"
+      ></iframe>
+    </main>
+    <script>
+      document.querySelector('form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        document.querySelector('form').hidden = true;
+        document.querySelector('#complete').hidden = false;
+      });
+      const root = document
+        .querySelector('#shadow-host')
+        .attachShadow({ mode: 'open' });
+      root.innerHTML = '<button id="shadow-button">Shadow action</button>';
+    </script>
+  </body>
+</html>

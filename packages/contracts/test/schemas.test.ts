@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   assertionResultStatusSchema,
+  controlledTargetUrlSchema,
+  createProjectRequestSchema,
   experimentTypeSchema,
   journeyActionTypeSchema,
   runArtifactSchema,
@@ -114,4 +116,24 @@ describe('foundational contracts', () => {
       ).toBe(false);
     },
   );
+
+  it.each([
+    'http://localhost:4300',
+    'http://127.0.0.1:4300/form',
+    'https://controlled.example.test/journey',
+  ])('accepts controlled HTTP target URL %s', (targetUrl) => {
+    expect(
+      createProjectRequestSchema.safeParse({ name: 'Target', targetUrl })
+        .success,
+    ).toBe(true);
+  });
+
+  it.each([
+    'file:///tmp/form.html',
+    'ftp://example.test/form',
+    'javascript:alert(1)',
+    'https://user:secret@example.test',
+  ])('rejects unsupported target URL %s', (targetUrl) => {
+    expect(controlledTargetUrlSchema.safeParse(targetUrl).success).toBe(false);
+  });
 });

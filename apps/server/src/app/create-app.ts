@@ -6,10 +6,15 @@ import { ScreenshotStore } from '../artifacts/screenshot-store.js';
 import { RunEventBroker } from '../events/run-event-broker.js';
 import { registerHealthRoute } from '../modules/health/routes.js';
 import { registerSampleRunRoutes } from '../modules/runs/sample-routes.js';
+import { registerProjectRoutes } from '../modules/projects/routes.js';
 import { initializePersistence } from '../persistence/initialize.js';
 import { RunRepository } from '../persistence/run-repository.js';
+import { ProjectJourneyRepository } from '../persistence/project-journey-repository.js';
 import { SampleRunCoordinator } from '../runner/engine/sample-run-coordinator.js';
 import { PlaywrightSampleRunExecutor } from '../runner/engine/sample-runner.js';
+import { BrowserOwnership } from '../runner/infrastructure/browser-ownership.js';
+import { RecordingManager } from '../runner/recording/recording-manager.js';
+import { JourneyReplayService } from '../runner/recording/journey-replay.js';
 
 export interface CreateAppOptions {
   readonly config: ServerConfig;
@@ -25,11 +30,23 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   });
   const database = initializePersistence(options.config);
   const runRepository = new RunRepository(database.connection);
+  const projectRepository = new ProjectJourneyRepository(database.connection);
   const screenshotStore = new ScreenshotStore(
     options.config.artifactRoot,
     runRepository,
   );
   const runEventBroker = options.runEventBroker ?? new RunEventBroker();
+  const browserOwnership = new BrowserOwnership();
+  const recordingManager = new RecordingManager(
+    options.config,
+    projectRepository,
+    browserOwnership,
+  );
+  const journeyReplay = new JourneyReplayService(
+    options.config,
+    projectRepository,
+    browserOwnership,
+  );
 
   void app.register(cors, {
     origin: [...options.config.dashboardOrigins],
@@ -66,6 +83,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
         eventBroker: runEventBroker,
       }),
       {
+        browserOwnership,
         onAsyncError: (error, runId) => {
           app.log.error(
             { error, runId },
@@ -78,6 +96,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     runEventBroker.close();
   });
   app.addHook('onClose', async () => {
+    await recordingManager.close();
     await sampleRunCoordinator.waitForIdle();
     database.close();
   });
@@ -87,6 +106,12 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     runRepository,
     screenshotStore,
     runEventBroker,
+  );
+  registerProjectRoutes(
+    app,
+    projectRepository,
+    recordingManager,
+    journeyReplay,
   );
 
   return app;

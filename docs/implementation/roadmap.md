@@ -143,67 +143,53 @@ builders, report export, or broad visual polish.
 **Exit criteria:** A judge can reach and run the seeded scenario without technical
 commands; refresh/reconnect does not invent or reorder events.
 
-## Chunk 5: Failed-versus-fixed comparison
+## Chunk 5: External target and journey capture
 
-**User-visible outcome:** A developer replays the identical experiment against
-fixed mode and compares the failed and passed runs side by side.
+**User-visible outcome:** A developer creates a persisted local project, opens its
+controlled URL in visible Chromium, manually records a supported same-tab journey,
+reviews the normalized steps and ranked replay locators, saves a versioned journey,
+and replays it with an exact failed-step result.
 
-**Backend work:** Comparable-run query rules, experiment-version validation, and
-comparison read model for configuration, assertion, request/order count, final
-state, and duration.
+**Backend work:** Focused project/recording/journey APIs, shared browser ownership,
+recording lifecycle persistence, pre-application event injection, validated and
+privacy-aware event normalization, immutable journey versions, and generic replay.
 
-**Frontend work:** Fixed replay action, run selection, prominent failed-versus-
-passed comparison, configuration-difference warnings, and changed-result emphasis.
+**Frontend work:** Project creation/list, controlled-environment warning, recording
+status and stop control, unsupported-action warnings, step review/editing, locator
+inspection, journey saving/listing, and replay result presentation.
 
-**Tests:** Same-version eligibility, incompatible comparison rejection, result
-diffing, fixed-mode end-to-end pass, and full vulnerable-versus-fixed workflow.
+**Tests:** URL schemes, browser exclusion and release, selector priority, input
+coalescing, sensitive masking, unsupported events, top-frame navigation, durable
+steps and versions, exact replay failures, and real Chromium verification against
+both a separate external fixture and the bundled checkout.
 
-**Demo checkpoint:** Complete the signature before-and-after proof using one saved
-experiment and show two orders versus one.
+**Explicit non-goals:** Failure experiments on recorded journeys, comparison,
+reports, CI, selector healing, cross-browser support, authentication, or cloud
+execution.
 
-**Explicit non-goals:** Arbitrary cross-experiment diffs, other experiments,
-advanced visualizations, or external target support.
+**Exit criteria:** The same generic recorder captures and successfully replays a
+non-sample controlled local application and the bundled checkout.
 
-**Exit criteria:** Both runs retain identical experiment snapshots except the
-explicit target mode; evidence and assertion changes are unambiguous.
+## Chunk 6: Attach Impatient User to a recorded journey
 
-## Chunk 6: Report export and demo hardening
+**User-visible outcome:** A developer attaches Impatient User to a saved click or
+submit step, configures matching browser/network assertions, and runs the failure
+experiment against their own saved local journey.
 
-**User-visible outcome:** A completed Priority 0 run exports a human-readable,
-sanitized report and the full judge workflow reliably completes within three
-minutes.
+**Explicit non-goals:** Other failure injectors, comparison, reports, CI, cloud
+execution, authentication, or production monitoring.
 
-**Backend work:** Deterministic report generation, safe artifact access, export
-failure handling, cleanup limits, setup/reset hardening, and demo diagnostics.
+## Later: Remaining experiments and report hardening
 
-**Frontend work:** Export action, clear error state, first-run sample path, safety
-warning, and targeted Priority 0 presentation polish.
+**User-visible outcome:** Developers configure Tunnel Drop, Slow Server,
+Accidental Refresh, and Back-Button Trap on already-recorded journeys with
+applicable assertions, then export qualified evidence.
 
-**Tests:** Report content and redaction, missing-artifact behavior, clean-install
-instructions, repeated demo soak runs, and timing measurement.
+**Backend work:** Experiment-specific injectors, additional assertion evaluators,
+screenshots, generic run history, and a Playwright-style export starting point.
 
-**Demo checkpoint:** Run the entire saved vulnerable/fixed comparison and export
-its report from a clean setup in under three minutes.
-
-**Explicit non-goals:** Full Playwright-style export, other experiments, recorder,
-cloud execution, authentication, teams, or CI integration.
-
-**Exit criteria:** Clean setup is reproducible, repeated demo runs are stable,
-export never leaks masked input, and all claims in README match tested behavior.
-
-## Post-Priority-0: Recorder and remaining experiments
-
-**User-visible outcome:** Developers can record supported journeys and configure
-Tunnel Drop, Slow Server, Accidental Refresh, and Back-Button Trap with applicable
-assertions.
-
-**Backend work:** Recorder protocol, selector strategy, versioned editing,
-experiment-specific injectors, additional assertion evaluators, screenshots, run
-history, and Playwright-style export starting point.
-
-**Frontend work:** Project/journey management, recording controls and review,
-experiment cards/settings, assertion builder, richer results, and empty/error
-states from the PRD.
+**Frontend work:** Experiment cards/settings, assertion builder, richer results,
+report actions, and the related empty/error states from the PRD.
 
 **Tests:** Per-experiment deterministic integration tests, recorder privacy and
 unsupported-action tests, assertion matrices, screenshot failure handling, and
