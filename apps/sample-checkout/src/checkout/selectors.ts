@@ -1,4 +1,5 @@
 export const FORMCRASH_SELECTORS = {
+  checkoutReady: 'checkout-ready',
   cart: 'cart',
   cartNext: 'cart-next',
   contactStep: 'contact-step',

@@ -1,62 +1,9 @@
 import type {
-  SampleJourneyActionType,
+  SampleJourneyStep,
   SampleJourneyStepSummary,
-} from '../sample/types.js';
+} from '@formcrash/contracts';
 
-interface BaseStep {
-  readonly id: string;
-  readonly name: string;
-}
-
-export interface NavigateStep extends BaseStep {
-  readonly action: {
-    readonly type: 'navigate';
-    readonly path: string;
-  };
-}
-
-export interface ClickStep extends BaseStep {
-  readonly action: {
-    readonly type: 'click';
-    readonly selector: string;
-  };
-}
-
-export interface FillStep extends BaseStep {
-  readonly action: {
-    readonly type: 'fill';
-    readonly selector: string;
-    readonly value: string;
-  };
-}
-
-export interface WaitForVisibleStep extends BaseStep {
-  readonly action: {
-    readonly type: 'wait_for_visible';
-    readonly selector: string;
-  };
-}
-
-export interface InjectImpatientUserStep extends BaseStep {
-  readonly action: {
-    readonly type: 'inject_impatient_user';
-    readonly selector: string;
-  };
-}
-
-export interface ReadTestStateStep extends BaseStep {
-  readonly action: {
-    readonly type: 'read_test_state';
-  };
-}
-
-export type SampleJourneyStep =
-  | NavigateStep
-  | ClickStep
-  | FillStep
-  | WaitForVisibleStep
-  | InjectImpatientUserStep
-  | ReadTestStateStep;
+export type { SampleJourneyStep };
 
 export function summarizeStep(
   step: SampleJourneyStep,
@@ -67,7 +14,7 @@ export function summarizeStep(
   return {
     id: step.id,
     name: step.name,
-    actionType: step.action.type satisfies SampleJourneyActionType,
+    actionType: step.action.type,
     selector,
     path,
   };

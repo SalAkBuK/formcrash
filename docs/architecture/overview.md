@@ -9,9 +9,8 @@ independently while sharing explicit contracts.
    commands to the server and will subscribe to Server-Sent Events (SSE). It does
    not own Playwright, SQLite, run orchestration, or evidence files.
 2. **Control server (`apps/server`)** — a long-running Fastify modular monolith.
-   It is the only process that launches visible Chromium and evaluates the first
-   in-memory assertion. It will later mutate FormCrash metadata and write durable
-   evidence.
+   It is the only process that launches visible Chromium, evaluates assertions,
+   owns SQLite metadata, and writes or serves filesystem evidence.
 3. **Bundled sample checkout (`apps/sample-checkout`)** — an independent Next.js
    target application. It exposes a realistic but fake controlled checkout for
    the guaranteed demonstration path and must remain usable without the control
@@ -54,8 +53,8 @@ and make the guaranteed demo path less representative.
 
 ## Intentionally deferred
 
-Chunks 1 and 2 add the independent checkout plus one hardcoded Playwright replay,
-Impatient User injector, request/application evidence, and duplicate-order
-assertion. Database schema, durable events/artifacts, SSE, recording, editable
-models, screenshots, reports, comparisons, and dashboard run workflows remain
-deferred.
+Chunks 1 through 3 add the independent checkout, one hardcoded Playwright replay,
+Impatient User injector, request/application evidence, durable definitions and
+runs, duplicate-order assertion, and three screenshot artifacts. SSE, recording,
+editable models, reports, comparisons, dashboard run workflows, and arbitrary
+external targets remain deferred.

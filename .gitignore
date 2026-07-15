@@ -23,10 +23,14 @@ Thumbs.db
 var/*
 !var/README.md
 !var/database/
+var/database/*
 !var/database/.gitkeep
 !var/runs/
+var/runs/*
 !var/runs/.gitkeep
 !var/screenshots/
+var/screenshots/*
 !var/screenshots/.gitkeep
 !var/exports/
+var/exports/*
 !var/exports/.gitkeep

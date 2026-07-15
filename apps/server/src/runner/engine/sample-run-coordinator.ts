@@ -15,7 +15,6 @@ export class ActiveSampleRunError extends Error {
 
 export class SampleRunCoordinator {
   private active = false;
-  private latestResult: SampleRunResult | null = null;
 
   constructor(private readonly executor: SampleRunExecutor) {}
 
@@ -23,20 +22,12 @@ export class SampleRunCoordinator {
     return this.active;
   }
 
-  get latest(): SampleRunResult | null {
-    return this.latestResult === null
-      ? null
-      : structuredClone(this.latestResult);
-  }
-
   async run(mode: SampleRunMode): Promise<SampleRunResult> {
     if (this.active) throw new ActiveSampleRunError();
     this.active = true;
 
     try {
-      const result = await this.executor.run(mode);
-      this.latestResult = structuredClone(result);
-      return result;
+      return await this.executor.run(mode);
     } finally {
       this.active = false;
     }

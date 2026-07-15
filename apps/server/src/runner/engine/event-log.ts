@@ -12,7 +12,10 @@ export class RunEventLog {
   private readonly events: RunEventEnvelope[] = [];
   private readonly startedAt = performance.now();
 
-  constructor(private readonly runId: string) {}
+  constructor(
+    private readonly runId: string,
+    private readonly onAppend?: (event: RunEventEnvelope) => void,
+  ) {}
 
   append(eventType: string, payload: JsonValue): RunEventEnvelope {
     const sequence = this.events.length + 1;
@@ -29,6 +32,7 @@ export class RunEventLog {
       schemaVersion: 1,
       payload,
     };
+    this.onAppend?.(event);
     this.events.push(event);
     return event;
   }

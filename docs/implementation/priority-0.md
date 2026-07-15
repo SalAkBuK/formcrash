@@ -23,21 +23,21 @@ evidence. An item is complete only when its stated verification can be repeated.
 
 ## Saved journey and experiment
 
-- [ ] First launch exposes a seeded Sample Checkout project, saved checkout
+- [x] First launch exposes a seeded Sample Checkout project, saved checkout
       journey, and Impatient User experiment without manual creation.
 - [x] The saved journey lists every action in execution order and targets the final
       Submit Order step explicitly.
-- [ ] The saved experiment records trigger count and allowed interval; replay uses
+- [x] The saved experiment records trigger count and allowed interval; replay uses
       those exact values rather than random timing.
-- [ ] At least one saved assertion states that no more than one matching order may
+- [x] At least one saved assertion states that no more than one matching order may
       be created.
-- [ ] A persisted experiment version is immutable after a run references it.
+- [x] A persisted experiment version is immutable after a run references it.
 - [ ] Each run stores a complete versioned configuration snapshot whose hash and
       serialized content remain unchanged when the current experiment is edited.
 
 ## Controlled Chromium replay
 
-- [ ] A run command launches headed Chromium from the control server process and
+- [x] A run command launches headed Chromium from the control server process and
       no dashboard code imports Playwright.
 - [x] A second run command while one is active returns a documented conflict and
       does not create or queue another browser run.
@@ -55,20 +55,20 @@ incomplete` in an integration test.
 
 - [x] The server captures matching submission-request count, response status, and
       created-order count from actual run behavior.
-- [ ] Every persisted run event has a unique ID, run ID, server sequence, event
+- [x] Every persisted run event has a unique ID, run ID, server sequence, event
       type, non-negative relative time, recorded time, schema version, and JSON
       payload accepted by the shared contract.
-- [ ] Run events are append-only; automated persistence tests prove existing
+- [x] Run events are append-only; automated persistence tests prove existing
       events cannot be updated or reordered.
-- [ ] The duplicate-protection assertion stores expected and observed counts plus
+- [x] The duplicate-protection assertion stores expected and observed counts plus
       an independent `passed`, `failed`, `not_evaluated`, or `error` status.
-- [ ] Vulnerable mode consistently ends `failed` with observed order count greater
+- [x] Vulnerable mode consistently ends `failed` with observed order count greater
       than one across a documented repeated-run test.
-- [ ] Fixed mode consistently ends `passed` with observed order count exactly one
+- [x] Fixed mode consistently ends `passed` with observed order count exactly one
       across the identical repeated-run test.
-- [ ] Server restart preserves runs, snapshots, events, assertion results, and
+- [x] Server restart preserves runs, snapshots, events, assertion results, and
       artifact metadata.
-- [ ] SQLite contains metadata only; a database inspection confirms no binary
+- [x] SQLite contains metadata only; a database inspection confirms no binary
       screenshots or unmasked sensitive input values are stored.
 
 ## Live result and comparison

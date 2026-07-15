@@ -1,8 +1,8 @@
 # Priority 0 data flow
 
-The eventual submission-critical lifecycle is below. Chunk 2 implements an API-
-driven, in-memory version of the browser execution core; persistence, dashboard
-control, and comparison remain deferred.
+The eventual submission-critical lifecycle is below. Chunk 3 implements the
+API-driven browser core plus durable definitions, snapshots, events, assertions,
+and screenshot artifacts. Dashboard control, SSE, and comparison remain deferred.
 
 ```mermaid
 sequenceDiagram
@@ -30,9 +30,9 @@ sequenceDiagram
 
 1. **Dashboard requests a run — partially implemented.** `POST /api/sample-runs`
    accepts a target mode, but the dashboard does not call it yet.
-2. **Server snapshots the saved experiment — not implemented.** The snapshot will
-   include journey steps, injector configuration, assertion configuration, and
-   relevant target settings so future edits cannot rewrite history.
+2. **Server snapshots the saved experiment — implemented for the seed.** The
+   persisted run receives journey steps, injector configuration, assertion
+   configuration, selected mode, and target URL before Chromium launches.
 3. **Server launches visible Chromium — implemented.** Only the server owns
    Playwright and uses a fresh context per run; tests override visible mode to
    headless.
@@ -40,14 +40,16 @@ sequenceDiagram
    Steps execute in order and missing targets produce identified runner errors.
 5. **Impatient User acts at Submit Order — implemented.** Two trigger attempts
    occur exactly 100 ms apart at the configured step.
-6. **Evidence is collected — partially implemented.** Browser order-request
-   metadata and sample test-support state are captured in memory. Screenshots are
-   deferred.
+6. **Evidence is collected — implemented for Priority 0.** Browser order-request
+   metadata and sample test-support state are persisted, and full-page PNGs are
+   attempted immediately before disruption, after both triggers, and after final
+   state is read.
 7. **Assertions are evaluated — implemented for one assertion.** Created-order
    count determines pass/fail; evidence failures remain runner errors.
-8. **Events and artifacts are persisted — not implemented.** Run events append in
-   order. Artifact metadata points to server-owned files rather than database
-   blobs.
+8. **Events and artifacts are persisted — implemented.** Run events append under
+   database-enforced per-run sequence rules. Artifact metadata points to validated
+   server-owned relative files, includes SHA-256 integrity hashes, and never stores
+   screenshot blobs in SQLite.
 9. **Dashboard receives live events — not implemented.** One SSE stream per run
    carries versioned event envelopes after the REST command returns.
 10. **Completed runs become comparable — not implemented.** Only runs of the same

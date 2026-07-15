@@ -8,8 +8,9 @@ must not absorb module-specific business rules.
 The implemented modules are:
 
 - `health`: process health and service identity.
-- `runs`: the Chunk 2 REST boundary for starting the hardcoded sample run and
-  reading the latest in-memory result.
+- `runs`: starts the hardcoded sample run and exposes durable run-history, detail,
+  latest-result, and run-owned artifact reads.
 
-The `runs` module deliberately delegates execution and single-run coordination to
-the runner. It does not yet provide durable history, CRUD workflows, or streaming.
+The `runs` module deliberately delegates execution, persistence, artifacts, and
+single-run coordination to focused server-owned collaborators. It does not provide
+CRUD workflows or streaming.

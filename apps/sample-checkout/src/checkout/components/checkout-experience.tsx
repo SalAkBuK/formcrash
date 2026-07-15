@@ -87,6 +87,7 @@ export function CheckoutExperience({
   mode,
   modeNotice,
 }: CheckoutExperienceProps) {
+  const [isHydrated, setIsHydrated] = useState(false);
   const [step, setStep] = useState<CheckoutStep>('cart');
   const [contact, setContact] = useState<ContactInformation>(EMPTY_CONTACT);
   const [shipping, setShipping] = useState<ShippingInformation>(EMPTY_SHIPPING);
@@ -137,6 +138,7 @@ export function CheckoutExperience({
   }, []);
 
   useEffect(() => {
+    setIsHydrated(true);
     void refreshEvidence();
   }, [refreshEvidence]);
 
@@ -261,6 +263,9 @@ export function CheckoutExperience({
 
   return (
     <main className={`checkout-app mode-${mode}`}>
+      {isHydrated ? (
+        <span data-formcrash={SELECTORS.checkoutReady} hidden />
+      ) : null}
       <header className="site-header">
         <div>
           <p className="eyebrow">FormCrash local test target</p>

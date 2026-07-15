@@ -5,6 +5,7 @@ import { summarizeStep } from './types.js';
 // This is the server-owned copy of the stable selector contract documented by
 // ADR 0007. The runner deliberately does not import from the target application.
 export const SAMPLE_CHECKOUT_SELECTORS = {
+  checkoutReady: 'checkout-ready',
   cart: 'cart',
   cartNext: 'cart-next',
   contactName: 'contact-name',

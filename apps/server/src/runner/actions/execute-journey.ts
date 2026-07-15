@@ -1,14 +1,15 @@
 import type { RunEventLog } from '../engine/event-log.js';
 import type { CheckoutBrowserSession } from '../infrastructure/browser-session.js';
-import {
-  IMPATIENT_USER_EXPERIMENT,
-  SAMPLE_CHECKOUT_JOURNEY,
-} from '../journeys/sample-checkout.js';
 import type { SampleJourneyStep } from '../journeys/types.js';
 import { summarizeStep } from '../journeys/types.js';
 import type { Delay } from '../injectors/impatient-user.js';
 import { delay, injectImpatientUser } from '../injectors/impatient-user.js';
-import type { SampleApplicationState, SampleRunMode } from '../sample/types.js';
+import type {
+  ImpatientUserExperimentSummary,
+  SampleApplicationState,
+  SampleRunMode,
+} from '../sample/types.js';
+import type { ScreenshotLabel } from '../../artifacts/screenshot-store.js';
 
 export class JourneyStepExecutionError extends Error {
   readonly step;
@@ -34,6 +35,9 @@ export interface JourneyExecutionOptions {
   readonly baseUrl: string;
   readonly mode: SampleRunMode;
   readonly timeoutMs: number;
+  readonly journey: readonly SampleJourneyStep[];
+  readonly experiment: ImpatientUserExperimentSummary;
+  readonly captureEvidence: (label: ScreenshotLabel) => Promise<void>;
   readonly wait?: Delay;
 }
 
@@ -44,7 +48,7 @@ export async function executeSampleJourney(
 ): Promise<SampleApplicationState> {
   let finalState: SampleApplicationState | null = null;
 
-  for (const step of SAMPLE_CHECKOUT_JOURNEY) {
+  for (const step of options.journey) {
     const summary = summarizeStep(step);
     events.append('journey.step.started', {
       stepId: summary.id,
@@ -99,21 +103,26 @@ async function executeStep(
       await session.waitForVisible(step.action.selector);
       return null;
     case 'inject_impatient_user':
+      await options.captureEvidence('before-disruption');
       await injectImpatientUser(
         session,
         step.action.selector,
-        IMPATIENT_USER_EXPERIMENT,
+        options.experiment,
         events,
         options.wait ?? delay,
       );
+      await options.captureEvidence('after-disruption');
       return null;
-    case 'read_test_state':
-      return waitForSettledState(
+    case 'read_test_state': {
+      const state = await waitForSettledState(
         session,
         options.mode,
         options.timeoutMs,
         options.wait ?? delay,
       );
+      await options.captureEvidence('final-result');
+      return state;
+    }
   }
 }
 

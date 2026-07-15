@@ -4,6 +4,7 @@ import {
   assertionResultStatusSchema,
   experimentTypeSchema,
   journeyActionTypeSchema,
+  runArtifactSchema,
   runEventEnvelopeSchema,
   runStatusSchema,
 } from '../src/index.js';
@@ -56,4 +57,43 @@ describe('foundational contracts', () => {
 
     expect(result.success).toBe(false);
   });
+
+  it('accepts server-owned relative artifact metadata', () => {
+    expect(
+      runArtifactSchema.safeParse({
+        artifactId: 'artifact-1',
+        runId: 'run-1',
+        artifactType: 'screenshot',
+        label: 'before-disruption',
+        relativePath: 'screenshots/run-1/001-before-disruption.png',
+        mimeType: 'image/png',
+        sizeBytes: 100,
+        checksumSha256: '0'.repeat(64),
+        captureSequence: 1,
+        createdAt: '2026-07-15T10:00:00.000Z',
+        metadata: { fullPage: true },
+      }).success,
+    ).toBe(true);
+  });
+
+  it.each(['C:\\outside.png', '/outside.png', '../outside.png'])(
+    'rejects unsafe artifact path %s',
+    (relativePath) => {
+      expect(
+        runArtifactSchema.safeParse({
+          artifactId: 'artifact-1',
+          runId: 'run-1',
+          artifactType: 'screenshot',
+          label: 'before-disruption',
+          relativePath,
+          mimeType: 'image/png',
+          sizeBytes: 100,
+          checksumSha256: '0'.repeat(64),
+          captureSequence: 1,
+          createdAt: '2026-07-15T10:00:00.000Z',
+          metadata: {},
+        }).success,
+      ).toBe(false);
+    },
+  );
 });

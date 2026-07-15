@@ -56,4 +56,18 @@ describe('single active sample run', () => {
       });
     },
   );
+
+  it('releases the lock when the executor rejects', async () => {
+    const coordinator = new SampleRunCoordinator({
+      run: () => Promise.reject(new Error('Persistence unavailable.')),
+    });
+
+    await expect(coordinator.run('fixed')).rejects.toThrow(
+      'Persistence unavailable.',
+    );
+    expect(coordinator.isActive).toBe(false);
+    await expect(coordinator.run('fixed')).rejects.toThrow(
+      'Persistence unavailable.',
+    );
+  });
 });

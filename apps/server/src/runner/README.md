@@ -8,7 +8,7 @@ browser and context for each run.
 
 - Endpoint: `POST /api/sample-runs` with `{ "mode": "vulnerable" }` or
   `{ "mode": "fixed" }`.
-- Latest in-memory result: `GET /api/sample-runs/latest`.
+- Latest persisted result: `GET /api/sample-runs/latest`.
 - Journey: one structured, hardcoded sample checkout journey using only the
   documented `data-formcrash` selector contract.
 - Experiment: `impatient_user`, two Submit Order triggers, 100 ms apart.
@@ -26,6 +26,8 @@ browser, journey, evidence, and cleanup failures produce a structured
 FORMCRASH_BROWSER_HEADLESS=false
 FORMCRASH_BROWSER_TIMEOUT_MS=10000
 SAMPLE_CHECKOUT_BASE_URL=http://localhost:4200
+FORMCRASH_DATABASE_PATH=./var/database/formcrash.db
+FORMCRASH_ARTIFACT_ROOT=./var
 ```
 
 Visible Chromium is the default. Automated integration tests override it to
@@ -47,11 +49,24 @@ assertion. Browser-observed order requests exclude request bodies and unrelated
 endpoints.
 
 Every journey step emits started/completed events. Request callbacks append to the
-same synchronous event log, so event sequences remain monotonic even when network
-callbacks overlap. Context and browser cleanup run before the terminal run event.
+same synchronous, SQLite-backed event log, so event sequences remain monotonic
+even when network callbacks overlap. Context and browser cleanup run before the
+terminal run event.
 
-## In-memory limitation
+## Persistence and screenshots
 
-Only the latest completed result is retained, and restarting the server loses it.
-There is no SQLite, run history, SSE, screenshot, artifact, comparison, report, or
-dashboard integration in Chunk 2.
+The runner loads the stable seeded experiment version, creates a durable run before
+launching Chromium, and stores immutable journey, experiment, assertion, mode, and
+target snapshots. Events append without holding a transaction across browser
+execution. Assertion results and terminal state finalize in a short transaction.
+
+Three full-page screenshots are attempted at `before-disruption`,
+`after-disruption`, and `final-result`. PNG files are atomically staged under the
+configured artifact root and SQLite stores only validated relative metadata. A
+capture's metadata includes byte size and a SHA-256 checksum. A capture failure
+becomes an inspectable warning; a metadata persistence failure removes the
+orphaned file and remains a persistence/runner problem.
+
+Durable reads are available from `GET /api/runs`, `GET /api/runs/:runId`, and the
+run-owned artifact endpoint. SSE, dashboard workflows, comparison, report export,
+editing, recording, and arbitrary external targets remain deferred.

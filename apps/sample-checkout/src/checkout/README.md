@@ -70,6 +70,7 @@ every valid request, even when attempt keys match.
 Presentation changes must preserve these semantic values:
 
 ```text
+checkout-ready
 cart
 cart-next
 contact-step
@@ -95,8 +96,9 @@ reset-sample
 mode-indicator
 ```
 
-The selector contract has an automated source-usage test. Generated order and
-attempt IDs are content, never selector names.
+The selector contract has an automated source-usage test. `checkout-ready` is
+attached only after React hydration, and the runner waits for it before the first
+interaction. Generated order and attempt IDs are content, never selector names.
 
 ## Manual vulnerable verification
 

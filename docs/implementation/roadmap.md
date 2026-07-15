@@ -86,25 +86,31 @@ behavior.
 
 ## Chunk 3: Assertion evaluation, persistence, and evidence
 
+**Status:** Complete. Migrations, stable seeded definitions, immutable run
+snapshots, append-only events, assertion results, restart persistence, and three
+filesystem PNG captures are covered by real SQLite and Chromium tests.
+
 **User-visible outcome:** The vulnerable run ends failed because more than one
 matching order exists, with chronological request/order evidence.
 
 **Backend work:** Add SQLite metadata, migrations, immutable snapshots,
 append-only events, duplicate request/record evidence, one recovery assertion,
 assertion results, and artifact metadata/filesystem discipline.
+The current implementation also captures the three PRD screenshot points required
+by the expanded Chunk 3 scope.
 
 **Frontend work:** Only diagnostic rendering required to inspect raw completed
 run data; no polished results workflow.
 
 **Tests:** Migration and repository integration, snapshot immutability, event
-ordering, restart persistence, vulnerable failure, fixed pass, and missing
-evidence/error distinctions.
+ordering, restart persistence, vulnerable failure, fixed pass, three PNG artifacts,
+artifact access control, and missing evidence/error distinctions.
 
 **Demo checkpoint:** Execute both target modes and inspect persisted events and
 independent assertion results after a server restart.
 
-**Explicit non-goals:** Screenshots, full assertion builder, other assertion
-types, report export, or generalized evidence ingestion.
+**Explicit non-goals:** Full assertion builder, other assertion types, report
+export, generalized evidence ingestion, or dashboard workflows.
 
 **Exit criteria:** Actual order/request evidence determines the assertion; history
 survives restart; no screenshot blob or sensitive raw input enters SQLite.
@@ -128,7 +134,7 @@ checks, and end-to-end vulnerable workflow.
 operations plus a failed duplicate-protection assertion in real time.
 
 **Explicit non-goals:** Project creation, recorder, other experiments, generic
-builders, screenshots, report export, or broad visual polish.
+builders, report export, or broad visual polish.
 
 **Exit criteria:** A judge can reach and run the seeded scenario without technical
 commands; refresh/reconnect does not invent or reorder events.

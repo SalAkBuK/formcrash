@@ -14,8 +14,8 @@ Priority 0 is the duplicate checkout-submission demonstration described there.
   result workflows. It communicates with the control server over HTTP and never
   launches browsers or reads the FormCrash database.
 - `apps/server` — Fastify modular monolith that owns health, the hardcoded
-  sample-run API, Playwright execution, assertions, and in-memory evidence.
-  Persistence and live event delivery remain deferred.
+  sample-run API, Playwright execution, assertions, SQLite metadata, and
+  filesystem screenshot evidence. Live event delivery remains deferred.
 - `apps/sample-checkout` — independent Next.js target application implementing
   the bundled vulnerable-versus-fixed checkout demonstration.
 - `packages/contracts` — runtime-validated cross-boundary schemas and inferred
@@ -68,11 +68,23 @@ The dashboard's browser-visible server URL is configured separately with
 
 Runner configuration:
 
-| Variable                       | Default                 | Purpose                                                    |
-| ------------------------------ | ----------------------- | ---------------------------------------------------------- |
-| `FORMCRASH_BROWSER_HEADLESS`   | `false`                 | Use visible Chromium by default; set `true` in automation. |
-| `FORMCRASH_BROWSER_TIMEOUT_MS` | `10000`                 | Bounded target, action, and evidence timeout.              |
-| `SAMPLE_CHECKOUT_BASE_URL`     | `http://localhost:4200` | Already-running bundled checkout target.                   |
+| Variable                       | Default                       | Purpose                                                    |
+| ------------------------------ | ----------------------------- | ---------------------------------------------------------- |
+| `FORMCRASH_BROWSER_HEADLESS`   | `false`                       | Use visible Chromium by default; set `true` in automation. |
+| `FORMCRASH_BROWSER_TIMEOUT_MS` | `10000`                       | Bounded target, action, and evidence timeout.              |
+| `SAMPLE_CHECKOUT_BASE_URL`     | `http://localhost:4200`       | Already-running bundled checkout target.                   |
+| `FORMCRASH_DATABASE_PATH`      | `./var/database/formcrash.db` | SQLite metadata path, resolved from the repository root.   |
+| `FORMCRASH_ARTIFACT_ROOT`      | `./var`                       | Root for server-owned relative artifact paths.             |
+
+Startup creates the configured directories, applies ordered migrations, and
+idempotently seeds the bundled Sample Checkout project, journey, Impatient User
+experiment version 1, and duplicate-protection assertion. Migrations can also be
+run explicitly. Applied migration SHA-256 checksums prevent an edited historical
+migration from being accepted silently:
+
+```sh
+pnpm --filter @formcrash/server db:migrate
+```
 
 ## Verification
 
@@ -88,6 +100,7 @@ pnpm verify
 `pnpm verify` runs all non-destructive checks and production builds. Tests cover
 shared contracts, control-server health, sample-checkout validation, route
 behavior, reset behavior, and sequential/concurrent duplicate handling.
+Persistence tests always use temporary directories and never write into `var/`.
 
 ## Bundled sample checkout
 
@@ -132,36 +145,59 @@ $fixed | ConvertTo-Json -Depth 12
 
 The endpoint awaits completion. Vulnerable mode returns HTTP 200 with run status
 `failed` and two orders; fixed mode returns HTTP 200 with status `passed` and one
-order. Assertion failure is a test result, not an HTTP error. The latest result is
-available only in memory at `GET /api/sample-runs/latest`.
+order. Assertion failure is a test result, not an HTTP error. The result is
+durable, and `GET /api/sample-runs/latest` reads the newest persisted run.
 
 The current runner allows one browser run at a time. A concurrent request receives
 HTTP 409 and is not queued. The hardcoded experiment triggers Submit Order twice,
 100 ms apart, and checks exactly one assertion: no more than one order should be
 created.
 
+Persisted inspection endpoints:
+
+- `GET /api/runs?limit=20&offset=0` — newest-first bounded history.
+- `GET /api/runs/:runId` — immutable snapshots, ordered events, assertion
+  results, observed evidence, warnings, and artifact metadata.
+- `GET /api/runs/:runId/artifacts/:artifactId` — PNG content located through
+  run-owned database metadata, never a client filesystem path.
+
+Each successful browser run attempts three full-page PNG captures: immediately
+before disruption, immediately after both triggers, and after settled final-state
+evidence is read. Artifact metadata includes byte size and a SHA-256 checksum. A
+screenshot failure is recorded as an evidence warning and does not change a valid
+business assertion into an application failure.
+
 ## Runtime storage
 
 Local generated state belongs under `var/`:
 
-- `var/database` for the future SQLite database.
-- `var/runs` for structured run evidence.
-- `var/screenshots` for binary screenshots.
+- `var/database` for the active SQLite metadata database and SQLite sidecar files.
+- `var/runs` reserved for later structured evidence files.
+- `var/screenshots/<run-id>` for ordered PNG screenshot evidence.
 - `var/exports` for generated reports and test starting points.
 
-Generated contents are ignored by Git. The control server will be the only owner
-of the FormCrash database and artifact layout.
+Generated contents are ignored by Git. The control server is the only owner of
+the FormCrash database and artifact layout; screenshot bytes are never stored in
+SQLite.
+
+To reset FormCrash metadata during development, stop the server and remove the
+generated database files under `var/database/` plus generated run directories
+under `var/screenshots/`. Keep the committed `.gitkeep` markers. The next startup
+recreates the schema and sample definitions. This deletes FormCrash run history;
+it is separate from `POST /api/test-support/reset`, which clears only the sample
+checkout's process-local order attempts, orders, and idempotency state.
 
 ## Current implementation status
 
-Chunks 0 through 2 are implemented. The bundled checkout supports the complete
+Chunks 0 through 3 are implemented. The bundled checkout supports the complete
 fake cart-to-confirmation journey, intentional vulnerable duplicate creation,
 fixed client locking, fixed server idempotency, visible local evidence, and reset.
 The control server now runs the one hardcoded checkout journey in Chromium,
-injects the first Impatient User experiment, captures in-memory evidence, and
-evaluates the duplicate-order assertion. It does **not** implement recording,
-editable journeys or experiments, persistence, SSE, screenshots, dashboard run
-workflows, reports, exports, or comparisons.
+injects the first Impatient User experiment, persists immutable run snapshots,
+ordered events and assertion results, and captures three filesystem screenshots.
+It does **not** implement recording, editable journeys or experiments, SSE,
+dashboard run workflows, reports, exports, comparisons, or arbitrary external
+application support.
 
 Priority 0 must be built in this order:
 

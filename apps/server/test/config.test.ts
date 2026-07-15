@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import path from 'node:path';
 
 import { loadConfig } from '../src/app/config.js';
 
@@ -21,5 +22,18 @@ describe('runner configuration', () => {
     expect(() =>
       loadConfig({ FORMCRASH_BROWSER_HEADLESS: 'sometimes' }),
     ).toThrow('Invalid server configuration');
+  });
+
+  it('resolves relative storage paths from the repository root', () => {
+    const config = loadConfig({
+      FORMCRASH_DATABASE_PATH: './var/database/test.db',
+      FORMCRASH_ARTIFACT_ROOT: './var',
+    });
+
+    expect(path.isAbsolute(config.databasePath)).toBe(true);
+    expect(path.isAbsolute(config.artifactRoot)).toBe(true);
+    expect(config.databasePath).toMatch(
+      /formcrash[\\/]var[\\/]database[\\/]test\.db$/u,
+    );
   });
 });

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { FORMCRASH_SELECTORS } from '../src/checkout/selectors';
 
 const REQUIRED_SELECTORS = [
+  'checkout-ready',
   'cart',
   'cart-next',
   'contact-step',

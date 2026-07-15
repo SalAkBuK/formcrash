@@ -1,8 +1,9 @@
 # Conceptual data model
 
-This document designs the server-owned metadata model; Chunk 0 creates no SQLite
-tables. Identifiers should be opaque strings, timestamps should be UTC, and
-persisted configuration should carry an explicit schema version.
+This document describes the server-owned metadata model. Chunk 3 implements the
+Priority 0 subset in SQLite through ordered SQL migrations. Identifiers are opaque
+strings, timestamps are UTC, JSON is validated at repository boundaries, and
+binary screenshots stay on disk.
 
 ```mermaid
 erDiagram
@@ -29,23 +30,22 @@ erDiagram
 
 ### Journey
 
-- `id`, `projectId`, `name`, `schemaVersion`, `createdAt`, `updatedAt`.
+- `id`, `projectId`, `name`, `version`, `definitionJson`, and `createdAt`.
 - Priority 0 uses a seeded saved journey; recording is post-Priority-0.
 
-### JourneyStep
-
-- `id`, `journeyId`, `position`, `actionType`, `targetSelector`, `pageUrl`.
-- Action-specific configuration and a human-readable target description.
-- Input uses a masked value or a test-data reference, never an exposed secret.
+Journey steps remain inside the immutable structured `definitionJson` for this
+single seeded journey. A normalized journey-step table is deferred until editing
+or recording creates a real query requirement.
 
 ### Experiment
 
-- `id`, `projectId`, `name`, `currentVersionId`, `createdAt`, `updatedAt`.
+- `id`, `projectId`, `journeyId`, `name`, `experimentType`, and `createdAt`.
 - Stable identity groups replays and comparisons across immutable versions.
 
 ### ExperimentVersion
 
-- `id`, `experimentId`, `versionNumber`, `journeyId`, `experimentType`.
+- `id`, `experimentId`, `version`, configuration JSON, journey snapshot JSON,
+  assertion snapshot JSON, and `createdAt`.
 - Selected journey-step identity and deterministic Impatient User configuration.
 - Complete serialized journey, injector, assertion, and target configuration.
 - `schemaVersion`, `createdAt`, and a content hash for diagnostic integrity.
@@ -58,8 +58,8 @@ erDiagram
 
 ### Run
 
-- `id`, `experimentId`, `experimentVersionId`, `status`, `targetMode`.
-- Immutable `configurationSnapshot`, `snapshotSchemaVersion`, and snapshot hash.
+- `id`, `experimentVersionId`, `status`, `mode`, and `targetUrl`.
+- Immutable journey, experiment, and assertion snapshot JSON columns.
 - `createdAt`, `startedAt`, `completedAt`, `durationMs`, and error summary fields.
 - The snapshot is copied at run creation; historical runs never resolve through
   mutable current experiment data.
@@ -78,10 +78,22 @@ erDiagram
 
 ### Artifact
 
-- `id`, `runId`, optional `runEventId`, `kind`, `label`, media type.
-- Relative filesystem path, byte size, checksum, created timestamp, and capture
-  status. Screenshot bytes remain on disk under `var/screenshots`, never as SQLite
-  blobs.
+- `id`, `runId`, `artifactType`, `label`, media type, capture sequence, metadata,
+  relative filesystem path, byte size, SHA-256 checksum, and created timestamp.
+  Screenshot bytes remain under `var/screenshots`, never as SQLite blobs.
+
+## Implemented database enforcement
+
+- Foreign keys are enabled on every connection.
+- Experiment version numbers are unique within an experiment and version rows are
+  immutable through triggers.
+- Run snapshot columns cannot be updated after insertion.
+- Run event IDs and `(run_id, sequence_number)` are unique; insertion must be the
+  next sequence and update/delete triggers preserve append-only history.
+- Run modes, run statuses, assertion statuses, artifact labels, and current
+  Priority 0 types use practical `CHECK` constraints.
+- Artifact paths are validated relative POSIX paths; byte sizes and SHA-256
+  checksums support integrity checks while SQLite stores metadata only.
 
 ## Integrity and privacy rules
 

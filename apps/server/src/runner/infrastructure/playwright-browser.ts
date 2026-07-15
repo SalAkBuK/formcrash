@@ -2,6 +2,7 @@ import type { Browser, BrowserContext, Page, Request } from 'playwright';
 import { chromium } from 'playwright';
 
 import { parseSampleApplicationState } from '../evidence/sample-state.js';
+import { SAMPLE_CHECKOUT_SELECTORS } from '../journeys/sample-checkout.js';
 import type { SampleApplicationState } from '../sample/types.js';
 import type {
   BrowserLaunchOptions,
@@ -77,6 +78,9 @@ class PlaywrightCheckoutSession implements CheckoutBrowserSession {
 
   async navigate(url: string): Promise<void> {
     await this.page.goto(url, { waitUntil: 'domcontentloaded' });
+    await this.page
+      .locator(this.toSelector(SAMPLE_CHECKOUT_SELECTORS.checkoutReady))
+      .waitFor({ state: 'attached', timeout: this.timeoutMs });
   }
 
   async click(
@@ -99,6 +103,14 @@ class PlaywrightCheckoutSession implements CheckoutBrowserSession {
     await this.page
       .locator(this.toSelector(selector))
       .waitFor({ state: 'visible', timeout: this.timeoutMs });
+  }
+
+  async captureScreenshot(destination: string): Promise<void> {
+    await this.page.screenshot({
+      path: destination,
+      type: 'png',
+      fullPage: true,
+    });
   }
 
   async resetSampleState(): Promise<void> {

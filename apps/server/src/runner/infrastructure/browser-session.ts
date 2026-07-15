@@ -36,6 +36,7 @@ export interface CheckoutBrowserSession {
   ): Promise<void>;
   fill(selector: string, value: string): Promise<void>;
   waitForVisible(selector: string): Promise<void>;
+  captureScreenshot(destination: string): Promise<void>;
   resetSampleState(): Promise<void>;
   readSampleState(): Promise<SampleApplicationState>;
   pendingOrderRequestCount(): number;
