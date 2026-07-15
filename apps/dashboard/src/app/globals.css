@@ -269,6 +269,150 @@ select {
   color: var(--danger);
 }
 
+.external-workbench {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.settings-grid,
+.builder-grid,
+.runtime-value-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.settings-column,
+.discovery-box,
+.assertion-box,
+.hook-editor {
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 1rem;
+  background: #0d1214;
+}
+
+.settings-column h3,
+.discovery-box h3,
+.assertion-box h3 {
+  margin-bottom: 0.35rem;
+}
+
+.compact-heading {
+  align-items: start;
+}
+
+.compact-heading p {
+  margin-bottom: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.variable-row {
+  display: grid;
+  grid-template-columns: 0.8fr 1.4fr auto auto;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 0.65rem;
+}
+
+.settings-panel input,
+.settings-panel textarea,
+.settings-panel select,
+.experiment-builder input,
+.experiment-builder select,
+.runtime-value-grid input,
+.discovery-box select,
+.assertion-box input,
+.assertion-box select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  padding: 0.68rem 0.72rem;
+  background: #090d0f;
+  color: var(--text);
+}
+
+.hook-grid,
+.discovery-box,
+.assertion-box,
+.experiment-version-list,
+.external-result {
+  margin-top: 1rem;
+}
+
+.hook-editor {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.hook-line {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 0.55rem;
+}
+
+.inline-check {
+  display: flex !important;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.inline-check input {
+  width: auto;
+}
+
+.builder-grid label,
+.runtime-value-grid label,
+.discovery-box > label,
+.assertion-box label {
+  display: grid;
+  gap: 0.4rem;
+  color: #d9e0e2;
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.continue-check {
+  align-self: end;
+  min-height: 2.85rem;
+}
+
+.experiment-version-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.external-result {
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 1rem;
+}
+
+.external-result ul {
+  display: grid;
+  gap: 0.55rem;
+  padding-left: 1.2rem;
+}
+
+.external-result li span {
+  color: var(--muted);
+  font-size: 0.83rem;
+}
+
+@media (max-width: 850px) {
+  .settings-grid,
+  .builder-grid,
+  .runtime-value-grid,
+  .project-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .variable-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 button,
 a {
   -webkit-tap-highlight-color: transparent;

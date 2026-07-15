@@ -83,6 +83,12 @@ Runner configuration:
 | `FORMCRASH_ARTIFACT_ROOT`      | `./var`                       | Root for server-owned relative artifact paths.             |
 | `FORMCRASH_DASHBOARD_ORIGINS`  | `http://localhost:3000`       | Dashboard origins allowed to call REST and SSE endpoints.  |
 
+Project runtime variables use `FORMCRASH_VAR_<NAME>` environment keys. For
+example, a declaration named `API_TOKEN` reads `FORMCRASH_VAR_API_TOKEN`.
+Values may instead be supplied ephemerally when replaying or running an external
+experiment. Secret values are resolved in memory only and are excluded from API
+responses, events, persisted snapshots, errors, and masked screenshots.
+
 Startup creates the configured directories, applies ordered migrations, and
 idempotently seeds the bundled Sample Checkout project, journey, Impatient User
 experiment version 1, and duplicate-protection assertion. Migrations can also be
@@ -192,7 +198,23 @@ External target and journey endpoints:
 - `GET /api/projects/:projectId/journeys` and `GET /api/journeys/:journeyId`
   — list and read saved generic journeys.
 - `POST /api/journeys/:journeyId/replay` — replay persisted steps in a fresh
-  context and return the exact failed step when an action cannot complete.
+  context and return the exact failed step when an action cannot complete. An
+  optional `{ "variables": { ... } }` body supplies ephemeral runtime values.
+- `GET` and `PUT /api/projects/:projectId/settings` — read public execution
+  metadata and configure variable declarations plus bounded before/after hooks.
+- `POST /api/projects/:projectId/auth-captures` and `POST
+.../:captureId/confirm` — open visible Chromium for a developer-managed login
+  and persist its browser storage state. `DELETE
+/api/projects/:projectId/authentication` clears it.
+- `POST /api/journeys/:journeyId/request-discovery` — replay through one saved
+  click or submit and return sanitized method/path/status candidates caused by
+  that target.
+- `POST` and `GET /api/journeys/:journeyId/experiments` — create immutable
+  Impatient User versions and list them.
+- `GET /api/external-experiments/:experimentVersionId`, `POST
+.../:experimentVersionId/runs`, and `GET /api/external-runs/:runId` — inspect
+  a version, execute it, and reload its persisted assertions, network evidence,
+  ordered events, warnings, and artifact metadata.
 
 Recording intentionally supports only top-frame navigation, click, text input,
 checkbox/radio change, dropdown selection, and form submission. New tabs,
@@ -201,6 +223,19 @@ contenteditable editors, and unsupported Shadow DOM targets produce explicit
 warnings and are not silently recorded. Consecutive input events for one locator
 are coalesced; a top-frame navigation immediately caused by a recorded click or
 submit is omitted to avoid replaying the same transition twice.
+
+External Impatient User execution replays every step before the selected target,
+replaces that target with exactly two or three recorded trigger attempts, and
+does not blindly replay the original target afterward. Later steps run only when
+the immutable experiment version explicitly enables continuation; otherwise the
+runner settles and evaluates final-state assertions immediately after injection.
+The optional request matcher compares method and pathname (query parameters are
+ignored) and may also constrain the host.
+
+Before-run and cleanup hooks accept only bounded `POST` or `DELETE` requests and
+should exist only in controlled test environments. A failed before-run hook is a
+runner error and prevents Chromium launch. A failed cleanup hook is preserved as
+a warning because it occurs after experiment evidence is evaluated.
 
 Each successful browser run attempts three full-page PNG captures: immediately
 before disruption, immediately after both triggers, and after settled final-state
@@ -229,6 +264,8 @@ Local generated state belongs under `var/`:
 - `var/database` for the active SQLite metadata database and SQLite sidecar files.
 - `var/runs` reserved for later structured evidence files.
 - `var/screenshots/<run-id>` for ordered PNG screenshot evidence.
+- `var/auth/<project-id>/storage-state.json` for server-owned authentication
+  state; only relative metadata and availability are exposed publicly.
 - `var/exports` for generated reports and test starting points.
 
 Generated contents are ignored by Git. The control server is the only owner of
@@ -244,7 +281,7 @@ checkout's process-local order attempts, orders, and idempotency state.
 
 ## Current implementation status
 
-Chunks 0 through 5 are implemented. The bundled checkout supports the complete
+Chunks 0 through 6 are implemented. The bundled checkout supports the complete
 fake cart-to-confirmation journey, intentional vulnerable duplicate creation,
 fixed client locking, fixed server idempotency, visible local evidence, and reset.
 The control server now runs the one hardcoded checkout journey in Chromium,
@@ -253,10 +290,16 @@ ordered events and assertion results, captures three filesystem screenshots, and
 publishes replayable live progress. The dashboard now creates persisted projects,
 records supported manual same-tab journeys in visible Chromium, reviews safe or
 masked steps and their ranked locators, saves immutable journey versions, and
-replays them with exact failed-step reporting. The recorder is verified against
-both the separate `fixtures/external-target` application and the bundled sample
-checkout. It does **not** implement experiment attachment to recorded journeys,
-comparison, reports, exports, authentication, or cloud execution.
+replays them with exact failed-step reporting. Project settings now capture and
+restore authenticated browser state, declare safe runtime inputs and repeatable
+data hooks, and reject unresolved variables before browser launch. Saved click
+or submit steps accept immutable external Impatient User versions with request
+discovery plus network, UI, field, and final-URL assertions. External runs
+persist ordered sanitized events, assertion outcomes, matched network evidence,
+warnings, and screenshots. The recorder and runner are verified against both the
+separate `fixtures/external-target` application and the bundled sample checkout.
+It does **not** implement failed-versus-fixed comparison, reports, exports, other
+failure injectors, CI orchestration, or cloud execution.
 
 Priority 0 must be built in this order:
 
@@ -265,8 +308,8 @@ Priority 0 must be built in this order:
 3. Duplicate assertion, persistence, and evidence.
 4. Dashboard run control and live progress.
 5. External target and journey capture.
-6. Attach Impatient User plus matching browser/network assertions to a saved
-   local journey.
+6. External Impatient User experiments with authentication, runtime variables,
+   repeatable test data, discovery, and browser/network/UI assertions.
 
 See [`docs/implementation/roadmap.md`](docs/implementation/roadmap.md) for chunk
 boundaries and objective exit criteria.

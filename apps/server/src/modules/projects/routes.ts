@@ -2,12 +2,17 @@ import {
   createProjectRequestSchema,
   journeyListSchema,
   projectListSchema,
+  runExternalExperimentRequestSchema,
   saveRecordedJourneyRequestSchema,
 } from '@formcrash/contracts';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 
 import type { ProjectJourneyRepository } from '../../persistence/project-journey-repository.js';
 import { BrowserOwnershipConflictError } from '../../runner/infrastructure/browser-ownership.js';
+import {
+  InvalidTemplateError,
+  MissingRuntimeVariablesError,
+} from '../../runner/external/runtime-values.js';
 import type { JourneyReplayService } from '../../runner/recording/journey-replay.js';
 import { RecordingNotActiveError } from '../../runner/recording/recording-manager.js';
 import type { RecordingManager } from '../../runner/recording/recording-manager.js';
@@ -160,11 +165,41 @@ export function registerProjectRoutes(
       if (repository.getJourney(request.params.journeyId) === null) {
         return notFound(reply, 'Journey');
       }
+      const parsed = runExternalExperimentRequestSchema.safeParse(
+        request.body ?? {},
+      );
+      if (!parsed.success) {
+        return invalid(
+          reply,
+          'INVALID_REPLAY_REQUEST',
+          parsed.error.issues[0]?.message,
+        );
+      }
       try {
-        return reply.send(await replay.replay(request.params.journeyId));
+        return reply.send(
+          await replay.replay(request.params.journeyId, parsed.data.variables),
+        );
       } catch (error: unknown) {
         if (error instanceof BrowserOwnershipConflictError)
           return conflict(reply, error.message);
+        if (error instanceof MissingRuntimeVariablesError) {
+          return reply.status(400).send({
+            error: {
+              code: 'MISSING_RUNTIME_VARIABLES',
+              message: 'Required runtime variables were not provided.',
+              missingVariables: error.missingVariables,
+            },
+          });
+        }
+        if (error instanceof InvalidTemplateError) {
+          return invalid(reply, 'INVALID_TEMPLATE', error.message);
+        }
+        if (
+          error instanceof Error &&
+          error.message.includes('authentication state is missing')
+        ) {
+          return invalid(reply, 'AUTHENTICATION_STATE_MISSING', error.message);
+        }
         throw error;
       }
     },

@@ -27,6 +27,10 @@ erDiagram
 
 - `id`, `name`, `targetBaseUrl`, `description`, `createdAt`, `updatedAt`.
 - Bundled-sample identity must be explicit rather than inferred from its name.
+- External project execution settings persist variable declarations and bounded
+  hook configuration, never runtime secret values.
+- Authentication metadata stores only a relative storage-state path and capture
+  timestamps. Cookie and local-storage contents remain in the server-owned file.
 
 ### Journey
 
@@ -81,6 +85,21 @@ or recording creates a real query requirement.
 - `id`, `runId`, `artifactType`, `label`, media type, capture sequence, metadata,
   relative filesystem path, byte size, SHA-256 checksum, and created timestamp.
   Screenshot bytes remain under `var/screenshots`, never as SQLite blobs.
+
+## External experiment tables
+
+Chunk 6 adds parallel `external_experiments`, immutable
+`external_experiment_versions`, `external_runs`, append-only
+`external_run_events`, `external_assertion_results`, and `external_artifacts`.
+The original Priority 0 sample tables retain their locked mode and assertion
+constraints; forcing generic external data into them would break the seeded
+sample contract. Both paths share ownership, locator, event-envelope, assertion
+status, and artifact conventions.
+
+An external run snapshots its project/journey/experiment names and definitions,
+safe resolved values, trigger count, sanitized browser request observations,
+runner error, warnings, assertions, and relative artifact metadata. It never
+persists ephemeral secret values or raw HTTP hook headers/bodies.
 
 ## Implemented database enforcement
 

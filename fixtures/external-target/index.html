@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>External profile fixture</title>
+    <title>External FormCrash fixture</title>
     <style>
       body {
         max-width: 42rem;
@@ -12,7 +12,8 @@
         font: 16px/1.5 system-ui;
       }
       form,
-      fieldset {
+      fieldset,
+      .auth-panel {
         display: grid;
         gap: 1rem;
       }
@@ -20,15 +21,28 @@
         display: grid;
         gap: 0.25rem;
       }
+      .auth-panel,
       .complete {
         border: 2px solid #27833d;
+        margin-bottom: 1rem;
         padding: 1rem;
+      }
+      .error {
+        border-color: #a32929;
+      }
+      [hidden] {
+        display: none !important;
       }
     </style>
   </head>
   <body>
     <main>
       <h1>External profile fixture</h1>
+      <section class="auth-panel" data-testid="auth-panel">
+        <strong>Fixture authentication</strong>
+        <span id="auth-status">Signed out</span>
+        <button data-testid="login" type="button">Sign in to fixture</button>
+      </section>
       <a data-testid="details-link" href="/details">Open profile form</a>
       <form data-testid="profile-form">
         <label for="display-name">Display name</label>
@@ -37,6 +51,12 @@
           data-formcrash="display-name"
           name="displayName"
         />
+
+        <label for="email">Unique email</label>
+        <input id="email" data-testid="email" name="email" type="email" />
+
+        <label for="run-id">Run ID</label>
+        <input id="run-id" data-testid="run-id" name="runId" />
 
         <label for="password">Temporary password</label>
         <input id="password" name="password" type="password" />
@@ -54,8 +74,10 @@
         <button data-testid="save-profile" type="submit">Save profile</button>
       </form>
       <section id="complete" class="complete" hidden>
-        Profile fixture completed.
+        <strong>Profile fixture completed.</strong>
+        <span id="created-count"></span>
       </section>
+      <section id="request-error" class="auth-panel error" hidden></section>
 
       <input id="upload" type="file" />
       <div id="editor" contenteditable="true">Unsupported editor</div>
@@ -66,15 +88,93 @@
       ></iframe>
     </main>
     <script>
-      document.querySelector('form').addEventListener('submit', (event) => {
+      const parameters = new URLSearchParams(window.location.search);
+      const mode = parameters.get('mode') === 'fixed' ? 'fixed' : 'vulnerable';
+      const requiresAuthentication = parameters.get('auth') === 'required';
+      let signedIn = !requiresAuthentication;
+      let localCreatedCount = 0;
+      let fixedInFlight = false;
+      const form = document.querySelector('form');
+      const authStatus = document.querySelector('#auth-status');
+
+      function renderAuthentication() {
+        authStatus.textContent = signedIn ? 'Signed in' : 'Signed out';
+        form.hidden = !signedIn;
+      }
+
+      async function refreshAuthentication() {
+        if (!requiresAuthentication) return renderAuthentication();
+        try {
+          const response = await fetch('/api/session', {
+            credentials: 'same-origin',
+          });
+          const payload = await response.json();
+          signedIn = payload.authenticated === true;
+        } catch {
+          signedIn = false;
+        }
+        renderAuthentication();
+      }
+
+      document
+        .querySelector('[data-testid="login"]')
+        .addEventListener('click', async () => {
+          const response = await fetch('/api/login', {
+            method: 'POST',
+            credentials: 'same-origin',
+          });
+          signedIn = response.ok;
+          renderAuthentication();
+        });
+
+      form.addEventListener('submit', async (event) => {
         event.preventDefault();
-        document.querySelector('form').hidden = true;
-        document.querySelector('#complete').hidden = false;
+        if (mode === 'fixed' && fixedInFlight) return;
+        if (mode === 'fixed') fixedInFlight = true;
+        const fields = new FormData(form);
+        const body = {
+          displayName: fields.get('displayName'),
+          email: fields.get('email'),
+          runId: fields.get('runId'),
+          plan: fields.get('plan'),
+          mode,
+        };
+        try {
+          const response = await fetch('/api/profile', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const payload = await response.json();
+          document.querySelector('#created-count').textContent =
+            `Created records: ${payload.createdCount}`;
+          form.hidden = true;
+          document.querySelector('#complete').hidden = false;
+        } catch (error) {
+          // Preserve the Chunk 5 path when this HTML is hosted without APIs.
+          if (!requiresAuthentication) {
+            localCreatedCount += 1;
+            document.querySelector('#created-count').textContent =
+              `Created records: ${localCreatedCount}`;
+            form.hidden = true;
+            document.querySelector('#complete').hidden = false;
+          } else {
+            const target = document.querySelector('#request-error');
+            target.textContent = `Request failed: ${error.message}`;
+            target.hidden = false;
+          }
+        } finally {
+          if (mode === 'fixed') fixedInFlight = false;
+        }
       });
+
       const root = document
         .querySelector('#shadow-host')
         .attachShadow({ mode: 'open' });
       root.innerHTML = '<button id="shadow-button">Shadow action</button>';
+      void refreshAuthentication();
     </script>
   </body>
 </html>

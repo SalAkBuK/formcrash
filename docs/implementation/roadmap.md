@@ -170,14 +170,41 @@ execution.
 **Exit criteria:** The same generic recorder captures and successfully replays a
 non-sample controlled local application and the bundled checkout.
 
-## Chunk 6: Attach Impatient User to a recorded journey
+## Chunk 6: External Impatient User experiments — implemented
 
 **User-visible outcome:** A developer attaches Impatient User to a saved click or
 submit step, configures matching browser/network assertions, and runs the failure
 experiment against their own saved local journey.
 
+**Backend work:** Visible authentication capture with server-owned storage state,
+project runtime declarations with ephemeral/environment resolution, deterministic
+run templates, controlled before/cleanup hooks, target request discovery,
+immutable external experiment versions, generic repeat-trigger execution,
+network/UI/field/URL assertions, and durable sanitized run evidence.
+
+**Frontend work:** Project authentication and variable settings, hook editors,
+click/submit compatibility guidance, request discovery and matcher selection,
+assertion configuration, immutable version listing, ephemeral run values, and a
+prominent assertion-first terminal result.
+
+**Tests:** Real Chromium restores authentication, discovers the target request,
+and deterministically fails vulnerable mode while passing fixed mode. Unit and
+persistence coverage proves missing-variable preflight, template safety, hook
+semantics, secret redaction, matcher behavior, assertion pass/fail behavior,
+version immutability, browser exclusion, cleanup, and existing sample
+compatibility.
+
+**Continuation rule:** Steps before the target replay normally. Injection
+replaces the target. Later steps run only when that immutable version explicitly
+enables continuation; otherwise the runner settles and evaluates final state.
+
 **Explicit non-goals:** Other failure injectors, comparison, reports, CI, cloud
-execution, authentication, or production monitoring.
+execution, or production monitoring.
+
+**Exit criteria:** A controlled external authenticated or unauthenticated target
+can supply runtime data, reset repeatable state, select a saved click/submit,
+attach assertions, and preserve deterministic failed-vulnerable and passed-fixed
+results.
 
 ## Later: Remaining experiments and report hardening
 

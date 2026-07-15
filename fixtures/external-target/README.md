@@ -1,7 +1,13 @@
-# External recording fixture
+# External target fixture
 
-This static application is deliberately separate from `apps/sample-checkout`.
-It exists only to verify that the generic recorder and replay engine handle a
-normal same-tab navigation, text and sensitive inputs, a select, a checkbox,
-form submission, and a visible completion state without fixture-specific server
-logic.
+This controlled application is deliberately separate from
+`apps/sample-checkout`. It verifies the generic recorder and replay engine and,
+when hosted by the stateful integration-test server, supports Chunk 6:
+
+- `?auth=required` protects the form behind `/api/login` and `/api/session`.
+- `?mode=vulnerable` permits repeated `/api/profile` creates.
+- `?mode=fixed` suppresses concurrent repeat submits.
+- `/api/reset` is the repeatable before/after hook target.
+
+The HTML retains a client-side fallback so the original static Chunk 5
+recording integration remains valid.

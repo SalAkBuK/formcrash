@@ -2,12 +2,22 @@ import { randomUUID } from 'node:crypto';
 
 import {
   replayResultSchema,
-  type RecordedJourneyStep,
+  type EphemeralRuntimeValues,
   type ReplayResult,
 } from '@formcrash/contracts';
 
 import type { ServerConfig } from '../../app/config.js';
 import type { ProjectJourneyRepository } from '../../persistence/project-journey-repository.js';
+import type { ProjectSettingsRepository } from '../../persistence/project-settings-repository.js';
+import { RunEventLog } from '../engine/event-log.js';
+import type { AuthStateStore } from '../external/auth-session.js';
+import { executeHttpHook } from '../external/http-hooks.js';
+import { executeRecordedStep } from '../external/journey-actions.js';
+import {
+  resolveHook,
+  resolveRuntime,
+  resolveStepValue,
+} from '../external/runtime-values.js';
 import type { BrowserOwnership } from '../infrastructure/browser-ownership.js';
 import {
   PlaywrightExternalBrowserOwner,
@@ -23,30 +33,63 @@ export class JourneyReplayService {
     private readonly repository: ProjectJourneyRepository,
     private readonly ownership: BrowserOwnership,
     browserOwner?: ExternalBrowserOwner,
+    private readonly settings?: ProjectSettingsRepository,
+    private readonly authStore?: AuthStateStore,
   ) {
     this.browserOwner = browserOwner ?? new PlaywrightExternalBrowserOwner();
   }
 
-  async replay(journeyId: string): Promise<ReplayResult> {
+  async replay(
+    journeyId: string,
+    ephemeral: EphemeralRuntimeValues = {},
+  ): Promise<ReplayResult> {
     const journey = this.repository.getJourney(journeyId);
     if (journey === null) throw new Error('Journey was not found.');
     const project = this.repository.getProject(journey.projectId);
     if (project === null) throw new Error('Journey project was not found.');
-    const release = this.ownership.acquire('replay');
+    const storedSettings = this.settings?.get(project.id) ?? {
+      variables: [],
+      beforeRunHook: null,
+      afterRunHook: null,
+    };
     const replayId = randomUUID();
+    const runtime = resolveRuntime({
+      runId: replayId,
+      journey,
+      declarations: storedSettings.variables,
+      ephemeral,
+      hooks: [storedSettings.beforeRunHook, storedSettings.afterRunHook],
+    });
+    const storageStatePath = this.authStore?.usablePath(project.id) ?? null;
+    const release = this.ownership.acquire('replay');
     const startedAt = new Date().toISOString();
+    const events = new RunEventLog(`replay-${replayId}`);
     let session: ReplayBrowserSession | null = null;
     let result: ReplayResult | null = null;
     try {
+      if (storedSettings.beforeRunHook !== null) {
+        await executeHttpHook(
+          'before',
+          resolveHook(
+            storedSettings.beforeRunHook,
+            runtime.values,
+            runtime.context,
+          ),
+          events,
+        );
+      }
       session = await this.browserOwner.launchReplay({
         targetUrl: project.targetUrl,
         headless: this.config.browserHeadless,
         timeoutMs: this.config.browserTimeoutMs,
+        ...(storageStatePath === null ? {} : { storageStatePath }),
       });
       await session.navigate(project.targetUrl);
       for (const [index, step] of journey.steps.entries()) {
         try {
-          await executeStep(session, step);
+          await executeRecordedStep(session, step, (item) =>
+            resolveStepValue(item, runtime),
+          );
         } catch {
           result = replayResultSchema.parse({
             replayId,
@@ -97,50 +140,20 @@ export class JourneyReplayService {
           });
         }
       }
+      if (storedSettings.afterRunHook !== null) {
+        await executeHttpHook(
+          'after',
+          resolveHook(
+            storedSettings.afterRunHook,
+            runtime.values,
+            runtime.context,
+          ),
+          events,
+        ).catch(() => undefined);
+      }
       release();
     }
     if (result === null) throw new Error('Replay did not produce a result.');
     return result;
   }
-}
-
-async function executeStep(
-  session: ReplayBrowserSession,
-  step: RecordedJourneyStep,
-): Promise<void> {
-  if (step.type === 'navigate') {
-    await session.navigate(step.url);
-    return;
-  }
-  if (step.locator === null) throw new Error('Recorded step has no locator.');
-  switch (step.type) {
-    case 'click':
-      await session.click(step.locator);
-      return;
-    case 'fill':
-      await session.fill(step.locator, resolveValue(step));
-      return;
-    case 'checkbox':
-    case 'radio':
-      await session.setChecked(step.locator, resolveValue(step) === 'true');
-      return;
-    case 'select':
-      await session.select(step.locator, resolveValue(step));
-      return;
-    case 'submit':
-      await session.submit(step.locator);
-      return;
-  }
-}
-
-function resolveValue(step: RecordedJourneyStep): string {
-  if (step.value === null) throw new Error('Recorded step has no value.');
-  if (step.value.kind === 'safe') return step.value.value;
-  const value = process.env[step.value.variableName];
-  if (value === undefined) {
-    throw new Error(
-      `Runtime variable ${step.value.variableName} is not configured.`,
-    );
-  }
-  return value;
 }

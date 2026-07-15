@@ -20,6 +20,7 @@ import {
   startRecording,
   stopRecording,
 } from '../api/projects';
+import { ExternalExperimentPanel } from './external-experiment-panel';
 
 export function ProjectJourneyDashboard() {
   const [projects, setProjects] = useState<readonly Project[]>([]);
@@ -178,11 +179,11 @@ export function ProjectJourneyDashboard() {
   return (
     <main className="dashboard-shell project-workbench">
       <header className="hero project-hero">
-        <p className="eyebrow">Chunk 5 · External journey capture</p>
-        <h1>Record your own controlled app.</h1>
+        <p className="eyebrow">Chunk 6 · External impatient-user experiments</p>
+        <h1>Crash-test your own controlled app.</h1>
         <p className="hero-statement">
-          Open a visible Chromium session, perform a normal same-tab journey,
-          inspect exactly what was captured, then replay the saved steps.
+          Capture an authenticated normal journey, inject runtime data safely,
+          then repeat one real click or submit and preserve the evidence.
         </p>
         <p className="safety-notice">
           <strong>Controlled environments only.</strong> Test only applications
@@ -455,6 +456,8 @@ export function ProjectJourneyDashboard() {
               </button>
             </section>
           ) : null}
+
+          <ExternalExperimentPanel project={selected} journeys={journeys} />
 
           <section className="panel saved-journeys">
             <div className="section-heading-row">

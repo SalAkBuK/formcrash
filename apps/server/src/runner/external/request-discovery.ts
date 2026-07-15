@@ -1,0 +1,131 @@
+import { randomUUID } from 'node:crypto';
+
+import {
+  requestDiscoveryResultSchema,
+  type EphemeralRuntimeValues,
+  type RequestDiscoveryResult,
+} from '@formcrash/contracts';
+
+import type { ServerConfig } from '../../app/config.js';
+import type { ProjectJourneyRepository } from '../../persistence/project-journey-repository.js';
+import type { ProjectSettingsRepository } from '../../persistence/project-settings-repository.js';
+import { RunEventLog } from '../engine/event-log.js';
+import type { BrowserOwnership } from '../infrastructure/browser-ownership.js';
+import {
+  PlaywrightExternalBrowserOwner,
+  type ExternalBrowserOwner,
+  type ReplayBrowserSession,
+} from '../recording/external-browser.js';
+import type { AuthStateStore } from './auth-session.js';
+import { executeHttpHook } from './http-hooks.js';
+import { executeRecordedStep } from './journey-actions.js';
+import { NetworkEvidenceCollector } from './network-evidence.js';
+import {
+  resolveHook,
+  resolveRuntime,
+  resolveStepValue,
+} from './runtime-values.js';
+
+export class RequestDiscoveryService {
+  private readonly browserOwner: ExternalBrowserOwner;
+
+  constructor(
+    private readonly config: ServerConfig,
+    private readonly projects: ProjectJourneyRepository,
+    private readonly settings: ProjectSettingsRepository,
+    private readonly authStore: AuthStateStore,
+    private readonly ownership: BrowserOwnership,
+    browserOwner?: ExternalBrowserOwner,
+  ) {
+    this.browserOwner = browserOwner ?? new PlaywrightExternalBrowserOwner();
+  }
+
+  async discover(input: {
+    readonly journeyId: string;
+    readonly targetStepId: string;
+    readonly variables: EphemeralRuntimeValues;
+  }): Promise<RequestDiscoveryResult> {
+    const journey = this.projects.getJourney(input.journeyId);
+    if (journey === null) throw new Error('Journey was not found.');
+    const project = this.projects.getProject(journey.projectId);
+    if (project === null) throw new Error('Journey project was not found.');
+    const targetIndex = journey.steps.findIndex(
+      (step) => step.id === input.targetStepId,
+    );
+    const target = journey.steps[targetIndex];
+    if (target === undefined)
+      throw new Error('Target journey step was not found.');
+    if (target.type !== 'click' && target.type !== 'submit') {
+      throw new Error(
+        'Request discovery target must be a click or submit step.',
+      );
+    }
+    const storedSettings = this.settings.get(project.id);
+    const runtime = resolveRuntime({
+      runId: randomUUID(),
+      journey,
+      declarations: storedSettings.variables,
+      ephemeral: input.variables,
+      hooks: [storedSettings.beforeRunHook, storedSettings.afterRunHook],
+    });
+    const storageStatePath = this.authStore.usablePath(project.id);
+    const release = this.ownership.acquire('request_discovery');
+    const events = new RunEventLog(`discovery-${randomUUID()}`);
+    let session: ReplayBrowserSession | null = null;
+    try {
+      if (storedSettings.beforeRunHook !== null) {
+        await executeHttpHook(
+          'before',
+          resolveHook(
+            storedSettings.beforeRunHook,
+            runtime.values,
+            runtime.context,
+          ),
+          events,
+        );
+      }
+      session = await this.browserOwner.launchReplay({
+        targetUrl: project.targetUrl,
+        headless: this.config.browserHeadless,
+        timeoutMs: this.config.browserTimeoutMs,
+        ...(storageStatePath === null ? {} : { storageStatePath }),
+      });
+      let capture = false;
+      const collector = new NetworkEvidenceCollector(null);
+      session.observeNetwork((observation) => {
+        if (capture) collector.observe(observation);
+      });
+      await session.navigate(project.targetUrl);
+      for (const step of journey.steps.slice(0, targetIndex)) {
+        await executeRecordedStep(session, step, (item) =>
+          resolveStepValue(item, runtime),
+        );
+      }
+      capture = true;
+      await executeRecordedStep(session, target, (item) =>
+        resolveStepValue(item, runtime),
+      );
+      await session.settle(750);
+      capture = false;
+      return requestDiscoveryResultSchema.parse({
+        journeyId: journey.id,
+        targetStepId: target.id,
+        candidates: collector.discoveryCandidates(),
+      });
+    } finally {
+      if (session !== null) await session.close().catch(() => undefined);
+      if (storedSettings.afterRunHook !== null) {
+        await executeHttpHook(
+          'after',
+          resolveHook(
+            storedSettings.afterRunHook,
+            runtime.values,
+            runtime.context,
+          ),
+          events,
+        ).catch(() => undefined);
+      }
+      release();
+    }
+  }
+}

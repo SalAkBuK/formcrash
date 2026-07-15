@@ -7,14 +7,24 @@ import { RunEventBroker } from '../events/run-event-broker.js';
 import { registerHealthRoute } from '../modules/health/routes.js';
 import { registerSampleRunRoutes } from '../modules/runs/sample-routes.js';
 import { registerProjectRoutes } from '../modules/projects/routes.js';
+import { registerExternalExperimentRoutes } from '../modules/external-experiments/routes.js';
 import { initializePersistence } from '../persistence/initialize.js';
 import { RunRepository } from '../persistence/run-repository.js';
 import { ProjectJourneyRepository } from '../persistence/project-journey-repository.js';
+import { ProjectSettingsRepository } from '../persistence/project-settings-repository.js';
+import { ExternalExperimentRepository } from '../persistence/external-experiment-repository.js';
 import { SampleRunCoordinator } from '../runner/engine/sample-run-coordinator.js';
 import { PlaywrightSampleRunExecutor } from '../runner/engine/sample-runner.js';
 import { BrowserOwnership } from '../runner/infrastructure/browser-ownership.js';
 import { RecordingManager } from '../runner/recording/recording-manager.js';
 import { JourneyReplayService } from '../runner/recording/journey-replay.js';
+import {
+  AuthCaptureManager,
+  AuthStateStore,
+} from '../runner/external/auth-session.js';
+import { ProjectSettingsService } from '../runner/external/project-settings-service.js';
+import { RequestDiscoveryService } from '../runner/external/request-discovery.js';
+import { ExternalExperimentRunner } from '../runner/external/external-experiment-runner.js';
 
 export interface CreateAppOptions {
   readonly config: ServerConfig;
@@ -31,12 +41,34 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   const database = initializePersistence(options.config);
   const runRepository = new RunRepository(database.connection);
   const projectRepository = new ProjectJourneyRepository(database.connection);
+  const projectSettingsRepository = new ProjectSettingsRepository(
+    database.connection,
+  );
+  const externalExperimentRepository = new ExternalExperimentRepository(
+    database.connection,
+  );
   const screenshotStore = new ScreenshotStore(
     options.config.artifactRoot,
     runRepository,
   );
   const runEventBroker = options.runEventBroker ?? new RunEventBroker();
   const browserOwnership = new BrowserOwnership();
+  const authStateStore = new AuthStateStore(
+    options.config.artifactRoot,
+    projectSettingsRepository,
+  );
+  const projectSettings = new ProjectSettingsService(
+    projectRepository,
+    projectSettingsRepository,
+    authStateStore,
+  );
+  const authCaptures = new AuthCaptureManager(
+    options.config,
+    projectRepository,
+    projectSettingsRepository,
+    authStateStore,
+    browserOwnership,
+  );
   const recordingManager = new RecordingManager(
     options.config,
     projectRepository,
@@ -46,11 +78,29 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     options.config,
     projectRepository,
     browserOwnership,
+    undefined,
+    projectSettingsRepository,
+    authStateStore,
+  );
+  const requestDiscovery = new RequestDiscoveryService(
+    options.config,
+    projectRepository,
+    projectSettingsRepository,
+    authStateStore,
+    browserOwnership,
+  );
+  const externalRunner = new ExternalExperimentRunner(
+    options.config,
+    projectRepository,
+    projectSettingsRepository,
+    authStateStore,
+    externalExperimentRepository,
+    browserOwnership,
   );
 
   void app.register(cors, {
     origin: [...options.config.dashboardOrigins],
-    methods: ['GET', 'POST', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Last-Event-ID'],
     credentials: false,
   });
@@ -96,6 +146,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     runEventBroker.close();
   });
   app.addHook('onClose', async () => {
+    await authCaptures.close();
     await recordingManager.close();
     await sampleRunCoordinator.waitForIdle();
     database.close();
@@ -113,6 +164,16 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     recordingManager,
     journeyReplay,
   );
+  registerExternalExperimentRoutes(app, {
+    artifactRoot: options.config.artifactRoot,
+    projects: projectRepository,
+    settings: projectSettings,
+    authStore: authStateStore,
+    authCaptures,
+    discovery: requestDiscovery,
+    experiments: externalExperimentRepository,
+    runner: externalRunner,
+  });
 
   return app;
 }

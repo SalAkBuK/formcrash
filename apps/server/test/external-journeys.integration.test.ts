@@ -214,11 +214,18 @@ describe.sequential('generic Chromium recording and replay', () => {
       metadata: source.recordingMetadata,
     });
     const ownership = new BrowserOwnership();
+    const secret = source.steps.find(
+      (step) => step.value?.kind === 'sensitive',
+    )?.value;
+    if (secret?.kind !== 'sensitive')
+      throw new Error('Sensitive step was not saved.');
+    process.env[secret.variableName] = 'RuntimeOnlyValue';
     const result = await new JourneyReplayService(
       temporary.config,
       repository,
       ownership,
     ).replay(broken.id);
+    delete process.env[secret.variableName];
 
     expect(result).toMatchObject({
       status: 'failed',

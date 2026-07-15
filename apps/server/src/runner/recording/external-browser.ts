@@ -1,4 +1,4 @@
-import type { Browser, BrowserContext, Frame, Page } from 'playwright';
+import type { Browser, BrowserContext, Frame, Page, Request } from 'playwright';
 import { chromium } from 'playwright';
 
 import type { ReplayLocator, TargetFingerprint } from '@formcrash/contracts';
@@ -38,6 +38,7 @@ export interface ExternalBrowserOptions {
   readonly targetUrl: string;
   readonly headless: boolean;
   readonly timeoutMs: number;
+  readonly storageStatePath?: string;
 }
 
 export interface RecordingCallbacks {
@@ -57,8 +58,40 @@ export interface ReplayBrowserSession {
   setChecked(locator: ReplayLocator, checked: boolean): Promise<void>;
   select(locator: ReplayLocator, value: string): Promise<void>;
   submit(locator: ReplayLocator): Promise<void>;
+  triggerRepeated(
+    locator: ReplayLocator,
+    type: 'click' | 'submit',
+    count: 2 | 3,
+    intervalMs: 0 | 100 | 300,
+    onAttempt: (attempt: number) => void,
+  ): Promise<void>;
+  observeNetwork(observer: (observation: NetworkObservation) => void): void;
+  captureScreenshot(destination: string): Promise<void>;
+  setScreenshotMasks(locators: readonly ReplayLocator[]): void;
+  isVisible(locator: ReplayLocator): Promise<boolean>;
+  isDisabled(locator: ReplayLocator): Promise<boolean>;
+  textVisible(text: string): Promise<boolean>;
+  inputValue(locator: ReplayLocator): Promise<string | null>;
+  currentUrl(): string;
+  settle(milliseconds: number): Promise<void>;
   close(): Promise<void>;
 }
+
+export type NetworkObservation =
+  | {
+      readonly kind: 'started';
+      readonly requestId: string;
+      readonly method: string;
+      readonly url: string;
+      readonly timestampMs: number;
+    }
+  | {
+      readonly kind: 'completed';
+      readonly requestId: string;
+      readonly status: number | null;
+      readonly failed: boolean;
+      readonly timestampMs: number;
+    };
 
 export interface ExternalBrowserOwner {
   launchRecording(
@@ -72,6 +105,11 @@ class PlaywrightExternalSession
   implements RecordingBrowserSession, ReplayBrowserSession
 {
   private closed = false;
+  private readonly activeRequests = new Map<Request, string>();
+  private networkObserver: ((observation: NetworkObservation) => void) | null =
+    null;
+  private requestSequence = 0;
+  private screenshotMasks: readonly ReplayLocator[] = [];
 
   constructor(
     private readonly browser: Browser,
@@ -81,6 +119,43 @@ class PlaywrightExternalSession
   ) {
     page.setDefaultTimeout(timeoutMs);
     page.setDefaultNavigationTimeout(timeoutMs);
+    page.on('request', (request) => {
+      this.requestSequence += 1;
+      const requestId = `request-${String(this.requestSequence).padStart(4, '0')}`;
+      this.activeRequests.set(request, requestId);
+      this.networkObserver?.({
+        kind: 'started',
+        requestId,
+        method: request.method(),
+        url: request.url(),
+        timestampMs: Date.now(),
+      });
+    });
+    page.on('response', (response) => {
+      const request = response.request();
+      const requestId = this.activeRequests.get(request);
+      if (requestId === undefined) return;
+      this.activeRequests.delete(request);
+      this.networkObserver?.({
+        kind: 'completed',
+        requestId,
+        status: response.status(),
+        failed: false,
+        timestampMs: Date.now(),
+      });
+    });
+    page.on('requestfailed', (request) => {
+      const requestId = this.activeRequests.get(request);
+      if (requestId === undefined) return;
+      this.activeRequests.delete(request);
+      this.networkObserver?.({
+        kind: 'completed',
+        requestId,
+        status: null,
+        failed: true,
+        timestampMs: Date.now(),
+      });
+    });
   }
 
   async navigate(url: string): Promise<void> {
@@ -116,6 +191,125 @@ class PlaywrightExternalSession
       }
       element.requestSubmit();
     });
+  }
+
+  async triggerRepeated(
+    locator: ReplayLocator,
+    type: 'click' | 'submit',
+    count: 2 | 3,
+    intervalMs: 0 | 100 | 300,
+    onAttempt: (attempt: number) => void,
+  ): Promise<void> {
+    const element = await resolveLocator(this.page, locator).elementHandle();
+    if (element === null)
+      throw new Error('Experiment target could not be located.');
+    let firstError: unknown;
+    for (let attempt = 1; attempt <= count; attempt += 1) {
+      onAttempt(attempt);
+      try {
+        await element.evaluate((target, actionType) => {
+          if (actionType === 'submit') {
+            if (!(target instanceof HTMLFormElement)) {
+              throw new Error('Recorded submit target is no longer a form.');
+            }
+            target.requestSubmit();
+          } else if (target instanceof HTMLElement) {
+            target.click();
+          } else {
+            throw new Error('Recorded click target is no longer interactive.');
+          }
+        }, type);
+      } catch (error: unknown) {
+        firstError ??= error;
+      }
+      if (attempt < count && intervalMs > 0) {
+        await this.page.waitForTimeout(intervalMs);
+      }
+    }
+    if (firstError !== undefined) {
+      throw normalizeError(firstError, 'Repeated target execution failed.');
+    }
+  }
+
+  observeNetwork(observer: (observation: NetworkObservation) => void): void {
+    this.networkObserver = observer;
+  }
+
+  async captureScreenshot(destination: string): Promise<void> {
+    const masked = [];
+    for (const locator of this.screenshotMasks) {
+      const target = resolveLocator(this.page, locator);
+      if ((await target.count()) === 0) continue;
+      const previous = await target.evaluate((element) => {
+        if (
+          !(element instanceof HTMLInputElement) &&
+          !(element instanceof HTMLTextAreaElement)
+        ) {
+          return null;
+        }
+        const value = element.value;
+        element.value = '••••';
+        return value;
+      });
+      masked.push({ target, previous });
+    }
+    try {
+      await this.page.screenshot({
+        path: destination,
+        type: 'png',
+        fullPage: true,
+      });
+    } finally {
+      for (const item of masked) {
+        if (item.previous === null) continue;
+        await item.target
+          .evaluate((element, value) => {
+            if (
+              element instanceof HTMLInputElement ||
+              element instanceof HTMLTextAreaElement
+            ) {
+              element.value = value;
+            }
+          }, item.previous)
+          .catch(() => undefined);
+      }
+    }
+  }
+
+  setScreenshotMasks(locators: readonly ReplayLocator[]): void {
+    this.screenshotMasks = [...locators];
+  }
+
+  async isVisible(locator: ReplayLocator): Promise<boolean> {
+    return resolveLocator(this.page, locator).isVisible();
+  }
+
+  async isDisabled(locator: ReplayLocator): Promise<boolean> {
+    const target = resolveLocator(this.page, locator);
+    if ((await target.count()) === 0) return false;
+    return target.isDisabled();
+  }
+
+  async textVisible(value: string): Promise<boolean> {
+    return this.page.getByText(value, { exact: false }).first().isVisible();
+  }
+
+  async inputValue(locator: ReplayLocator): Promise<string | null> {
+    const target = resolveLocator(this.page, locator);
+    if ((await target.count()) === 0) return null;
+    try {
+      return await target.inputValue();
+    } catch {
+      return null;
+    }
+  }
+
+  currentUrl(): string {
+    return this.page.url();
+  }
+
+  async settle(milliseconds: number): Promise<void> {
+    await this.page.waitForTimeout(Math.min(milliseconds, this.timeoutMs));
   }
 
   async close(): Promise<void> {
@@ -158,7 +352,11 @@ export class PlaywrightExternalBrowserOwner implements ExternalBrowserOwner {
   ): Promise<RecordingBrowserSession> {
     const browser = await chromium.launch({ headless: options.headless });
     try {
-      const context = await browser.newContext();
+      const context = await browser.newContext(
+        options.storageStatePath === undefined
+          ? {}
+          : { storageState: options.storageStatePath },
+      );
       const page = await context.newPage();
       await context.exposeBinding(
         '__formcrashRecord',
@@ -211,7 +409,11 @@ export class PlaywrightExternalBrowserOwner implements ExternalBrowserOwner {
   ): Promise<ReplayBrowserSession> {
     const browser = await chromium.launch({ headless: options.headless });
     try {
-      const context = await browser.newContext();
+      const context = await browser.newContext(
+        options.storageStatePath === undefined
+          ? {}
+          : { storageState: options.storageStatePath },
+      );
       const page = await context.newPage();
       return new PlaywrightExternalSession(
         browser,

@@ -54,8 +54,8 @@ and make the guaranteed demo path less representative.
 
 ## Intentionally deferred
 
-Chunks 1 through 4 add the independent checkout, one hardcoded Playwright replay,
-Impatient User injector, request/application evidence, durable definitions and
-runs, duplicate-order assertion, three screenshot artifacts, replayable SSE, and
-the sample dashboard workflow. Recording, editable models, reports, comparisons,
-and arbitrary external targets remain deferred.
+Chunks 1 through 6 now include the independent checkout, the seeded demonstration,
+external project recording/replay, authenticated storage-state restoration,
+runtime variables and controlled data hooks, plus persisted external Impatient
+User experiments. Reports, failed-versus-fixed comparison, other injectors, CI,
+cross-browser execution, and cloud operation remain deferred.

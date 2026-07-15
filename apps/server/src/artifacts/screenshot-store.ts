@@ -4,9 +4,16 @@ import path from 'node:path';
 
 import type { RunArtifact } from '@formcrash/contracts';
 
-import type { RunRepository } from '../persistence/run-repository.js';
 import { RunPersistenceError } from '../persistence/run-repository.js';
-import type { CheckoutBrowserSession } from '../runner/infrastructure/browser-session.js';
+import type { CreateArtifactInput } from '../persistence/run-repository.js';
+
+export interface ScreenshotTarget {
+  captureScreenshot(destination: string): Promise<void>;
+}
+
+export interface ScreenshotArtifactRepository {
+  createArtifact(input: CreateArtifactInput): RunArtifact;
+}
 
 export type ScreenshotLabel = RunArtifact['label'];
 
@@ -37,14 +44,14 @@ export class ScreenshotStore {
 
   constructor(
     artifactRoot: string,
-    private readonly repository: RunRepository,
+    private readonly repository: ScreenshotArtifactRepository,
   ) {
     this.root = path.resolve(artifactRoot);
     mkdirSync(this.root, { recursive: true });
   }
 
   async capture(
-    session: CheckoutBrowserSession,
+    session: ScreenshotTarget,
     runId: string,
     label: ScreenshotLabel,
   ): Promise<RunArtifact> {

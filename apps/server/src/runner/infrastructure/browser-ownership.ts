@@ -1,4 +1,10 @@
-export type BrowserWorkload = 'sample_execution' | 'recording' | 'replay';
+export type BrowserWorkload =
+  | 'sample_execution'
+  | 'recording'
+  | 'replay'
+  | 'auth_capture'
+  | 'request_discovery'
+  | 'external_experiment';
 
 export class BrowserOwnershipConflictError extends Error {
   constructor(readonly activeWorkload: BrowserWorkload) {

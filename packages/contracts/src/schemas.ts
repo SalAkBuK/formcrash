@@ -208,6 +208,297 @@ export const replayResultSchema = z.object({
   completedAt: z.iso.datetime({ offset: true }),
 });
 
+export const runtimeVariableNameSchema = z
+  .string()
+  .regex(/^[A-Z][A-Z0-9_]*$/u)
+  .max(100);
+
+export const runtimeVariableDeclarationInputSchema = z.object({
+  name: runtimeVariableNameSchema,
+  secret: z.boolean(),
+  description: z.string().max(300).default(''),
+  template: z.string().max(10_000).nullable().default(null),
+});
+
+export const runtimeVariableDeclarationSchema =
+  runtimeVariableDeclarationInputSchema.extend({
+    environmentName: z.string().min(1),
+    configured: z.boolean(),
+  });
+
+export const hookMethodSchema = z.enum(['POST', 'DELETE']);
+export const httpHookSchema = z.object({
+  method: hookMethodSchema,
+  url: controlledTargetUrlSchema,
+  headers: z.record(z.string().min(1).max(100), z.string().max(10_000)),
+  body: z.json().nullable(),
+  timeoutMs: z.number().int().min(100).max(30_000).default(5_000),
+});
+
+export const projectExecutionSettingsInputSchema = z.object({
+  variables: z.array(runtimeVariableDeclarationInputSchema).max(100),
+  beforeRunHook: httpHookSchema.nullable(),
+  afterRunHook: httpHookSchema.nullable(),
+});
+
+export const projectAuthStatusSchema = z.object({
+  configured: z.boolean(),
+  available: z.boolean(),
+  capturedAt: z.iso.datetime({ offset: true }).nullable(),
+  missingReason: z.string().nullable(),
+});
+
+export const projectExecutionSettingsSchema = z.object({
+  projectId: z.string().min(1),
+  variables: z.array(runtimeVariableDeclarationSchema),
+  beforeRunHook: httpHookSchema.nullable(),
+  afterRunHook: httpHookSchema.nullable(),
+  authentication: projectAuthStatusSchema,
+  updatedAt: z.iso.datetime({ offset: true }),
+});
+
+export const authCaptureStatusSchema = z.enum([
+  'created',
+  'launching',
+  'awaiting_confirmation',
+  'stopping',
+  'completed',
+  'runner_error',
+]);
+
+export const authCaptureSessionSchema = z.object({
+  id: z.string().min(1),
+  projectId: z.string().min(1),
+  status: authCaptureStatusSchema,
+  errorMessage: z.string().nullable(),
+  startedAt: z.iso.datetime({ offset: true }),
+  completedAt: z.iso.datetime({ offset: true }).nullable(),
+});
+
+export const ephemeralRuntimeValuesSchema = z
+  .record(runtimeVariableNameSchema, z.string().max(10_000))
+  .default({});
+
+export const networkMatcherSchema = z.object({
+  method: z.string().regex(/^[A-Z]+$/u),
+  pathname: z.string().startsWith('/'),
+  host: z.string().min(1).nullable().default(null),
+});
+
+export const discoveredRequestSchema = z.object({
+  method: z.string().regex(/^[A-Z]+$/u),
+  pathname: z.string().startsWith('/'),
+  origin: z.string().url(),
+  status: z.number().int().min(100).max(599).nullable(),
+  relativeTimestampMs: z.number().int().nonnegative(),
+  occurrences: z.number().int().positive(),
+});
+
+export const requestDiscoveryRequestSchema = z.object({
+  targetStepId: z.string().min(1),
+  variables: ephemeralRuntimeValuesSchema.optional().default({}),
+});
+
+export const requestDiscoveryResultSchema = z.object({
+  journeyId: z.string().min(1),
+  targetStepId: z.string().min(1),
+  candidates: z.array(discoveredRequestSchema),
+});
+
+export const externalAssertionTypeSchema = z.enum([
+  'network_request_max',
+  'network_success_max',
+  'network_expected_status',
+  'element_visible',
+  'element_not_visible',
+  'element_disabled',
+  'text_appeared',
+  'field_retained',
+  'final_url_contains',
+  'final_url_not_contains',
+]);
+
+const assertionBaseSchema = z.object({
+  id: z.string().min(1),
+  description: z.string().min(1).max(500),
+});
+
+export const externalAssertionSchema = z.discriminatedUnion('type', [
+  assertionBaseSchema.extend({
+    type: z.literal('network_request_max'),
+    maximum: z.number().int().nonnegative(),
+  }),
+  assertionBaseSchema.extend({
+    type: z.literal('network_success_max'),
+    maximum: z.number().int().nonnegative(),
+  }),
+  assertionBaseSchema.extend({
+    type: z.literal('network_expected_status'),
+    expectedStatus: z.number().int().min(100).max(599),
+  }),
+  assertionBaseSchema.extend({
+    type: z.literal('element_visible'),
+    locator: replayLocatorSchema,
+    targetDescription: z.string().min(1).max(300),
+  }),
+  assertionBaseSchema.extend({
+    type: z.literal('element_not_visible'),
+    locator: replayLocatorSchema,
+    targetDescription: z.string().min(1).max(300),
+  }),
+  assertionBaseSchema.extend({
+    type: z.literal('element_disabled'),
+    locator: replayLocatorSchema,
+    targetDescription: z.string().min(1).max(300),
+  }),
+  assertionBaseSchema.extend({
+    type: z.literal('text_appeared'),
+    text: z.string().min(1).max(1_000),
+  }),
+  assertionBaseSchema.extend({
+    type: z.literal('field_retained'),
+    locator: replayLocatorSchema,
+    targetDescription: z.string().min(1).max(300),
+    expectedValue: recordedValueSchema,
+  }),
+  assertionBaseSchema.extend({
+    type: z.literal('final_url_contains'),
+    value: z.string().min(1).max(2_000),
+  }),
+  assertionBaseSchema.extend({
+    type: z.literal('final_url_not_contains'),
+    value: z.string().min(1).max(2_000),
+  }),
+]);
+
+export const createExternalExperimentRequestSchema = z.object({
+  name: z.string().trim().min(1).max(160),
+  targetStepId: z.string().min(1),
+  triggerCount: z.union([z.literal(2), z.literal(3)]),
+  intervalMs: z.union([z.literal(0), z.literal(100), z.literal(300)]),
+  networkMatcher: networkMatcherSchema.nullable().default(null),
+  assertions: z.array(externalAssertionSchema).min(1).max(20),
+  continueAfterTarget: z.boolean().default(false),
+});
+
+export const externalExperimentVersionSchema = z.object({
+  id: z.string().min(1),
+  experimentId: z.string().min(1),
+  projectId: z.string().min(1),
+  journeyId: z.string().min(1),
+  name: z.string().min(1),
+  experimentType: z.literal('impatient_user'),
+  version: z.number().int().positive(),
+  targetStepId: z.string().min(1),
+  triggerCount: z.union([z.literal(2), z.literal(3)]),
+  intervalMs: z.union([z.literal(0), z.literal(100), z.literal(300)]),
+  networkMatcher: networkMatcherSchema.nullable(),
+  assertions: z.array(externalAssertionSchema).min(1),
+  continueAfterTarget: z.boolean(),
+  journeySnapshot: persistedJourneySchema,
+  createdAt: z.iso.datetime({ offset: true }),
+});
+
+export const externalExperimentListSchema = z.object({
+  items: z.array(externalExperimentVersionSchema),
+});
+
+export const runExternalExperimentRequestSchema = z.object({
+  variables: ephemeralRuntimeValuesSchema.optional().default({}),
+});
+
+export const externalNetworkObservationSchema = z.object({
+  requestId: z.string().min(1),
+  method: z.string().regex(/^[A-Z]+$/u),
+  pathname: z.string().startsWith('/'),
+  origin: z.string().url(),
+  startedAtMs: z.number().int().nonnegative(),
+  completedAtMs: z.number().int().nonnegative().nullable(),
+  status: z.number().int().min(100).max(599).nullable(),
+  failed: z.boolean(),
+  matched: z.boolean(),
+});
+
+export const externalAssertionResultSchema = z.object({
+  assertionResultId: z.string().min(1),
+  assertionId: z.string().min(1),
+  type: externalAssertionTypeSchema,
+  status: z.enum(['passed', 'failed', 'not_evaluated', 'error']),
+  description: z.string().min(1),
+  expectedDescription: z.string().min(1),
+  observedDescription: z.string().min(1),
+  evaluatedAt: z.iso.datetime({ offset: true }),
+});
+
+export const externalRunWarningSchema = z.object({
+  code: z.enum(['screenshot_capture_failed', 'cleanup_hook_failed']),
+  message: z.string().min(1),
+  label: z
+    .enum(['before-disruption', 'after-disruption', 'final-result'])
+    .nullable(),
+});
+
+export const externalRunnerErrorSchema = z.object({
+  code: z.enum([
+    'configuration_failed',
+    'authentication_state_missing',
+    'before_hook_failed',
+    'browser_launch_failed',
+    'journey_step_failed',
+    'browser_cleanup_failed',
+    'persistence_failed',
+    'runner_failure',
+  ]),
+  message: z.string().min(1),
+  failedStep: replayFailureSchema.nullable(),
+  missingVariables: z.array(runtimeVariableNameSchema),
+});
+
+export const externalRunDetailSchema = z.object({
+  runId: z.string().min(1),
+  experimentVersionId: z.string().min(1),
+  projectId: z.string().min(1),
+  journeyId: z.string().min(1),
+  status: z.enum([
+    'created',
+    'starting',
+    'running',
+    'evaluating',
+    'passed',
+    'failed',
+    'runner_error',
+  ]),
+  startedAt: z.iso.datetime({ offset: true }),
+  completedAt: z.iso.datetime({ offset: true }).nullable(),
+  durationMs: z.number().int().nonnegative().nullable(),
+  targetUrl: controlledTargetUrlSchema,
+  projectName: z.string().min(1),
+  journeyName: z.string().min(1),
+  experimentName: z.string().min(1),
+  experimentSnapshot: externalExperimentVersionSchema,
+  resolvedValues: z.record(runtimeVariableNameSchema, z.string()),
+  triggerAttempts: z.number().int().nonnegative(),
+  networkObservations: z.array(externalNetworkObservationSchema),
+  assertions: z.array(externalAssertionResultSchema),
+  events: z.array(z.lazy(() => runEventEnvelopeSchema)),
+  runnerError: externalRunnerErrorSchema.nullable(),
+  warnings: z.array(externalRunWarningSchema),
+  artifacts: z.array(z.lazy(() => runArtifactSchema)),
+  createdAt: z.iso.datetime({ offset: true }),
+});
+
+export const externalRunListSchema = z.object({
+  items: z.array(externalRunDetailSchema),
+});
+
+export const missingRuntimeVariablesErrorSchema = z.object({
+  error: z.object({
+    code: z.literal('MISSING_RUNTIME_VARIABLES'),
+    message: z.string().min(1),
+    missingVariables: z.array(runtimeVariableNameSchema).min(1),
+  }),
+});
+
 export const assertionResultStatusSchema = z.enum([
   'passed',
   'failed',
@@ -477,6 +768,56 @@ export type PersistedJourney = z.infer<typeof persistedJourneySchema>;
 export type JourneyList = z.infer<typeof journeyListSchema>;
 export type ReplayFailure = z.infer<typeof replayFailureSchema>;
 export type ReplayResult = z.infer<typeof replayResultSchema>;
+export type RuntimeVariableName = z.infer<typeof runtimeVariableNameSchema>;
+export type RuntimeVariableDeclarationInput = z.infer<
+  typeof runtimeVariableDeclarationInputSchema
+>;
+export type RuntimeVariableDeclaration = z.infer<
+  typeof runtimeVariableDeclarationSchema
+>;
+export type HookMethod = z.infer<typeof hookMethodSchema>;
+export type HttpHook = z.infer<typeof httpHookSchema>;
+export type ProjectExecutionSettingsInput = z.infer<
+  typeof projectExecutionSettingsInputSchema
+>;
+export type ProjectAuthStatus = z.infer<typeof projectAuthStatusSchema>;
+export type ProjectExecutionSettings = z.infer<
+  typeof projectExecutionSettingsSchema
+>;
+export type AuthCaptureStatus = z.infer<typeof authCaptureStatusSchema>;
+export type AuthCaptureSession = z.infer<typeof authCaptureSessionSchema>;
+export type EphemeralRuntimeValues = z.infer<
+  typeof ephemeralRuntimeValuesSchema
+>;
+export type NetworkMatcher = z.infer<typeof networkMatcherSchema>;
+export type DiscoveredRequest = z.infer<typeof discoveredRequestSchema>;
+export type RequestDiscoveryRequest = z.infer<
+  typeof requestDiscoveryRequestSchema
+>;
+export type RequestDiscoveryResult = z.infer<
+  typeof requestDiscoveryResultSchema
+>;
+export type ExternalAssertionType = z.infer<typeof externalAssertionTypeSchema>;
+export type ExternalAssertion = z.infer<typeof externalAssertionSchema>;
+export type CreateExternalExperimentRequest = z.infer<
+  typeof createExternalExperimentRequestSchema
+>;
+export type ExternalExperimentVersion = z.infer<
+  typeof externalExperimentVersionSchema
+>;
+export type RunExternalExperimentRequest = z.infer<
+  typeof runExternalExperimentRequestSchema
+>;
+export type ExternalNetworkObservation = z.infer<
+  typeof externalNetworkObservationSchema
+>;
+export type ExternalAssertionResult = z.infer<
+  typeof externalAssertionResultSchema
+>;
+export type ExternalRunWarning = z.infer<typeof externalRunWarningSchema>;
+export type ExternalRunnerError = z.infer<typeof externalRunnerErrorSchema>;
+export type ExternalRunDetail = z.infer<typeof externalRunDetailSchema>;
+export type ExternalRunList = z.infer<typeof externalRunListSchema>;
 export type AssertionResultStatus = z.infer<typeof assertionResultStatusSchema>;
 export type RunEventEnvelope = z.infer<typeof runEventEnvelopeSchema>;
 export type SampleRunMode = z.infer<typeof sampleRunModeSchema>;
