@@ -7,15 +7,15 @@ evidence. An item is complete only when its stated verification can be repeated.
 
 - [ ] A clean install starts the checkout on its documented configurable port
       without an account, API key, external service, or control server.
-- [ ] The journey exposes cart, contact, shipping, review, submit, and confirmation
+- [x] The journey exposes cart, contact, shipping, review, submit, and confirmation
       states using only fake product, customer, address, and payment-free data.
-- [ ] Every saved-journey target has a documented stable `data-formcrash` selector
+- [x] Every saved-journey target has a documented stable `data-formcrash` selector
       covered by an automated selector-contract test.
-- [ ] An order-inspection surface returns the exact records created in the current
+- [x] An order-inspection surface returns the exact records created in the current
       local sample session/store.
-- [ ] Reset removes all sample orders and restores deterministic initial state in
+- [x] Reset removes all sample orders and restores deterministic initial state in
       an automated integration test.
-- [ ] Two or three rapid submissions create the same number of accepted order
+- [x] Two or three rapid submissions create the same number of accepted order
       records in vulnerable mode in repeated integration runs.
 - [ ] The identical rapid submissions create exactly one accepted order record in
       fixed mode, with both a disabled/in-progress UI and server-side idempotency

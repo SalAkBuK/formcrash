@@ -15,8 +15,8 @@ Priority 0 is the duplicate checkout-submission demonstration described there.
   launches browsers or reads the FormCrash database.
 - `apps/server` — Fastify modular monolith that will own commands, live events,
   Playwright, persistence, assertions, and evidence. Chunk 0 exposes only health.
-- `apps/sample-checkout` — independent Next.js target application for the bundled
-  vulnerable-versus-fixed demonstration.
+- `apps/sample-checkout` — independent Next.js target application implementing
+  the bundled vulnerable-versus-fixed checkout demonstration.
 - `packages/contracts` — runtime-validated cross-boundary schemas and inferred
   TypeScript types.
 - `packages/test-kit` — builders and fixtures for tests only.
@@ -71,9 +71,31 @@ pnpm build
 pnpm verify
 ```
 
-`pnpm verify` runs all non-destructive checks and production builds. Tests in this
-bootstrap cover shared contract validation and the server health endpoint; they
-do not pretend that deferred product behavior exists.
+`pnpm verify` runs all non-destructive checks and production builds. Tests cover
+shared contracts, control-server health, sample-checkout validation, route
+behavior, reset behavior, and sequential/concurrent duplicate handling.
+
+## Bundled sample checkout
+
+Open one explicit target mode after starting the workspace:
+
+- Vulnerable: `http://localhost:4200/?mode=vulnerable`
+- Fixed: `http://localhost:4200/?mode=fixed`
+
+The sample uses two deterministic fictional products and fake local customer
+information. It has no payment fields, account, external service, or dependency
+on the FormCrash control server. The process-local store resets when the sample
+checkout process restarts or when the UI/API reset action is used.
+
+Local endpoints:
+
+- `POST /api/orders` — validate and submit a server-priced fake order.
+- `GET /api/test-support/state` — inspect request attempts and created orders.
+- `POST /api/test-support/reset` — clear sample state and idempotency records.
+
+See
+[`apps/sample-checkout/src/checkout/README.md`](apps/sample-checkout/src/checkout/README.md)
+for the selector contract and repeatable vulnerable/fixed verification steps.
 
 ## Runtime storage
 
@@ -89,11 +111,12 @@ of the FormCrash database and artifact layout.
 
 ## Current implementation status
 
-Chunk 0, architecture bootstrap, contains application shells, foundational
-contracts, server lifecycle and health handling, runner interfaces, state
-definitions, documentation, and verification tooling. It does **not** implement
-checkout behavior, journey recording or replay, failure injection, assertions,
-persistence, screenshots, reports, exports, or comparisons.
+Chunks 0 and 1 are implemented. The bundled checkout now supports the complete
+fake cart-to-confirmation journey, intentional vulnerable duplicate creation,
+fixed client locking, fixed server idempotency, visible local evidence, and reset.
+It does **not** implement journey recording or replay, browser control, FormCrash
+failure injection, assertions, run persistence, screenshots, reports, exports, or
+comparisons.
 
 Priority 0 must be built in this order:
 

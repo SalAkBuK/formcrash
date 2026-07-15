@@ -27,6 +27,9 @@ match the architecture documents; no product feature is claimed as implemented.
 
 ## Chunk 1: Sample checkout vulnerable and fixed modes
 
+**Status:** Complete. Verified by store and route concurrency tests, strict
+workspace checks, production builds, and direct runtime API smoke tests.
+
 **User-visible outcome:** A developer can complete the fake bundled checkout in
 either mode, inspect created fake orders, and reset them. Rapid submission creates
 duplicates only in vulnerable mode.
