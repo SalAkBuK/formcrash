@@ -8,8 +8,10 @@ import {
   type ScreenshotStore,
 } from '../../artifacts/screenshot-store.js';
 import type { ServerConfig } from '../../app/config.js';
+import type { RunEventBroker } from '../../events/run-event-broker.js';
 import {
   RunPersistenceError,
+  type SeededExperimentDefinition,
   type RunRepository,
 } from '../../persistence/run-repository.js';
 import {
@@ -31,6 +33,7 @@ import type {
   SampleApplicationState,
   SampleObservedState,
   SampleRunnerError,
+  SampleRunExecution,
   SampleRunExecutor,
   SampleRunMode,
   SampleRunResult,
@@ -79,6 +82,15 @@ export interface SampleRunnerDependencies {
   readonly screenshotStore: ScreenshotStore;
   readonly browserOwner?: BrowserOwner;
   readonly readinessChecker?: TargetReadinessChecker;
+  readonly eventBroker?: RunEventBroker;
+}
+
+interface PreparedSampleRun {
+  readonly definition: SeededExperimentDefinition;
+  readonly events: RunEventLog;
+  readonly mode: SampleRunMode;
+  readonly runId: string;
+  readonly startedAtMs: number;
 }
 
 export class PlaywrightSampleRunExecutor implements SampleRunExecutor {
@@ -96,6 +108,10 @@ export class PlaywrightSampleRunExecutor implements SampleRunExecutor {
   }
 
   async run(mode: SampleRunMode): Promise<SampleRunResult> {
+    return this.prepare(mode).execute();
+  }
+
+  prepare(mode: SampleRunMode): SampleRunExecution {
     const definition = this.dependencies.repository.loadSeededExperiment();
     const runId = randomUUID();
     const startedAtMs = Date.now();
@@ -111,9 +127,35 @@ export class PlaywrightSampleRunExecutor implements SampleRunExecutor {
       assertions: definition.assertions,
     });
 
-    const events = new RunEventLog(runId, (event) =>
-      this.dependencies.repository.appendEvent(event),
-    );
+    let started = false;
+    return {
+      runId,
+      execute: () => {
+        if (started) {
+          return Promise.reject(
+            new Error(`Run ${runId} execution was already started.`),
+          );
+        }
+        started = true;
+        return this.executePrepared({
+          definition,
+          events: new RunEventLog(runId, (event) => {
+            this.dependencies.repository.appendEvent(event);
+            this.dependencies.eventBroker?.publish(event);
+          }),
+          mode,
+          runId,
+          startedAtMs,
+        });
+      },
+    };
+  }
+
+  private async executePrepared(
+    prepared: PreparedSampleRun,
+  ): Promise<SampleRunResult> {
+    const { definition, events, mode, runId, startedAtMs } = prepared;
+
     const state = new RunStateTracker();
     const requests = new Map<string, BrowserRequestEvidence>();
     const evidenceWarnings: EvidenceWarning[] = [];
@@ -231,7 +273,31 @@ export class PlaywrightSampleRunExecutor implements SampleRunExecutor {
     if (runnerError !== null) {
       finalStatus = 'runner_error';
       transitionToRunnerError(state);
-      try {
+    } else {
+      finalStatus = assertion.status === 'passed' ? 'passed' : 'failed';
+      state.transition(finalStatus);
+    }
+
+    const completedAtMs = Date.now();
+    const observed =
+      applicationState === null
+        ? null
+        : createObservedState(applicationState, requests);
+
+    try {
+      this.dependencies.repository.finalizeRun({
+        runId,
+        status: finalStatus,
+        completedAt: new Date(completedAtMs).toISOString(),
+        durationMs: Math.max(0, completedAtMs - startedAtMs),
+        observed,
+        runnerError,
+        evidenceWarnings,
+        assertionId: definition.assertionId,
+        assertion,
+      });
+
+      if (runnerError !== null) {
         events.append('runner.error', {
           code: runnerError.code,
           message: runnerError.message,
@@ -246,40 +312,21 @@ export class PlaywrightSampleRunExecutor implements SampleRunExecutor {
                   path: runnerError.failedStep.path,
                 },
         });
-      } catch (error: unknown) {
-        runnerError = mapRunnerError(error, state.status);
+      } else {
+        events.append(`run.${finalStatus}`, { mode });
       }
-    } else {
-      finalStatus = assertion.status === 'passed' ? 'passed' : 'failed';
-      state.transition(finalStatus);
-      events.append(`run.${finalStatus}`, { mode });
-    }
 
-    const completedAtMs = Date.now();
-    const observed =
-      applicationState === null
-        ? null
-        : createObservedState(applicationState, requests);
-    this.dependencies.repository.finalizeRun({
-      runId,
-      status: finalStatus,
-      completedAt: new Date(completedAtMs).toISOString(),
-      durationMs: Math.max(0, completedAtMs - startedAtMs),
-      observed,
-      runnerError,
-      evidenceWarnings,
-      assertionId: definition.assertionId,
-      assertion,
-    });
-
-    const persisted = this.dependencies.repository.getRun(runId);
-    if (persisted === null) {
-      throw new RunPersistenceError(
-        'reload the finalized run',
-        new Error('Finalized run is missing.'),
-      );
+      const persisted = this.dependencies.repository.getRun(runId);
+      if (persisted === null) {
+        throw new RunPersistenceError(
+          'reload the finalized run',
+          new Error('Finalized run is missing.'),
+        );
+      }
+      return persisted;
+    } finally {
+      this.dependencies.eventBroker?.complete(runId);
     }
-    return persisted;
   }
 
   private async captureEvidence(

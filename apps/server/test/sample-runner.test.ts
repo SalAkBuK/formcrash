@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ScreenshotStore } from '../src/artifacts/screenshot-store.js';
 import type { ServerConfig } from '../src/app/config.js';
+import { RunEventBroker } from '../src/events/run-event-broker.js';
 import { initializePersistence } from '../src/persistence/initialize.js';
 import { RunRepository } from '../src/persistence/run-repository.js';
 import { RunPersistenceError } from '../src/persistence/run-repository.js';
@@ -201,6 +202,37 @@ describe('sample runner failure handling', () => {
     expect(result.runnerError?.code).toBe('browser_launch_failed');
   });
 
+  it('publishes each event only after that event is persisted', async () => {
+    const broker = new RunEventBroker();
+    const context = createExecutorContext(
+      {},
+      { launch: () => Promise.reject(new Error('Expected launch stop.')) },
+      { assertReachable: () => Promise.resolve() },
+      broker,
+    );
+    const execution = context.executor.prepare('fixed');
+    const publishedSequences: number[] = [];
+    broker.subscribe(execution.runId, {
+      onEvent: (runEvent) => {
+        expect(
+          context.repository
+            .getEventsAfter(execution.runId, runEvent.sequence - 1)
+            .some((persisted) => persisted.eventId === runEvent.eventId),
+        ).toBe(true);
+        publishedSequences.push(runEvent.sequence);
+      },
+      onTerminal: () => undefined,
+      onServerClose: () => undefined,
+    });
+
+    await execution.execute();
+
+    expect(publishedSequences.length).toBeGreaterThan(0);
+    expect(publishedSequences).toEqual(
+      publishedSequences.map((_, index) => index + 1),
+    );
+  });
+
   it('keeps a passing assertion when all screenshots fail and releases the lock', async () => {
     const context = createExecutorContext(
       {},
@@ -209,19 +241,23 @@ describe('sample runner failure handling', () => {
     );
     const coordinator = new SampleRunCoordinator(context.executor);
 
-    const first = await coordinator.run('fixed');
-    const second = await coordinator.run('fixed');
+    const firstStart = coordinator.start('fixed');
+    await coordinator.waitForIdle();
+    const first = context.repository.getRun(firstStart.runId);
+    const secondStart = coordinator.start('fixed');
+    await coordinator.waitForIdle();
+    const second = context.repository.getRun(secondStart.runId);
 
-    expect(first.status).toBe('passed');
-    expect(first.assertions[0]?.status).toBe('passed');
-    expect(first.artifacts).toEqual([]);
-    expect(first.evidenceWarnings).toHaveLength(3);
+    expect(first?.status).toBe('passed');
+    expect(first?.assertions[0]?.status).toBe('passed');
+    expect(first?.artifacts).toEqual([]);
+    expect(first?.evidenceWarnings).toHaveLength(3);
     expect(
-      first.events.filter(
+      first?.events.filter(
         (event) => event.eventType === 'artifact.capture_failed',
       ),
     ).toHaveLength(3);
-    expect(second.status).toBe('passed');
+    expect(second?.status).toBe('passed');
     expect(coordinator.isActive).toBe(false);
   });
 
@@ -238,10 +274,16 @@ describe('sample runner failure handling', () => {
       { assertReachable: () => Promise.resolve() },
     );
     holder.closeDatabase = context.database.close.bind(context.database);
-    const coordinator = new SampleRunCoordinator(context.executor);
+    const onAsyncError = vi.fn();
+    const coordinator = new SampleRunCoordinator(context.executor, {
+      onAsyncError,
+    });
 
-    await expect(coordinator.run('fixed')).rejects.toBeInstanceOf(
-      RunPersistenceError,
+    coordinator.start('fixed');
+    await coordinator.waitForIdle();
+    expect(onAsyncError).toHaveBeenCalledWith(
+      expect.any(RunPersistenceError),
+      expect.any(String),
     );
     expect(coordinator.isActive).toBe(false);
   });
@@ -264,6 +306,7 @@ function createExecutorContext(
   readinessChecker?: {
     assertReachable(baseUrl: string, timeoutMs: number): Promise<void>;
   },
+  eventBroker?: RunEventBroker,
 ) {
   const temporary = createTemporaryTestConfig(configOverrides);
   const database = initializePersistence(temporary.config);
@@ -281,6 +324,7 @@ function createExecutorContext(
     screenshotStore,
     browserOwner,
     ...(readinessChecker === undefined ? {} : { readinessChecker }),
+    ...(eventBroker === undefined ? {} : { eventBroker }),
   });
   return { executor, repository, database };
 }

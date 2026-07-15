@@ -349,6 +349,37 @@ export class RunRepository {
     });
   }
 
+  getRunStatus(runId: string): RunStatus | null {
+    return this.protect('read the run status', () => {
+      const row = this.database
+        .prepare('SELECT status FROM runs WHERE id = ?')
+        .get(runId) as { readonly status: string } | undefined;
+      return row === undefined ? null : runStatusSchema.parse(row.status);
+    });
+  }
+
+  getEventsAfter(
+    runId: string,
+    sequenceNumber: number,
+  ): readonly RunEventEnvelope[] {
+    return this.protect('read persisted run events', () =>
+      (
+        this.database
+          .prepare(
+            `SELECT id, run_id AS runId, sequence_number AS sequenceNumber,
+                    event_type AS eventType,
+                    relative_timestamp_ms AS relativeTimestampMs,
+                    recorded_at AS recordedAt, schema_version AS schemaVersion,
+                    payload_json AS payloadJson
+               FROM run_events
+              WHERE run_id = ? AND sequence_number > ?
+              ORDER BY sequence_number`,
+          )
+          .all(runId, sequenceNumber) as EventRow[]
+      ).map(mapEvent),
+    );
+  }
+
   getLatestRun(): PersistedRunDetail | null {
     return this.protect('read the latest run', () => {
       const row = this.database

@@ -12,6 +12,13 @@ export const runStatusSchema = z.enum([
   'runner_error',
 ]);
 
+export const terminalRunStatusSchema = z.enum([
+  'passed',
+  'failed',
+  'incomplete',
+  'runner_error',
+]);
+
 export const experimentTypeSchema = z.enum([
   'impatient_user',
   'tunnel_drop',
@@ -49,6 +56,19 @@ export const runEventEnvelopeSchema = z.object({
 });
 
 export const sampleRunModeSchema = z.enum(['vulnerable', 'fixed']);
+
+export const startSampleRunRequestSchema = z.object({
+  mode: sampleRunModeSchema,
+});
+
+export const startSampleRunAcceptedSchema = z.object({
+  runId: z.string().min(1),
+  status: z.literal('created'),
+  detailUrl: z.string().startsWith('/api/runs/'),
+  eventsUrl: z.string().startsWith('/api/runs/'),
+});
+
+export const sseRunEventSchema = runEventEnvelopeSchema;
 
 export const sampleJourneyActionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('navigate'), path: z.string().min(1) }),
@@ -253,11 +273,23 @@ export const persistedRunListSchema = z.object({
 });
 
 export type RunStatus = z.infer<typeof runStatusSchema>;
+export type TerminalRunStatus = z.infer<typeof terminalRunStatusSchema>;
+
+export function isTerminalRunStatus(
+  status: RunStatus,
+): status is TerminalRunStatus {
+  return terminalRunStatusSchema.safeParse(status).success;
+}
 export type ExperimentType = z.infer<typeof experimentTypeSchema>;
 export type JourneyActionType = z.infer<typeof journeyActionTypeSchema>;
 export type AssertionResultStatus = z.infer<typeof assertionResultStatusSchema>;
 export type RunEventEnvelope = z.infer<typeof runEventEnvelopeSchema>;
 export type SampleRunMode = z.infer<typeof sampleRunModeSchema>;
+export type StartSampleRunRequest = z.infer<typeof startSampleRunRequestSchema>;
+export type StartSampleRunAccepted = z.infer<
+  typeof startSampleRunAcceptedSchema
+>;
+export type SseRunEvent = z.infer<typeof sseRunEventSchema>;
 export type SampleJourneyAction = z.infer<typeof sampleJourneyActionSchema>;
 export type SampleJourneyStep = z.infer<typeof sampleJourneyStepSchema>;
 export type SampleJourneyStepSummary = z.infer<

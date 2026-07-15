@@ -1,14 +1,13 @@
 import type { FastifyInstance } from 'fastify';
+import { startSampleRunRequestSchema } from '@formcrash/contracts';
 import { z } from 'zod';
 
 import type { ScreenshotStore } from '../../artifacts/screenshot-store.js';
+import type { RunEventBroker } from '../../events/run-event-broker.js';
 import type { RunRepository } from '../../persistence/run-repository.js';
 import { ActiveSampleRunError } from '../../runner/engine/sample-run-coordinator.js';
 import type { SampleRunCoordinator } from '../../runner/engine/sample-run-coordinator.js';
-
-const sampleRunRequestSchema = z.object({
-  mode: z.enum(['vulnerable', 'fixed']),
-});
+import { parseLastEventId, streamRunEvents } from './run-events-sse.js';
 
 const runListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -25,9 +24,10 @@ export function registerSampleRunRoutes(
   coordinator: SampleRunCoordinator,
   repository: RunRepository,
   screenshotStore: ScreenshotStore,
+  eventBroker: RunEventBroker,
 ): void {
-  app.post('/api/sample-runs', async (request, reply) => {
-    const parsed = sampleRunRequestSchema.safeParse(request.body);
+  app.post('/api/sample-runs', (request, reply) => {
+    const parsed = startSampleRunRequestSchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.status(400).send({
         error: {
@@ -42,7 +42,7 @@ export function registerSampleRunRoutes(
     }
 
     try {
-      return await coordinator.run(parsed.data.mode);
+      return reply.status(202).send(coordinator.start(parsed.data.mode));
     } catch (error: unknown) {
       if (error instanceof ActiveSampleRunError) {
         return reply.status(409).send({
@@ -97,6 +97,29 @@ export function registerSampleRunRoutes(
     return run === null ? reply.status(404).send(runNotFound()) : run;
   });
 
+  app.get('/api/runs/:runId/events', (request, reply) => {
+    const parsed = runParametersSchema.safeParse(request.params);
+    if (!parsed.success) return reply.status(404).send(runNotFound());
+    const header = request.headers['last-event-id'];
+    if (Array.isArray(header)) {
+      return reply.status(400).send(invalidLastEventId());
+    }
+    let afterSequence: number;
+    try {
+      afterSequence = parseLastEventId(header);
+    } catch {
+      return reply.status(400).send(invalidLastEventId());
+    }
+    streamRunEvents(
+      request,
+      reply,
+      parsed.data.runId,
+      afterSequence,
+      repository,
+      eventBroker,
+    );
+  });
+
   app.get('/api/runs/:runId/artifacts/:artifactId', (request, reply) => {
     const parsed = artifactParametersSchema.safeParse(request.params);
     if (!parsed.success) return reply.status(404).send(artifactNotFound());
@@ -135,6 +158,15 @@ function artifactNotFound() {
     error: {
       code: 'ARTIFACT_NOT_FOUND',
       message: 'The requested artifact was not found.',
+    },
+  };
+}
+
+function invalidLastEventId() {
+  return {
+    error: {
+      code: 'INVALID_LAST_EVENT_ID',
+      message: 'Last-Event-ID must be a non-negative safe integer.',
     },
   };
 }

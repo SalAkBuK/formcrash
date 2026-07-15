@@ -144,6 +144,7 @@ Automated tests additionally prove the truly concurrent `Promise.all` case.
 
 ## Intentionally deferred
 
-Playwright, visible-Chromium control, saved journey replay, FormCrash assertions,
-run persistence, SSE, screenshots, results, comparisons, and reports belong to
-later roadmap chunks.
+This target application intentionally owns none of the Playwright, persisted run,
+SSE, screenshot, or result workflow now implemented by the separate FormCrash
+server/dashboard. Comparison, reports, recording, and external targets remain
+later roadmap work.

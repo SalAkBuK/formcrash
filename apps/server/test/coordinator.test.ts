@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   ActiveSampleRunError,
@@ -10,7 +10,7 @@ import type {
 } from '../src/runner/sample/types.js';
 import { buildSampleRunResult } from './fixtures.js';
 
-function deferredResult(): {
+function deferredExecutor(): {
   executor: SampleRunExecutor;
   resolve: (result: SampleRunResult) => void;
 } {
@@ -19,55 +19,83 @@ function deferredResult(): {
     resolveResult = resolve;
   });
   return {
-    executor: { run: () => resultPromise },
+    executor: {
+      prepare: () => ({
+        runId: 'deferred-run',
+        execute: () => resultPromise,
+      }),
+    },
     resolve: (result) => {
-      if (resolveResult === undefined)
+      if (resolveResult === undefined) {
         throw new Error('Deferred result is not ready.');
+      }
       resolveResult(result);
     },
   };
 }
 
-describe('single active sample run', () => {
-  it('rejects a second run instead of queueing it', async () => {
-    const deferred = deferredResult();
+describe('single active asynchronous sample run', () => {
+  it('returns a durable run handle and rejects a second start', async () => {
+    const deferred = deferredExecutor();
     const coordinator = new SampleRunCoordinator(deferred.executor);
-    const firstRun = coordinator.run('vulnerable');
 
-    await expect(coordinator.run('fixed')).rejects.toBeInstanceOf(
-      ActiveSampleRunError,
-    );
+    expect(coordinator.start('vulnerable')).toEqual({
+      runId: 'deferred-run',
+      status: 'created',
+      detailUrl: '/api/runs/deferred-run',
+      eventsUrl: '/api/runs/deferred-run/events',
+    });
+    expect(() => coordinator.start('fixed')).toThrow(ActiveSampleRunError);
+
     deferred.resolve(buildSampleRunResult());
-    await firstRun;
+    await coordinator.waitForIdle();
+    expect(coordinator.isActive).toBe(false);
   });
 
-  it.each(['passed', 'runner_error'] as const)(
-    'releases the lock after a %s result',
-    async (status) => {
-      const results = [buildSampleRunResult(status), buildSampleRunResult()];
-      const executor: SampleRunExecutor = {
-        run: () => Promise.resolve(results.shift() ?? buildSampleRunResult()),
-      };
-      const coordinator = new SampleRunCoordinator(executor);
+  it('releases the lock after each terminal result', async () => {
+    let sequence = 0;
+    const executor: SampleRunExecutor = {
+      prepare: () => {
+        sequence += 1;
+        return {
+          runId: `run-${sequence}`,
+          execute: () => Promise.resolve(buildSampleRunResult()),
+        };
+      },
+    };
+    const coordinator = new SampleRunCoordinator(executor);
 
-      await coordinator.run('fixed');
-      await expect(coordinator.run('fixed')).resolves.toMatchObject({
-        status: 'passed',
-      });
-    },
-  );
+    expect(coordinator.start('fixed').runId).toBe('run-1');
+    await coordinator.waitForIdle();
+    expect(coordinator.start('fixed').runId).toBe('run-2');
+    await coordinator.waitForIdle();
+  });
 
-  it('releases the lock when the executor rejects', async () => {
-    const coordinator = new SampleRunCoordinator({
-      run: () => Promise.reject(new Error('Persistence unavailable.')),
-    });
+  it('logs rejection and releases the lock without an unhandled promise', async () => {
+    const onAsyncError = vi.fn();
+    let sequence = 0;
+    const coordinator = new SampleRunCoordinator(
+      {
+        prepare: () => {
+          sequence += 1;
+          return {
+            runId: `failed-${sequence}`,
+            execute: () =>
+              Promise.reject(new Error('Persistence unavailable.')),
+          };
+        },
+      },
+      { onAsyncError },
+    );
 
-    await expect(coordinator.run('fixed')).rejects.toThrow(
-      'Persistence unavailable.',
+    coordinator.start('fixed');
+    await coordinator.waitForIdle();
+    expect(onAsyncError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Persistence unavailable.' }),
+      'failed-1',
     );
     expect(coordinator.isActive).toBe(false);
-    await expect(coordinator.run('fixed')).rejects.toThrow(
-      'Persistence unavailable.',
-    );
+    expect(coordinator.start('fixed').runId).toBe('failed-2');
+    await coordinator.waitForIdle();
   });
 });

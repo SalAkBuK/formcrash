@@ -25,4 +25,27 @@ describe('GET /health', () => {
     });
     expect(response.json()).toHaveProperty('timestamp');
   });
+
+  it('allows only the configured dashboard origin', async () => {
+    const temporary = createTemporaryTestConfig();
+    cleanups.push(temporary.cleanup);
+    const app = createApp({ config: temporary.config, logger: false });
+
+    const allowed = await app.inject({
+      method: 'GET',
+      url: '/health',
+      headers: { origin: 'http://localhost:3000' },
+    });
+    const disallowed = await app.inject({
+      method: 'GET',
+      url: '/health',
+      headers: { origin: 'http://malicious.test' },
+    });
+    await app.close();
+
+    expect(allowed.headers['access-control-allow-origin']).toBe(
+      'http://localhost:3000',
+    );
+    expect(disallowed.headers['access-control-allow-origin']).toBeUndefined();
+  });
 });

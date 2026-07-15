@@ -117,6 +117,10 @@ survives restart; no screenshot blob or sensitive raw input enters SQLite.
 
 ## Chunk 4: Dashboard run workflow and live progress
 
+**Status:** Complete. Async durable run acceptance, replayable SSE, narrow CORS,
+sample controls, direct history/detail routes, evidence rendering, and dashboard
+state tests are implemented. Full-stack verification covers both target modes.
+
 **User-visible outcome:** The dashboard opens the seeded experiment, starts or
 stops a run, and displays live steps, disruption, evidence, and final assertion.
 

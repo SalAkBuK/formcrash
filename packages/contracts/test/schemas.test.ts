@@ -7,9 +7,27 @@ import {
   runArtifactSchema,
   runEventEnvelopeSchema,
   runStatusSchema,
+  startSampleRunAcceptedSchema,
+  startSampleRunRequestSchema,
 } from '../src/index.js';
 
 describe('foundational contracts', () => {
+  it('validates asynchronous sample-run start contracts', () => {
+    expect(startSampleRunRequestSchema.parse({ mode: 'vulnerable' })).toEqual({
+      mode: 'vulnerable',
+    });
+    expect(
+      startSampleRunAcceptedSchema.parse({
+        runId: 'run-1',
+        status: 'created',
+        detailUrl: '/api/runs/run-1',
+        eventsUrl: '/api/runs/run-1/events',
+      }),
+    ).toMatchObject({ runId: 'run-1', status: 'created' });
+    expect(
+      startSampleRunRequestSchema.safeParse({ mode: 'unsafe' }).success,
+    ).toBe(false);
+  });
   it.each([
     [runStatusSchema, 'running'],
     [experimentTypeSchema, 'impatient_user'],

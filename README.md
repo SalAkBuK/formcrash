@@ -10,12 +10,13 @@ Priority 0 is the duplicate checkout-submission demonstration described there.
 
 ## Repository boundaries
 
-- `apps/dashboard` — Next.js interface for future project, experiment, run, and
-  result workflows. It communicates with the control server over HTTP and never
-  launches browsers or reads the FormCrash database.
+- `apps/dashboard` — Next.js interface for starting the bundled experiment,
+  following live progress, and inspecting persisted run evidence. It communicates
+  with the control server over REST/SSE and never launches browsers or reads the
+  FormCrash database.
 - `apps/server` — Fastify modular monolith that owns health, the hardcoded
   sample-run API, Playwright execution, assertions, SQLite metadata, and
-  filesystem screenshot evidence. Live event delivery remains deferred.
+  filesystem screenshot evidence, and persisted SSE replay/live publication.
 - `apps/sample-checkout` — independent Next.js target application implementing
   the bundled vulnerable-versus-fixed checkout demonstration.
 - `packages/contracts` — runtime-validated cross-boundary schemas and inferred
@@ -66,6 +67,11 @@ reads environment variables; it does not load `.env` files implicitly.
 The dashboard's browser-visible server URL is configured separately with
 `NEXT_PUBLIC_FORMCRASH_SERVER_URL`.
 
+The control server permits only configured dashboard origins. Set
+`FORMCRASH_DASHBOARD_ORIGINS` to a comma-separated list of absolute origins; the
+default is `http://localhost:3000`. Wildcard CORS is rejected. When changing the
+dashboard port, update this setting too.
+
 Runner configuration:
 
 | Variable                       | Default                       | Purpose                                                    |
@@ -75,6 +81,7 @@ Runner configuration:
 | `SAMPLE_CHECKOUT_BASE_URL`     | `http://localhost:4200`       | Already-running bundled checkout target.                   |
 | `FORMCRASH_DATABASE_PATH`      | `./var/database/formcrash.db` | SQLite metadata path, resolved from the repository root.   |
 | `FORMCRASH_ARTIFACT_ROOT`      | `./var`                       | Root for server-owned relative artifact paths.             |
+| `FORMCRASH_DASHBOARD_ORIGINS`  | `http://localhost:3000`       | Dashboard origins allowed to call REST and SSE endpoints.  |
 
 Startup creates the configured directories, applies ordered migrations, and
 idempotently seeds the bundled Sample Checkout project, journey, Impatient User
@@ -124,29 +131,36 @@ See
 [`apps/sample-checkout/src/checkout/README.md`](apps/sample-checkout/src/checkout/README.md)
 for the selector contract and repeatable vulnerable/fixed verification steps.
 
-## Hardcoded Priority 0 browser run
+## Dashboard-driven Priority 0 browser run
 
-With the control server and sample checkout already running, invoke the one
-predefined experiment from PowerShell:
+Open `http://localhost:3000`, select **Vulnerable** or **Fixed**, and choose the
+prominent start action. The dashboard navigates only after the server returns a
+durable run ID, follows persisted and live SSE events, then reloads the
+authoritative result. Recent runs survive server/dashboard restarts and open at
+stable URLs such as `http://localhost:3000/runs/<run-id>`.
+
+The result separates request attempts from created order records, shows the
+recovery assertion, presents the ordered timeline, and loads screenshot bytes
+through run-owned artifact API URLs. Missing screenshots degrade to explicit
+unavailable cards without hiding the remaining evidence.
+
+### Control-server API
+
+`POST /api/sample-runs` accepts one predefined mode and returns `202 Accepted`
+after the run and immutable snapshots exist, before Chromium execution finishes:
 
 ```powershell
 $vulnerable = Invoke-RestMethod -Method Post `
   -Uri http://localhost:4100/api/sample-runs `
   -ContentType 'application/json' `
   -Body '{"mode":"vulnerable"}'
-$vulnerable | ConvertTo-Json -Depth 12
-
-$fixed = Invoke-RestMethod -Method Post `
-  -Uri http://localhost:4100/api/sample-runs `
-  -ContentType 'application/json' `
-  -Body '{"mode":"fixed"}'
-$fixed | ConvertTo-Json -Depth 12
+$vulnerable | ConvertTo-Json
 ```
 
-The endpoint awaits completion. Vulnerable mode returns HTTP 200 with run status
-`failed` and two orders; fixed mode returns HTTP 200 with status `passed` and one
-order. Assertion failure is a test result, not an HTTP error. The result is
-durable, and `GET /api/sample-runs/latest` reads the newest persisted run.
+The response contains `runId`, status `created`, `detailUrl`, and `eventsUrl`.
+Browser execution continues asynchronously. Vulnerable mode ultimately persists
+`failed` with two orders; fixed mode persists `passed` with one. Assertion failure
+is a run result, not an HTTP error.
 
 The current runner allows one browser run at a time. A concurrent request receives
 HTTP 409 and is not queued. The hardcoded experiment triggers Submit Order twice,
@@ -158,6 +172,10 @@ Persisted inspection endpoints:
 - `GET /api/runs?limit=20&offset=0` — newest-first bounded history.
 - `GET /api/runs/:runId` — immutable snapshots, ordered events, assertion
   results, observed evidence, warnings, and artifact metadata.
+- `GET /api/runs/:runId/events` — `text/event-stream` replay plus live events.
+  Frames use persisted sequence as `id`, `event: run-event`, and validated JSON
+  data. Native EventSource reconnection sends `Last-Event-ID`; replay resumes
+  after that sequence without inventing transient history.
 - `GET /api/runs/:runId/artifacts/:artifactId` — PNG content located through
   run-owned database metadata, never a client filesystem path.
 
@@ -166,6 +184,20 @@ before disruption, immediately after both triggers, and after settled final-stat
 evidence is read. Artifact metadata includes byte size and a SHA-256 checksum. A
 screenshot failure is recorded as an evidence warning and does not change a valid
 business assertion into an application failure.
+
+### Manual judge workflow
+
+1. Run `pnpm dev` and open `http://localhost:3000`.
+2. Start Vulnerable mode and watch the visible Chromium run plus live timeline.
+3. Confirm a failed assertion, two created orders, and all three screenshot cards.
+4. Return to history, reopen the run, and refresh its direct URL.
+5. Start Fixed mode with the identical saved experiment.
+6. Confirm a passed assertion, one created order, the observed request/attempt
+   counts, and three screenshots; refresh its direct URL.
+7. While a run is active, attempt another `POST /api/sample-runs` and confirm the
+   documented `409` response.
+8. Stop `pnpm dev` and confirm ports 3000, 4100, and 4200 plus runner Chromium are
+   released.
 
 ## Runtime storage
 
@@ -189,15 +221,15 @@ checkout's process-local order attempts, orders, and idempotency state.
 
 ## Current implementation status
 
-Chunks 0 through 3 are implemented. The bundled checkout supports the complete
+Chunks 0 through 4 are implemented. The bundled checkout supports the complete
 fake cart-to-confirmation journey, intentional vulnerable duplicate creation,
 fixed client locking, fixed server idempotency, visible local evidence, and reset.
 The control server now runs the one hardcoded checkout journey in Chromium,
 injects the first Impatient User experiment, persists immutable run snapshots,
-ordered events and assertion results, and captures three filesystem screenshots.
-It does **not** implement recording, editable journeys or experiments, SSE,
-dashboard run workflows, reports, exports, comparisons, or arbitrary external
-application support.
+ordered events and assertion results, captures three filesystem screenshots, and
+publishes replayable live progress to the sample-only dashboard. It does **not**
+implement recording, editable journeys or experiments, reports, exports,
+failed-versus-fixed comparison, or arbitrary external application support.
 
 Priority 0 must be built in this order:
 

@@ -8,6 +8,8 @@ browser and context for each run.
 
 - Endpoint: `POST /api/sample-runs` with `{ "mode": "vulnerable" }` or
   `{ "mode": "fixed" }`.
+- Accepted response: HTTP 202 with a durable run ID and detail/event URLs.
+- Live progress: `GET /api/runs/:runId/events` with persisted SSE replay.
 - Latest persisted result: `GET /api/sample-runs/latest`.
 - Journey: one structured, hardcoded sample checkout journey using only the
   documented `data-formcrash` selector contract.
@@ -16,9 +18,9 @@ browser and context for each run.
 - Concurrency: one active run; additional requests receive HTTP 409 and are not
   queued.
 
-Completed assertion failures return HTTP 200 with run status `failed`. Target,
-browser, journey, evidence, and cleanup failures produce a structured
-`runner_error` result without a public stack trace.
+The command does not wait for Chromium completion. Completed assertion failures
+persist run status `failed`; target, browser, journey, evidence, and cleanup
+failures persist a structured `runner_error` without a public stack trace.
 
 ## Browser and target configuration
 
@@ -28,6 +30,7 @@ FORMCRASH_BROWSER_TIMEOUT_MS=10000
 SAMPLE_CHECKOUT_BASE_URL=http://localhost:4200
 FORMCRASH_DATABASE_PATH=./var/database/formcrash.db
 FORMCRASH_ARTIFACT_ROOT=./var
+FORMCRASH_DASHBOARD_ORIGINS=http://localhost:3000
 ```
 
 Visible Chromium is the default. Automated integration tests override it to
@@ -68,5 +71,7 @@ becomes an inspectable warning; a metadata persistence failure removes the
 orphaned file and remains a persistence/runner problem.
 
 Durable reads are available from `GET /api/runs`, `GET /api/runs/:runId`, and the
-run-owned artifact endpoint. SSE, dashboard workflows, comparison, report export,
-editing, recording, and arbitrary external targets remain deferred.
+run-owned artifact endpoint. The SSE route replays these append-only events before
+subscribing clients receive newly persisted ones; terminal events end the stream.
+Comparison, report export, editing, recording, and arbitrary external targets
+remain deferred.

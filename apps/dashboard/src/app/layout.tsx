@@ -4,7 +4,10 @@ import type { ReactNode } from 'react';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'FormCrash Lab',
+  title: {
+    default: 'FormCrash Lab',
+    template: '%s · FormCrash Lab',
+  },
   description: 'Local resilience testing for transactional web journeys.',
 };
 

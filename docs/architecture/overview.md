@@ -6,7 +6,7 @@ FormCrash Lab is a pnpm monorepo with three processes that can evolve and fail
 independently while sharing explicit contracts.
 
 1. **Dashboard (`apps/dashboard`)** — a Next.js user interface. It sends REST
-   commands to the server and will subscribe to Server-Sent Events (SSE). It does
+   commands to the server and subscribes to Server-Sent Events (SSE). It does
    not own Playwright, SQLite, run orchestration, or evidence files.
 2. **Control server (`apps/server`)** — a long-running Fastify modular monolith.
    It is the only process that launches visible Chromium, evaluates assertions,
@@ -44,7 +44,8 @@ demo behavior.
 ## Communication and ownership
 
 The dashboard uses typed HTTP client modules. Command-style actions use REST;
-ordered live run progress will use SSE. The dashboard renders server-owned state
+ordered live run progress uses persisted replay plus process-local SSE publication.
+The dashboard renders server-owned state
 and never reads SQLite or artifacts by filesystem path.
 
 The sample checkout is separate because it is the system under test. Depending
@@ -53,8 +54,8 @@ and make the guaranteed demo path less representative.
 
 ## Intentionally deferred
 
-Chunks 1 through 3 add the independent checkout, one hardcoded Playwright replay,
+Chunks 1 through 4 add the independent checkout, one hardcoded Playwright replay,
 Impatient User injector, request/application evidence, durable definitions and
-runs, duplicate-order assertion, and three screenshot artifacts. SSE, recording,
-editable models, reports, comparisons, dashboard run workflows, and arbitrary
-external targets remain deferred.
+runs, duplicate-order assertion, three screenshot artifacts, replayable SSE, and
+the sample dashboard workflow. Recording, editable models, reports, comparisons,
+and arbitrary external targets remain deferred.

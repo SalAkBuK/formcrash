@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { startSampleRunAcceptedSchema } from '@formcrash/contracts';
 
 import { createApp } from '../src/app/create-app.js';
 import { initializePersistence } from '../src/persistence/initialize.js';
@@ -21,7 +22,10 @@ afterEach(async () => {
 describe('sample-run API', () => {
   it('rejects invalid modes with a structured 400 response', async () => {
     const coordinator = new SampleRunCoordinator({
-      run: () => Promise.resolve(buildSampleRunResult()),
+      prepare: () => ({
+        runId: 'unused',
+        execute: () => Promise.resolve(buildSampleRunResult()),
+      }),
     });
     const temporary = createTemporaryTestConfig();
     cleanups.push(temporary.cleanup);
@@ -44,13 +48,45 @@ describe('sample-run API', () => {
     });
   });
 
+  it('returns 202 only after the durable run can be read', async () => {
+    const temporary = createTemporaryTestConfig({
+      browserTimeoutMs: 1_000,
+      sampleCheckoutBaseUrl: 'http://127.0.0.1:1',
+    });
+    cleanups.push(temporary.cleanup);
+    const app = createApp({ config: temporary.config, logger: false });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/sample-runs',
+      payload: { mode: 'vulnerable' },
+    });
+    const accepted = startSampleRunAcceptedSchema.parse(response.json());
+
+    expect(response.statusCode).toBe(202);
+    expect(accepted.status).toBe('created');
+    const detail = await app.inject({
+      method: 'GET',
+      url: accepted.detailUrl,
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json()).toMatchObject({
+      runId: accepted.runId,
+      mode: 'vulnerable',
+    });
+  });
+
   it('returns 409 while another run is active', async () => {
     let resolveRun: ((result: SampleRunResult) => void) | undefined;
     const executor: SampleRunExecutor = {
-      run: () =>
-        new Promise((resolve) => {
-          resolveRun = resolve;
-        }),
+      prepare: () => ({
+        runId: 'active-run',
+        execute: () =>
+          new Promise((resolve) => {
+            resolveRun = resolve;
+          }),
+      }),
     };
     const coordinator = new SampleRunCoordinator(executor);
     const temporary = createTemporaryTestConfig();
@@ -62,12 +98,12 @@ describe('sample-run API', () => {
     });
     apps.push(app);
 
-    const firstResponse = app.inject({
+    const firstResponse = await app.inject({
       method: 'POST',
       url: '/api/sample-runs',
       payload: { mode: 'vulnerable' },
     });
-    await vi.waitFor(() => expect(coordinator.isActive).toBe(true));
+    await vi.waitFor(() => expect(resolveRun).toBeTypeOf('function'));
     const conflict = await app.inject({
       method: 'POST',
       url: '/api/sample-runs',
@@ -80,7 +116,8 @@ describe('sample-run API', () => {
     });
     if (resolveRun === undefined) throw new Error('First run did not start.');
     resolveRun(buildSampleRunResult());
-    expect((await firstResponse).statusCode).toBe(200);
+    await coordinator.waitForIdle();
+    expect(firstResponse.statusCode).toBe(202);
   });
 
   it('validates run-list pagination and returns 404 for unknown runs', async () => {

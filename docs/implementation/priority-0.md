@@ -73,14 +73,14 @@ incomplete` in an integration test.
 
 ## Live result and comparison
 
-- [ ] Starting the saved experiment from the dashboard requires no terminal
+- [x] Starting the saved experiment from the dashboard requires no terminal
       command after the three applications are running.
-- [ ] SSE delivers persisted run events in server sequence and reconnection from a
+- [x] SSE delivers persisted run events in server sequence and reconnection from a
       known event ID neither loses nor duplicates an event.
-- [ ] The dashboard visibly distinguishes current step, disruption triggers,
+- [x] The dashboard visibly distinguishes current step, disruption triggers,
       request/order counts, assertion result, overall result, incomplete, and runner
       error.
-- [ ] A completed vulnerable result identifies the earliest failed assertion and
+- [x] A completed vulnerable result identifies the earliest failed assertion and
       displays the underlying request/order evidence chronologically.
 - [ ] Only two runs of the same experiment/version lineage can be selected for the
       Priority 0 comparison; invalid pairs receive a clear reason.

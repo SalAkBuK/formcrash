@@ -22,6 +22,7 @@ export function createTemporaryTestConfig(
       browserHeadless: true,
       browserTimeoutMs: 2_000,
       databasePath: path.join(root, 'database', 'formcrash.db'),
+      dashboardOrigins: ['http://localhost:3000'],
       host: '127.0.0.1',
       logLevel: 'silent',
       port: 4100,

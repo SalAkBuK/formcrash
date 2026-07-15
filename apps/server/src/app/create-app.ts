@@ -1,7 +1,9 @@
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
+import cors from '@fastify/cors';
 
 import type { ServerConfig } from './config.js';
 import { ScreenshotStore } from '../artifacts/screenshot-store.js';
+import { RunEventBroker } from '../events/run-event-broker.js';
 import { registerHealthRoute } from '../modules/health/routes.js';
 import { registerSampleRunRoutes } from '../modules/runs/sample-routes.js';
 import { initializePersistence } from '../persistence/initialize.js';
@@ -13,6 +15,7 @@ export interface CreateAppOptions {
   readonly config: ServerConfig;
   readonly logger?: boolean;
   readonly sampleRunCoordinator?: SampleRunCoordinator;
+  readonly runEventBroker?: RunEventBroker;
 }
 
 export function createApp(options: CreateAppOptions): FastifyInstance {
@@ -26,9 +29,13 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     options.config.artifactRoot,
     runRepository,
   );
+  const runEventBroker = options.runEventBroker ?? new RunEventBroker();
 
-  app.addHook('onClose', () => {
-    database.close();
+  void app.register(cors, {
+    origin: [...options.config.dashboardOrigins],
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Last-Event-ID'],
+    credentials: false,
   });
 
   app.setErrorHandler((error: FastifyError, request, reply) => {
@@ -56,13 +63,30 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
       new PlaywrightSampleRunExecutor(options.config, {
         repository: runRepository,
         screenshotStore,
+        eventBroker: runEventBroker,
       }),
+      {
+        onAsyncError: (error, runId) => {
+          app.log.error(
+            { error, runId },
+            'Asynchronous sample run execution failed',
+          );
+        },
+      },
     );
+  app.addHook('preClose', () => {
+    runEventBroker.close();
+  });
+  app.addHook('onClose', async () => {
+    await sampleRunCoordinator.waitForIdle();
+    database.close();
+  });
   registerSampleRunRoutes(
     app,
     sampleRunCoordinator,
     runRepository,
     screenshotStore,
+    runEventBroker,
   );
 
   return app;

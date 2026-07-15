@@ -24,6 +24,21 @@ describe('runner configuration', () => {
     ).toThrow('Invalid server configuration');
   });
 
+  it('parses a narrow configured dashboard-origin allowlist', () => {
+    expect(
+      loadConfig({
+        FORMCRASH_DASHBOARD_ORIGINS:
+          'http://localhost:3000, http://127.0.0.1:3000',
+      }).dashboardOrigins,
+    ).toEqual(['http://localhost:3000', 'http://127.0.0.1:3000']);
+    expect(() => loadConfig({ FORMCRASH_DASHBOARD_ORIGINS: '*' })).toThrow(
+      'Invalid server configuration',
+    );
+    expect(() =>
+      loadConfig({ FORMCRASH_DASHBOARD_ORIGINS: 'http://localhost:3000/path' }),
+    ).toThrow('Invalid server configuration');
+  });
+
   it('resolves relative storage paths from the repository root', () => {
     const config = loadConfig({
       FORMCRASH_DATABASE_PATH: './var/database/test.db',

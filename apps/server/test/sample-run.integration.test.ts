@@ -5,6 +5,12 @@ import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  runEventEnvelopeSchema,
+  startSampleRunAcceptedSchema,
+  type RunEventEnvelope,
+  type SampleRunMode,
+} from '@formcrash/contracts';
 
 import { createApp } from '../src/app/create-app.js';
 import type { SampleRunResult } from '../src/runner/sample/types.js';
@@ -68,15 +74,10 @@ afterAll(async () => {
 
 describe.sequential('headless sample-run integration', () => {
   it('fails vulnerable mode with two triggers, requests, and orders', async () => {
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/sample-runs',
-      payload: { mode: 'vulnerable' },
-    });
-    const result = response.json<SampleRunResult>();
+    const { response, result, events } = await startRunAndWait('vulnerable');
     vulnerableRun = result;
 
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(202);
     expect(result.status).toBe('failed');
     expect(result.assertions[0]).toMatchObject({
       status: 'failed',
@@ -95,6 +96,8 @@ describe.sequential('headless sample-run integration', () => {
     expect(result.events.map((event) => event.eventType)).toContain(
       'browser.closed',
     );
+    expect(events).toEqual(result.events);
+    expect(events.at(-1)?.eventType).toBe('run.failed');
     expect(result.artifacts).toHaveLength(3);
     expect(result.evidenceWarnings).toEqual([]);
     for (const artifact of result.artifacts) {
@@ -119,15 +122,10 @@ describe.sequential('headless sample-run integration', () => {
   }, 20_000);
 
   it('passes fixed mode after two triggers with one created order', async () => {
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/sample-runs',
-      payload: { mode: 'fixed' },
-    });
-    const result = response.json<SampleRunResult>();
+    const { response, result, events } = await startRunAndWait('fixed');
     fixedRun = result;
 
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(202);
     expect(result.status).toBe('passed');
     expect(result.assertions[0]).toMatchObject({
       status: 'passed',
@@ -149,6 +147,7 @@ describe.sequential('headless sample-run integration', () => {
       'after-disruption',
       'final-result',
     ]);
+    expect(events.at(-1)?.eventType).toBe('run.passed');
   }, 20_000);
 
   it('reloads both runs and their artifacts after a server restart', async () => {
@@ -218,6 +217,38 @@ describe.sequential('headless sample-run integration', () => {
     expect(latest.json<SampleRunResult>().runId).toBe(fixedRun.runId);
   });
 });
+
+async function startRunAndWait(mode: SampleRunMode): Promise<{
+  response: Awaited<ReturnType<typeof app.inject>>;
+  result: SampleRunResult;
+  events: readonly RunEventEnvelope[];
+}> {
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/sample-runs',
+    payload: { mode },
+  });
+  const accepted = startSampleRunAcceptedSchema.parse(response.json());
+  const stream = await app.inject({
+    method: 'GET',
+    url: accepted.eventsUrl,
+  });
+  const detail = await app.inject({ method: 'GET', url: accepted.detailUrl });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  return {
+    response,
+    result: detail.json<SampleRunResult>(),
+    events: parseSseEvents(stream.body),
+  };
+}
+
+function parseSseEvents(body: string): readonly RunEventEnvelope[] {
+  return body
+    .split('\n\n')
+    .map((block) => block.split('\n').find((line) => line.startsWith('data: ')))
+    .filter((line): line is string => line !== undefined)
+    .map((line) => runEventEnvelopeSchema.parse(JSON.parse(line.slice(6))));
+}
 
 async function waitForSampleCheckout(): Promise<void> {
   const deadline = Date.now() + 25_000;

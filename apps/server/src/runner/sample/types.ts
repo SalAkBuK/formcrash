@@ -26,8 +26,13 @@ export type SampleJourneyActionType = SampleJourneyStepSummary['actionType'];
 export type ImpatientUserExperimentSummary = ImpatientUserExperiment;
 export type SampleRunResult = PersistedRunDetail;
 
+export interface SampleRunExecution {
+  readonly runId: string;
+  readonly execute: () => Promise<SampleRunResult>;
+}
+
 export interface SampleRunExecutor {
-  run(mode: SampleRunMode): Promise<SampleRunResult>;
+  prepare(mode: SampleRunMode): SampleRunExecution;
 }
 
 export interface SampleApplicationState {
