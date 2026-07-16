@@ -1,6 +1,7 @@
 'use client';
 
 import type { PersistedRunSummary, SampleRunMode } from '@formcrash/contracts';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -92,6 +93,11 @@ export function SampleRunDashboard() {
           uses fictional products, customer details, and local test records. Do
           not run destructive experiments against production or real user data.
         </div>
+        <div className="workflow-actions">
+          <Link className="button button-secondary" href="/projects">
+            Test Your Application
+          </Link>
+        </div>
       </header>
 
       <section className="run-grid" aria-labelledby="run-sample-title">
@@ -143,7 +149,9 @@ export function SampleRunDashboard() {
             aria-busy={starting}
             onClick={() => void handleStart()}
           >
-            {starting ? 'Creating durable run…' : `Start ${mode} run`}
+            {starting
+              ? 'Creating durable run…'
+              : `Run Sample Experiment — ${mode === 'vulnerable' ? 'Vulnerable' : 'Fixed'}`}
           </button>
           <p className="button-supporting-copy">
             FormCrash waits for a persisted run ID before opening live progress.

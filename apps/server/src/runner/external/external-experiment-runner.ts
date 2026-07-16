@@ -38,9 +38,12 @@ import {
 import { NetworkEvidenceCollector } from './network-evidence.js';
 import {
   InvalidTemplateError,
+  isStepValueSensitive,
   MissingRuntimeVariablesError,
+  redactSensitiveText,
   resolveHook,
   resolveRuntime,
+  resolveStepRuntimeValue,
   resolveStepValue,
   type ResolvedRuntime,
 } from './runtime-values.js';
@@ -157,7 +160,10 @@ export class ExternalExperimentRunner {
       }
       session.setScreenshotMasks(
         journey.steps
-          .filter((step) => step.sensitive && step.locator !== null)
+          .filter(
+            (step) =>
+              step.locator !== null && isStepValueSensitive(step, runtime),
+          )
           .map((step) => step.locator)
           .filter((locator) => locator !== null),
       );
@@ -216,7 +222,13 @@ export class ExternalExperimentRunner {
           },
         );
       } catch (error: unknown) {
-        throw new ExternalJourneyStepError(target, targetIndex, error);
+        throw new ExternalJourneyStepError(
+          target,
+          targetIndex,
+          error,
+          isStepValueSensitive(target, runtime),
+          runtime,
+        );
       }
       await this.settleAfterDisruption(
         session,
@@ -398,7 +410,13 @@ async function executeWithEvents(
       resolveStepValue(item, runtime),
     );
   } catch (error: unknown) {
-    throw new ExternalJourneyStepError(step, index, error);
+    throw new ExternalJourneyStepError(
+      step,
+      index,
+      error,
+      isStepValueSensitive(step, runtime),
+      runtime,
+    );
   }
   events.append('journey.step.completed', {
     stepId: step.id,
@@ -416,7 +434,10 @@ function createSafeSnapshot(
   for (const [index, step] of journey.steps.entries()) {
     if (step.value?.kind !== 'safe' || !step.value.value.includes('{{'))
       continue;
-    snapshot[`RESOLVED_STEP_${index + 1}`] = resolveStepValue(step, runtime);
+    const resolved = resolveStepRuntimeValue(step, runtime);
+    if (!resolved.sensitive) {
+      snapshot[`RESOLVED_STEP_${index + 1}`] = resolved.value;
+    }
   }
   return snapshot;
 }
@@ -496,6 +517,8 @@ class ExternalJourneyStepError extends Error {
     step: ExternalExperimentVersion['journeySnapshot']['steps'][number],
     index: number,
     cause: unknown,
+    sensitive: boolean,
+    runtime: ResolvedRuntime,
   ) {
     super(`Journey step “${step.name}” failed during external execution.`, {
       cause,
@@ -508,9 +531,12 @@ class ExternalJourneyStepError extends Error {
       message:
         'The recorded action could not complete within the bounded wait.',
       technicalMessage:
-        step.sensitive || !(cause instanceof Error)
+        sensitive || !(cause instanceof Error)
           ? null
-          : cause.message.trim().slice(0, 2_000) || null,
+          : redactSensitiveText(
+              cause.message.trim().slice(0, 2_000),
+              runtime,
+            ) || null,
       currentUrl: null,
       locator: step.locator,
     };

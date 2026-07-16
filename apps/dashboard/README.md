@@ -1,9 +1,15 @@
 # FormCrash dashboard
 
-The Next.js dashboard at `http://localhost:3000` is the sample-only user workflow
-for Chunk 4. It can start the seeded Impatient User experiment in vulnerable or
-fixed mode, display bounded persisted history, follow a nonterminal run over SSE,
-and inspect one authoritative terminal result at `/runs/<run-id>`.
+The Next.js dashboard exposes two deliberate workflows:
+
+- `http://localhost:3000` is the guaranteed bundled Sample Checkout path. It
+  starts the existing seeded Impatient User experiment in vulnerable or fixed
+  mode, displays persisted sample history, follows live SSE progress, and opens
+  the authoritative result at `/runs/<run-id>`.
+- `http://localhost:3000/projects` is the reusable external-project path. It
+  creates controlled targets, records and replays journeys, captures
+  authentication, runs Guided or Advanced repeated-action experiments, and
+  displays persisted external results.
 
 ## Runtime boundary
 
@@ -25,11 +31,17 @@ Historical terminal routes do not open SSE. Screenshot `<img>` and open links us
 the run-owned artifact API. A missing artifact or failed image load produces an
 unavailable card while assertion and request/order evidence remain usable.
 
-## Current limits
+## Current model and limits
 
-This dashboard supports only the bundled Sample Checkout and one saved experiment
-version. It does not create projects, record or edit journeys, target arbitrary
-applications, compare failed/fixed runs, or export reports.
+The sample runner and external journey workflow intentionally use different
+server read models. The seeded sample is not exposed as a user-recorded journey
+and no fake recording metadata is created for it.
+
+Guided Test currently uses dashboard-side request ranking and assertion
+generation. There is no server-owned recommendation contract with confidence,
+ambiguity handling, or persisted selection provenance. There is also no
+failed-versus-fixed comparison, report export, Playwright export, external SSE,
+or failure injector beyond repeated click/submit behavior.
 
 Run dashboard checks with:
 

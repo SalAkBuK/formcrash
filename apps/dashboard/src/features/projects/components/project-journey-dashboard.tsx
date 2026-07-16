@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState, type FormEvent } from 'react';
 import type {
   PersistedJourney,
@@ -360,6 +361,11 @@ export function ProjectJourneyDashboard() {
           you own or are explicitly authorized to test. Localhost and controlled
           HTTP/HTTPS targets are permitted.
         </p>
+        <div className="workflow-actions">
+          <Link className="button button-secondary" href="/">
+            Run Bundled Sample
+          </Link>
+        </div>
       </header>
 
       {error !== null ? (

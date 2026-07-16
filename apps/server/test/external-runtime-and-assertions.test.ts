@@ -16,6 +16,7 @@ import {
 import {
   InvalidTemplateError,
   resolveRuntime,
+  resolveStepRuntimeValue,
   resolveTemplate,
 } from '../src/runner/external/runtime-values.js';
 import type { MissingRuntimeVariablesError } from '../src/runner/external/runtime-values.js';
@@ -77,6 +78,98 @@ describe('external runtime values and safe templates', () => {
     );
   });
 
+  it('propagates sensitivity through direct, mixed, and multi-stage templates', () => {
+    const syntheticSecret = 'FORMCRASH_PATCH0_SECRET_7f3b1a';
+    const runtime = resolveRuntime({
+      runId: '22222222-3333-4444-5555-666666666666',
+      journey: journey([
+        step('derived', '{{var.AUTH_HEADER}}'),
+        step('mixed', 'test-{{var.SECRET_SUFFIX}}@example.test'),
+        step('nested', '{{var.NESTED_VALUE}}'),
+        step('safe-generated', '{{var.SAFE_VALUE}}'),
+        sensitiveStep('forced-sensitive', 'DECLARED_SAFE'),
+      ]),
+      declarations: [
+        {
+          name: 'ADMIN_PASSWORD',
+          secret: true,
+          description: '',
+          template: null,
+        },
+        {
+          name: 'AUTH_HEADER',
+          secret: false,
+          description: '',
+          template: 'Bearer {{var.ADMIN_PASSWORD}}',
+        },
+        {
+          name: 'SECRET_SUFFIX',
+          secret: false,
+          description: '',
+          template: '{{var.ADMIN_PASSWORD}}',
+        },
+        {
+          name: 'NESTED_VALUE',
+          secret: false,
+          description: '',
+          template: 'nested-{{var.AUTH_HEADER}}',
+        },
+        {
+          name: 'SAFE_VALUE',
+          secret: false,
+          description: '',
+          template: '{{unique.text}}',
+        },
+        {
+          name: 'DECLARED_SAFE',
+          secret: false,
+          description: '',
+          template: null,
+        },
+      ],
+      ephemeral: {
+        ADMIN_PASSWORD: syntheticSecret,
+        DECLARED_SAFE: syntheticSecret,
+      },
+      hooks: [],
+    });
+
+    expect(runtime.values.get('ADMIN_PASSWORD')).toMatchObject({
+      sensitive: true,
+      sources: ['ADMIN_PASSWORD'],
+    });
+    expect(runtime.values.get('AUTH_HEADER')).toMatchObject({
+      sensitive: true,
+      sources: ['ADMIN_PASSWORD'],
+    });
+    expect(runtime.values.get('NESTED_VALUE')).toMatchObject({
+      sensitive: true,
+      sources: ['ADMIN_PASSWORD'],
+    });
+    expect(runtime.values.get('SAFE_VALUE')).toMatchObject({
+      sensitive: false,
+      sources: [],
+    });
+    expect(runtime.values.get('DECLARED_SAFE')).toMatchObject({
+      sensitive: true,
+      sources: ['DECLARED_SAFE'],
+    });
+    expect(
+      resolveStepRuntimeValue(
+        journey([step('mixed', 'test-{{var.SECRET_SUFFIX}}@example.test')])
+          .steps[0]!,
+        runtime,
+      ),
+    ).toMatchObject({
+      sensitive: true,
+      sources: ['ADMIN_PASSWORD'],
+    });
+    expect(runtime.safeSnapshot).toEqual({
+      SAFE_VALUE: runtime.context.uniqueText,
+    });
+    expect(JSON.stringify(runtime.safeSnapshot)).not.toContain(syntheticSecret);
+  });
+
   it('rejects unknown templates and reports only variables used by the execution', () => {
     expect(() =>
       resolveTemplate('{{random.uuid}}', new Map(), {
@@ -105,6 +198,21 @@ describe('external runtime values and safe templates', () => {
         missingVariables: ['PASSWORD'],
       }),
     );
+    try {
+      resolveRuntime({
+        runId: 'run-id',
+        journey: journey([sensitiveStep('password', 'PASSWORD')]),
+        declarations: [],
+        ephemeral: {},
+        hooks: [],
+      });
+    } catch (error: unknown) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toBe(
+        'Required runtime variables are missing: PASSWORD.',
+      );
+      expect(JSON.stringify(error)).not.toContain('value');
+    }
   });
 
   it('does not require an unused declaration', () => {

@@ -1,5 +1,5 @@
-import { ProjectJourneyDashboard } from '../features/projects/components/project-journey-dashboard';
+import { SampleRunDashboard } from '../features/sample-run/components/sample-run-dashboard';
 
 export default function HomePage() {
-  return <ProjectJourneyDashboard />;
+  return <SampleRunDashboard />;
 }

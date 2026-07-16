@@ -43,7 +43,11 @@ describe('SampleRunDashboard', () => {
     expect(screen.getByRole('radio', { name: /Vulnerable/ })).toBeChecked();
     await user.click(screen.getByRole('radio', { name: /Fixed/ }));
     expect(screen.getByRole('radio', { name: /Fixed/ })).toBeChecked();
-    await user.click(screen.getByRole('button', { name: 'Start fixed run' }));
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Run Sample Experiment — Fixed',
+      }),
+    );
 
     expect(mocks.startSampleRun).toHaveBeenCalledWith('fixed');
     await waitFor(() =>
@@ -75,7 +79,9 @@ describe('SampleRunDashboard', () => {
 
     await screen.findByText('Vulnerable mode');
     await user.click(
-      screen.getByRole('button', { name: 'Start vulnerable run' }),
+      screen.getByRole('button', {
+        name: 'Run Sample Experiment — Vulnerable',
+      }),
     );
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -97,13 +103,26 @@ describe('SampleRunDashboard', () => {
       'History endpoint failed. Sample execution remains available.',
     );
     expect(
-      screen.getByRole('button', { name: 'Start vulnerable run' }),
+      screen.getByRole('button', {
+        name: 'Run Sample Experiment — Vulnerable',
+      }),
     ).toBeEnabled();
 
     mocks.getRecentRuns.mockResolvedValue({ items: [], limit: 12, offset: 0 });
     await user.click(screen.getByRole('button', { name: 'Refresh' }));
     expect(
       await screen.findByRole('heading', { name: 'No runs yet' }),
+    ).toBeVisible();
+  });
+
+  it('keeps the reusable external-project workflow directly accessible', async () => {
+    render(<SampleRunDashboard />);
+
+    expect(
+      await screen.findByRole('link', { name: 'Test Your Application' }),
+    ).toHaveAttribute('href', '/projects');
+    expect(
+      screen.getByRole('heading', { name: 'Run Sample Experiment' }),
     ).toBeVisible();
   });
 });

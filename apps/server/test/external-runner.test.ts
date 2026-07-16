@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ReplayLocator } from '@formcrash/contracts';
 
@@ -43,6 +43,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   database.close();
   temporary.cleanup();
 });
@@ -131,6 +132,100 @@ describe('external runner terminal paths', () => {
       expect.objectContaining({ code: 'cleanup_hook_failed' }),
     ]);
     expect(JSON.stringify(result)).not.toContain('super-secret-hook-token');
+  });
+
+  it('keeps secret-derived steps and hook values out of persisted evidence and screenshot metadata', async () => {
+    const syntheticSecret = 'FORMCRASH_PATCH0_SECRET_7f3b1a';
+    const configured = configureSecretScenario();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(null, {
+        status: 204,
+      }),
+    );
+    const owner = new FakeOwner();
+    const result = await runner(owner, new BrowserOwnership()).run(
+      configured.versionId,
+      { ROOT_SECRET: syntheticSecret },
+    );
+
+    expect(result.status).toBe('passed');
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const hookRequest = fetchMock.mock.calls[0]?.[1];
+    expect(hookRequest?.headers).toMatchObject({
+      authorization: `Bearer ${syntheticSecret}`,
+    });
+    expect(hookRequest?.body).toBe(
+      JSON.stringify({ token: `body-${syntheticSecret}` }),
+    );
+    expect(owner.lastSession?.screenshotMasks).toContainEqual({
+      strategy: 'id',
+      value: 'secret-derived-field',
+    });
+    expect(Object.keys(result.resolvedValues).sort()).toEqual([
+      'RESOLVED_STEP_2',
+      'SAFE_VALUE',
+    ]);
+    expect(result.resolvedValues.SAFE_VALUE).toMatch(/^FC-/u);
+    expect(result.resolvedValues.RESOLVED_STEP_2).toMatch(/^FC-/u);
+
+    const persistedEvidence = {
+      runs: database.connection
+        .prepare(
+          `SELECT resolved_values_json, network_observations_json,
+                  runner_error_json, warnings_json
+             FROM external_runs WHERE id = ?`,
+        )
+        .all(result.runId),
+      events: database.connection
+        .prepare(
+          `SELECT payload_json FROM external_run_events WHERE run_id = ?`,
+        )
+        .all(result.runId),
+      assertions: database.connection
+        .prepare(
+          `SELECT description, expected_description, observed_description
+             FROM external_assertion_results WHERE run_id = ?`,
+        )
+        .all(result.runId),
+      artifacts: database.connection
+        .prepare(
+          `SELECT metadata_json, relative_path
+             FROM external_artifacts WHERE run_id = ?`,
+        )
+        .all(result.runId),
+    };
+    expect(JSON.stringify(result)).not.toContain(syntheticSecret);
+    expect(JSON.stringify(persistedEvidence)).not.toContain(syntheticSecret);
+  });
+
+  it('does not expose a secret-derived browser value in runner diagnostics', async () => {
+    const syntheticSecret = 'FORMCRASH_PATCH0_SECRET_7f3b1a';
+    const configured = configureSecretScenario({ includeHook: false });
+    const owner = new FakeOwner({ failFillWithValue: true });
+    const result = await runner(owner, new BrowserOwnership()).run(
+      configured.versionId,
+      { ROOT_SECRET: syntheticSecret },
+    );
+
+    expect(result.status).toBe('runner_error');
+    expect(result.runnerError).toMatchObject({
+      code: 'journey_step_failed',
+      failedStep: {
+        stepName: 'Fill derived secret',
+        technicalMessage: null,
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain(syntheticSecret);
+    expect(
+      JSON.stringify(
+        database.connection
+          .prepare(
+            `SELECT resolved_values_json, runner_error_json
+               FROM external_runs WHERE id = ?`,
+          )
+          .all(result.runId),
+      ),
+    ).not.toContain(syntheticSecret);
   });
 });
 
@@ -229,6 +324,123 @@ function configure(options: {
   return { versionId: version.id, projectId: project.id };
 }
 
+function configureSecretScenario(
+  options: { readonly includeHook?: boolean } = {},
+) {
+  const project = projects.createProject({
+    name: `Secret runner ${crypto.randomUUID()}`,
+    targetUrl: 'http://127.0.0.1:49999/controlled',
+    description: 'Transitive secret runner test',
+  });
+  const targetStepId = crypto.randomUUID();
+  const journey = projects.saveJourney({
+    projectId: project.id,
+    name: 'Secret-derived step',
+    steps: [
+      {
+        id: crypto.randomUUID(),
+        name: 'Fill derived secret',
+        type: 'fill',
+        timestamp: 0,
+        url: project.targetUrl,
+        locator: { strategy: 'id', value: 'secret-derived-field' },
+        fingerprint: null,
+        value: {
+          kind: 'safe',
+          value: 'prefix-{{var.DERIVED_SECRET}}',
+        },
+        sensitive: false,
+      },
+      {
+        id: crypto.randomUUID(),
+        name: 'Fill safe generated value',
+        type: 'fill',
+        timestamp: 1,
+        url: project.targetUrl,
+        locator: { strategy: 'id', value: 'safe-generated-field' },
+        fingerprint: null,
+        value: { kind: 'safe', value: '{{var.SAFE_VALUE}}' },
+        sensitive: false,
+      },
+      {
+        id: targetStepId,
+        name: 'Submit',
+        type: 'submit',
+        timestamp: 2,
+        url: project.targetUrl,
+        locator: { strategy: 'css', value: '#form' },
+        fingerprint: null,
+        value: null,
+        sensitive: false,
+      },
+    ],
+    metadata: {
+      recordingSessionId: null,
+      recordedAt: new Date(0).toISOString(),
+      warningCount: 0,
+      normalizationRule: 'test',
+    },
+  });
+  settings.save(project.id, {
+    variables: [
+      {
+        name: 'ROOT_SECRET',
+        secret: true,
+        description: 'Synthetic test secret',
+        template: null,
+      },
+      {
+        name: 'DERIVED_SECRET',
+        secret: false,
+        description: 'Must inherit sensitivity',
+        template: '{{var.ROOT_SECRET}}',
+      },
+      {
+        name: 'SAFE_VALUE',
+        secret: false,
+        description: 'Safe generated value',
+        template: '{{unique.text}}',
+      },
+    ],
+    beforeRunHook:
+      options.includeHook === false
+        ? null
+        : {
+            method: 'POST',
+            url: 'https://hooks.example.test/reset',
+            headers: {
+              authorization: 'Bearer {{var.DERIVED_SECRET}}',
+            },
+            body: {
+              token: 'body-{{var.DERIVED_SECRET}}',
+            },
+            timeoutMs: 100,
+          },
+    afterRunHook: null,
+  });
+  const version = experiments.createVersion({
+    projectId: project.id,
+    journey,
+    request: {
+      name: 'Secret-safe impatient submit',
+      targetStepId,
+      triggerCount: 2,
+      intervalMs: 0,
+      networkMatcher: null,
+      assertions: [
+        {
+          id: 'completion',
+          type: 'text_appeared',
+          text: 'Complete',
+          description: 'Completion appears.',
+        },
+      ],
+      continueAfterTarget: false,
+    },
+  });
+  return { versionId: version.id, projectId: project.id };
+}
+
 function runner(owner: ExternalBrowserOwner, ownership: BrowserOwnership) {
   return new ExternalExperimentRunner(
     temporary.config,
@@ -246,6 +458,10 @@ class FakeOwner implements ExternalBrowserOwner {
   lastOptions: ExternalBrowserOptions | null = null;
   lastSession: FakeSession | null = null;
 
+  constructor(
+    private readonly options: { readonly failFillWithValue?: boolean } = {},
+  ) {}
+
   launchRecording(): Promise<RecordingBrowserSession> {
     throw new Error('Recording is not used by this test.');
   }
@@ -253,7 +469,7 @@ class FakeOwner implements ExternalBrowserOwner {
   launchReplay(options: ExternalBrowserOptions): Promise<ReplayBrowserSession> {
     this.launchCount += 1;
     this.lastOptions = options;
-    this.lastSession = new FakeSession();
+    this.lastSession = new FakeSession(this.options);
     return Promise.resolve(this.lastSession);
   }
 }
@@ -261,13 +477,21 @@ class FakeOwner implements ExternalBrowserOwner {
 class FakeSession implements ReplayBrowserSession {
   private observer: ((observation: NetworkObservation) => void) | null = null;
   readonly settleDurations: number[] = [];
+  screenshotMasks: readonly ReplayLocator[] = [];
+
+  constructor(
+    private readonly options: { readonly failFillWithValue?: boolean } = {},
+  ) {}
   navigate(): Promise<void> {
     return Promise.resolve();
   }
   click(): Promise<void> {
     return Promise.resolve();
   }
-  fill(): Promise<void> {
+  fill(_locator: ReplayLocator, value: string): Promise<void> {
+    if (this.options.failFillWithValue) {
+      throw new Error(`Browser rejected fill value ${value}.`);
+    }
     return Promise.resolve();
   }
   setChecked(): Promise<void> {
@@ -296,7 +520,9 @@ class FakeSession implements ReplayBrowserSession {
     writeFileSync(destination, 'fake png');
     return Promise.resolve();
   }
-  setScreenshotMasks(): void {}
+  setScreenshotMasks(locators: readonly ReplayLocator[]): void {
+    this.screenshotMasks = [...locators];
+  }
   isVisible(): Promise<boolean> {
     return Promise.resolve(true);
   }

@@ -14,9 +14,12 @@ import type { AuthStateStore } from '../external/auth-session.js';
 import { executeHttpHook } from '../external/http-hooks.js';
 import { executeRecordedStep } from '../external/journey-actions.js';
 import {
+  isStepValueSensitive,
+  redactSensitiveText,
   resolveHook,
   resolveRuntime,
   resolveStepValue,
+  type ResolvedRuntime,
 } from '../external/runtime-values.js';
 import { assertProductionConfirmed } from '../external/production-safety.js';
 import type { BrowserOwnership } from '../infrastructure/browser-ownership.js';
@@ -108,8 +111,12 @@ export class JourneyReplayService {
               stepNumber: index + 1,
               actionType: step.type,
               message: `Step ${index + 1} could not be replayed.`,
-              technicalMessage: technicalReplayMessage(error, step.sensitive),
-              currentUrl: safeCurrentUrl(session),
+              technicalMessage: technicalReplayMessage(
+                error,
+                isStepValueSensitive(step, runtime),
+                runtime,
+              ),
+              currentUrl: safeCurrentUrl(session, runtime),
               locator: step.locator,
             },
             startedAt,
@@ -168,19 +175,26 @@ export class JourneyReplayService {
   }
 }
 
-function technicalReplayMessage(error: unknown, sensitive: boolean): string {
+function technicalReplayMessage(
+  error: unknown,
+  sensitive: boolean,
+  runtime: ResolvedRuntime,
+): string {
   if (sensitive) {
     return 'The sensitive field action failed. Its value was omitted from diagnostics.';
   }
   if (!(error instanceof Error) || error.message.trim() === '') {
     return 'The browser action failed without a diagnostic message.';
   }
-  return error.message.trim().slice(0, 2_000);
+  return redactSensitiveText(error.message.trim().slice(0, 2_000), runtime);
 }
 
-function safeCurrentUrl(session: ReplayBrowserSession): string | null {
+function safeCurrentUrl(
+  session: ReplayBrowserSession,
+  runtime: ResolvedRuntime,
+): string | null {
   try {
-    return session.currentUrl();
+    return redactSensitiveText(session.currentUrl(), runtime);
   } catch {
     return null;
   }

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   requestDiscoveryResultSchema,
   type EphemeralRuntimeValues,
+  type RecordedJourneyStep,
   type RequestDiscoveryResult,
 } from '@formcrash/contracts';
 
@@ -22,9 +23,12 @@ import { createGuidedJourneySnapshot } from './guided-journey.js';
 import { executeRecordedStep } from './journey-actions.js';
 import { NetworkEvidenceCollector } from './network-evidence.js';
 import {
+  isStepValueSensitive,
+  redactSensitiveText,
   resolveHook,
   resolveRuntime,
   resolveStepValue,
+  type ResolvedRuntime,
 } from './runtime-values.js';
 import { assertProductionConfirmed } from './production-safety.js';
 
@@ -112,14 +116,10 @@ export class RequestDiscoveryService {
       });
       await session.navigate(project.targetUrl);
       for (const step of journey.steps.slice(0, targetIndex)) {
-        await executeRecordedStep(session, step, (item) =>
-          resolveStepValue(item, runtime),
-        );
+        await executeDiscoveryStep(session, step, runtime);
       }
       capture = true;
-      await executeRecordedStep(session, target, (item) =>
-        resolveStepValue(item, runtime),
-      );
+      await executeDiscoveryStep(session, target, runtime);
       await session.settle(750);
       capture = false;
       return requestDiscoveryResultSchema.parse({
@@ -142,5 +142,25 @@ export class RequestDiscoveryService {
       }
       release();
     }
+  }
+}
+
+async function executeDiscoveryStep(
+  session: ReplayBrowserSession,
+  step: RecordedJourneyStep,
+  runtime: ResolvedRuntime,
+): Promise<void> {
+  try {
+    await executeRecordedStep(session, step, (item) =>
+      resolveStepValue(item, runtime),
+    );
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      error.message = isStepValueSensitive(step, runtime)
+        ? `Sensitive journey step “${step.name}” could not be replayed. Its value was omitted from diagnostics.`
+        : redactSensitiveText(error.message, runtime);
+      throw error;
+    }
+    throw error;
   }
 }

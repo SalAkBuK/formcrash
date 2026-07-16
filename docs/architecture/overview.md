@@ -52,6 +52,22 @@ The sample checkout is separate because it is the system under test. Depending
 on the control server would contaminate the experiment, hide real HTTP behavior,
 and make the guaranteed demo path less representative.
 
+## Sample and recorded journey entry points
+
+The dashboard homepage exposes the seeded Sample Checkout runner directly.
+`/projects` exposes the generic external-project recorder and experiment
+workflow. These paths intentionally use separate current read models:
+
+- Sample definitions are server-seeded and execute through the sample-run API,
+  persisted sample runs, and sample SSE.
+- Generic journey APIs expose only user-recorded journeys with recording
+  metadata and execute through the external replay/experiment model.
+
+The sample journey is not given fake recording metadata and is not forced through
+the generic journey list. This preserves the distinction between a guaranteed
+fixture and user-captured source material while keeping both workflows reachable
+from the normal dashboard.
+
 ## Intentionally deferred
 
 Chunks 1 through 6 now include the independent checkout, the seeded demonstration,

@@ -65,6 +65,17 @@ select {
   padding-bottom: 1.5rem;
 }
 
+.workflow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.workflow-actions .button {
+  text-decoration: none;
+}
+
 .project-grid {
   display: grid;
   min-width: 0;

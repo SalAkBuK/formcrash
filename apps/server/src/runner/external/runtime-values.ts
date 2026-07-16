@@ -9,7 +9,8 @@ import type {
 
 export interface ResolvedRuntimeValue {
   readonly value: string;
-  readonly secret: boolean;
+  readonly sensitive: boolean;
+  readonly sources: readonly string[];
 }
 
 export interface RunTemplateContext {
@@ -87,6 +88,10 @@ export function resolveRuntime(input: {
   );
   const required = collectReferencedVariables(input.journey, input.hooks);
   collectAssertionVariables(input.assertions ?? [], required);
+  const explicitlySensitive = collectExplicitlySensitiveVariables(
+    input.journey,
+    input.assertions ?? [],
+  );
 
   for (const name of new Set([
     ...declarations.keys(),
@@ -103,9 +108,14 @@ export function resolveRuntime(input: {
       (declaration === undefined ? process.env[name] : undefined);
     const direct = ephemeral ?? fromEnvironment;
     if (direct !== undefined) {
+      const sensitive =
+        declaration?.secret === true ||
+        explicitlySensitive.has(name) ||
+        (declaration === undefined && required.has(name));
       values.set(name, {
         value: direct,
-        secret: declaration?.secret ?? required.has(name),
+        sensitive,
+        sources: sensitive ? [name] : [],
       });
     }
   }
@@ -124,10 +134,20 @@ export function resolveRuntime(input: {
       if (values.has(declaration.name) || declaration.template === null)
         continue;
       try {
-        const value = resolveTemplate(declaration.template, values, context);
+        const resolved = resolveTemplateValue(
+          declaration.template,
+          values,
+          context,
+        );
+        const explicitlyMarked =
+          declaration.secret || explicitlySensitive.has(declaration.name);
         values.set(declaration.name, {
-          value,
-          secret: declaration.secret,
+          value: resolved.value,
+          sensitive: explicitlyMarked || resolved.sensitive,
+          sources: mergeSources(
+            explicitlyMarked ? [declaration.name] : [],
+            resolved.sources,
+          ),
         });
       } catch (error: unknown) {
         if (!(error instanceof InvalidTemplateError)) throw error;
@@ -159,7 +179,7 @@ export function resolveRuntime(input: {
     values,
     safeSnapshot: Object.fromEntries(
       [...values.entries()]
-        .filter(([, resolved]) => !resolved.secret)
+        .filter(([, resolved]) => !resolved.sensitive)
         .map(([name, resolved]) => [name, resolved.value]),
     ),
     context,
@@ -188,6 +208,25 @@ function collectAssertionVariables(
   }
 }
 
+function collectExplicitlySensitiveVariables(
+  journey: PersistedJourney,
+  assertions: readonly ExternalAssertion[],
+): Set<string> {
+  const names = new Set<string>();
+  for (const step of journey.steps) {
+    if (step.value?.kind === 'sensitive') names.add(step.value.variableName);
+  }
+  for (const assertion of assertions) {
+    if (
+      assertion.type === 'field_retained' &&
+      assertion.expectedValue.kind === 'sensitive'
+    ) {
+      names.add(assertion.expectedValue.variableName);
+    }
+  }
+  return names;
+}
+
 function validateAssertionTemplates(
   assertions: readonly ExternalAssertion[],
   values: ReadonlyMap<string, ResolvedRuntimeValue>,
@@ -214,15 +253,45 @@ export function resolveStepValue(
   step: RecordedJourneyStep,
   runtime: ResolvedRuntime,
 ): string {
+  return resolveStepRuntimeValue(step, runtime).value;
+}
+
+export function resolveStepRuntimeValue(
+  step: RecordedJourneyStep,
+  runtime: ResolvedRuntime,
+): ResolvedRuntimeValue {
   if (step.value === null) throw new Error('Recorded step has no value.');
   if (step.value.kind === 'safe') {
-    return resolveTemplate(step.value.value, runtime.values, runtime.context);
+    const resolved = resolveTemplateValue(
+      step.value.value,
+      runtime.values,
+      runtime.context,
+    );
+    if (!step.sensitive) return resolved;
+    return {
+      ...resolved,
+      sensitive: true,
+      sources: mergeSources([`step:${step.id}`], resolved.sources),
+    };
   }
   const resolved = runtime.values.get(step.value.variableName);
   if (resolved === undefined) {
     throw new MissingRuntimeVariablesError([step.value.variableName]);
   }
-  return resolved.value;
+  return {
+    ...resolved,
+    sensitive: true,
+    sources: mergeSources([step.value.variableName], resolved.sources),
+  };
+}
+
+export function isStepValueSensitive(
+  step: RecordedJourneyStep,
+  runtime: ResolvedRuntime,
+): boolean {
+  if (step.sensitive || step.value?.kind === 'sensitive') return true;
+  if (step.value === null) return false;
+  return resolveStepRuntimeValue(step, runtime).sensitive;
 }
 
 export function resolveTemplate(
@@ -230,21 +299,64 @@ export function resolveTemplate(
   values: ReadonlyMap<string, ResolvedRuntimeValue>,
   context: RunTemplateContext,
 ): string {
-  return template.replace(/\{\{([^{}]+)\}\}/gu, (_match, raw: string) => {
-    const expression = raw.trim();
-    if (expression === 'run.id') return context.runId;
-    if (expression === 'run.shortId') return context.shortId;
-    if (expression === 'timestamp') return context.timestamp;
-    if (expression === 'unique.email') return context.uniqueEmail;
-    if (expression === 'unique.name') return context.uniqueName;
-    if (expression === 'unique.phone') return context.uniquePhone;
-    if (expression === 'unique.text') return context.uniqueText;
-    if (expression.startsWith('var.')) {
-      const value = values.get(expression.slice(4));
-      if (value !== undefined) return value.value;
+  return resolveTemplateValue(template, values, context).value;
+}
+
+export function resolveTemplateValue(
+  template: string,
+  values: ReadonlyMap<string, ResolvedRuntimeValue>,
+  context: RunTemplateContext,
+): ResolvedRuntimeValue {
+  const sources = new Set<string>();
+  const value = template.replace(
+    /\{\{([^{}]+)\}\}/gu,
+    (_match, raw: string) => {
+      const expression = raw.trim();
+      if (expression === 'run.id') return context.runId;
+      if (expression === 'run.shortId') return context.shortId;
+      if (expression === 'timestamp') return context.timestamp;
+      if (expression === 'unique.email') return context.uniqueEmail;
+      if (expression === 'unique.name') return context.uniqueName;
+      if (expression === 'unique.phone') return context.uniquePhone;
+      if (expression === 'unique.text') return context.uniqueText;
+      if (expression.startsWith('var.')) {
+        const name = expression.slice(4);
+        const resolved = values.get(name);
+        if (resolved !== undefined) {
+          if (resolved.sensitive) {
+            if (resolved.sources.length === 0) sources.add(name);
+            for (const source of resolved.sources) sources.add(source);
+          }
+          return resolved.value;
+        }
+      }
+      throw new InvalidTemplateError(expression);
+    },
+  );
+  return {
+    value,
+    sensitive: sources.size > 0,
+    sources: [...sources].sort(),
+  };
+}
+
+export function redactSensitiveText(
+  text: string,
+  runtime: ResolvedRuntime,
+): string {
+  let redacted = text;
+  const sensitiveValues = [...runtime.values.values()]
+    .filter((resolved) => resolved.sensitive && resolved.value !== '')
+    .map((resolved) => resolved.value)
+    .sort((left, right) => right.length - left.length);
+  for (const value of sensitiveValues) {
+    redacted = redacted.replaceAll(value, '[REDACTED]');
+    const encoded = encodeURIComponent(value);
+    if (encoded !== value) {
+      redacted = redacted.replaceAll(encoded, '[REDACTED]');
     }
-    throw new InvalidTemplateError(expression);
-  });
+  }
+  return redacted;
 }
 
 export function resolveHook(
@@ -333,4 +445,10 @@ function expandTemplateDependencies(
       pending.push(dependency);
     }
   }
+}
+
+function mergeSources(
+  ...sourceGroups: readonly (readonly string[])[]
+): readonly string[] {
+  return [...new Set(sourceGroups.flat())].sort();
 }
