@@ -27,6 +27,15 @@ before/after hooks, request discovery, immutable external Impatient User
 versions, external runs, assertions, events, and screenshots. External
 execution is currently synchronous over REST and has no SSE or stop endpoint.
 
+Request discovery returns a server-owned deterministic ranking with stable
+candidate IDs, scores, classifications, confidence, reasons, and one of
+`recommended`, `review`, `ambiguous`, or `no_candidate`. Similar plausible
+mutations are never silently selected. Experiment versions persist bounded
+selection provenance, including confirmed recommendations and manual overrides,
+without request/response bodies, headers, cookies, auth state, or runtime
+secrets. See
+[`docs/architecture/request-recommendation.md`](../../docs/architecture/request-recommendation.md).
+
 Runtime resolution carries a sensitivity taint and source set with every value.
 Direct secrets, explicitly sensitive journey/assertion values, mixed templates,
 and transitive variable dependencies remain sensitive. Only untainted resolved
@@ -47,5 +56,5 @@ allows only the GET, POST, and OPTIONS methods plus Content-Type and Last-Event-
 headers needed by the dashboard and SSE reconnect path.
 
 There is no failed-versus-fixed comparison, report export, Playwright export,
-external SSE, queue, Redis, WebSocket support, or server-owned request
-recommendation contract. Current Guided request ranking remains in the dashboard.
+external SSE, queue, Redis, or WebSocket support. Automatic assertion
+recommendation and result diagnosis remain dashboard-owned.

@@ -37,11 +37,14 @@ The sample runner and external journey workflow intentionally use different
 server read models. The seeded sample is not exposed as a user-recorded journey
 and no fake recording metadata is created for it.
 
-Guided Test currently uses dashboard-side request ranking and assertion
-generation. There is no server-owned recommendation contract with confidence,
-ambiguity handling, or persisted selection provenance. There is also no
-failed-versus-fixed comparison, report export, Playwright export, external SSE,
-or failure injector beyond repeated click/submit behavior.
+Guided Test consumes server-ranked request candidates and preselects only a
+high-confidence recommendation. Review and ambiguous outcomes require explicit
+selection; no-candidate results do not fabricate a matcher. Advanced mode shows
+server score, rank, classification, confidence, and reasons and can persist a
+manual override. The dashboard still owns the current recipe-specific assertion
+generation and deterministic result diagnosis. There is no failed-versus-fixed
+comparison, report export, Playwright export, external SSE, or failure injector
+beyond repeated click/submit behavior.
 
 Run dashboard checks with:
 

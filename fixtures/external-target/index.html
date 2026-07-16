@@ -90,6 +90,7 @@
     <script>
       const parameters = new URLSearchParams(window.location.search);
       const mode = parameters.get('mode') === 'fixed' ? 'fixed' : 'vulnerable';
+      const requestShape = parameters.get('requestShape') ?? 'single';
       const requiresAuthentication = parameters.get('auth') === 'required';
       let signedIn = !requiresAuthentication;
       let localCreatedCount = 0;
@@ -140,13 +141,38 @@
           mode,
         };
         try {
-          const response = await fetch('/api/profile', {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(body),
-          });
+          if (requestShape === 'none') {
+            document.querySelector('#created-count').textContent =
+              'No business request was sent.';
+            form.hidden = true;
+            document.querySelector('#complete').hidden = false;
+            return;
+          }
+          const requests = [
+            fetch('/api/profile', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(body),
+            }),
+          ];
+          if (requestShape === 'ambiguous') {
+            requests.push(
+              fetch('/api/invitations', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify(body),
+              }),
+            );
+          }
+          const [response] = await Promise.all(requests);
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          if (requestShape === 'single') {
+            await fetch('/api/profile', {
+              credentials: 'same-origin',
+            });
+          }
           const payload = await response.json();
           document.querySelector('#created-count').textContent =
             `Created records: ${payload.createdCount}`;

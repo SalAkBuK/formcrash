@@ -45,6 +45,7 @@ interface ExperimentRow {
   readonly configurationJson: string;
   readonly journeySnapshotJson: string;
   readonly assertionsSnapshotJson: string;
+  readonly requestSelectionProvenanceJson: string | null;
   readonly createdAt: string;
 }
 
@@ -198,8 +199,9 @@ export class ExternalExperimentRepository {
           .prepare(
             `INSERT INTO external_experiment_versions
               (id, experiment_id, version, configuration_json,
-               journey_snapshot_json, assertions_snapshot_json, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+               journey_snapshot_json, assertions_snapshot_json,
+               request_selection_provenance_json, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             id,
@@ -208,6 +210,9 @@ export class ExternalExperimentRepository {
             JSON.stringify(configuration),
             JSON.stringify(journeySnapshot),
             JSON.stringify(request.assertions),
+            request.requestSelectionProvenance === null
+              ? null
+              : JSON.stringify(request.requestSelectionProvenance),
             now,
           );
         const created = this.getVersion(id);
@@ -720,6 +725,7 @@ function experimentSelect(suffix: string): string {
                  ev.version, ev.configuration_json AS configurationJson,
                  ev.journey_snapshot_json AS journeySnapshotJson,
                  ev.assertions_snapshot_json AS assertionsSnapshotJson,
+                 ev.request_selection_provenance_json AS requestSelectionProvenanceJson,
                  ev.created_at AS createdAt
             FROM external_experiment_versions ev
             JOIN external_experiments e ON e.id = ev.experiment_id
@@ -741,6 +747,10 @@ function mapExperiment(row: ExperimentRow): ExternalExperimentVersion {
     version: row.version,
     ...configuration,
     assertions: parseJson(row.assertionsSnapshotJson),
+    requestSelectionProvenance:
+      row.requestSelectionProvenanceJson === null
+        ? null
+        : parseJson(row.requestSelectionProvenanceJson),
     journeySnapshot: persistedJourneySchema.parse(
       parseJson(row.journeySnapshotJson),
     ),

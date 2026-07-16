@@ -3,14 +3,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import type {
   CreateExternalExperimentRequest,
-  DiscoveredRequest,
   EphemeralRuntimeValues,
   ExternalAssertion,
   ExternalRunDetail,
   PersistedJourney,
   Project,
   ProjectExecutionSettings,
+  RankedRequestCandidate,
   RecordedJourneyStep,
+  RequestDiscoveryResult,
 } from '@formcrash/contracts';
 
 import {
@@ -27,7 +28,14 @@ import {
 import { guidedStepValueOverrides } from '../models/guided-values';
 import { assessJourneyReadiness } from '../models/journey-readiness';
 import { journeyRuntimeRequirements } from '../models/journey-runtime';
+import {
+  initialCandidateIndex,
+  matcherForCandidate,
+  selectionProvenance,
+} from '../models/request-selection';
 import { ExternalRunResult } from './external-run-result';
+
+const noCandidates: readonly RankedRequestCandidate[] = [];
 
 interface Props {
   readonly project: Project;
@@ -50,8 +58,8 @@ export function GuidedTestPanel({
     {},
   );
   const [productionConfirmed, setProductionConfirmed] = useState(false);
-  const [candidates, setCandidates] = useState<readonly DiscoveredRequest[]>(
-    [],
+  const [discovery, setDiscovery] = useState<RequestDiscoveryResult | null>(
+    null,
   );
   const [candidateIndex, setCandidateIndex] = useState(-1);
   const [recipeId, setRecipeId] = useState<GuidedRecipeId>('duplicate_action');
@@ -76,6 +84,7 @@ export function GuidedTestPanel({
   const runtimeRequirements =
     journey === null ? [] : journeyRuntimeRequirements(journey, settings);
   const recipe = guidedRecipe(recipeId);
+  const candidates = discovery?.candidates ?? noCandidates;
   const selectedCandidate = candidates[candidateIndex] ?? null;
   const assertions = useMemo(
     () =>
@@ -124,7 +133,7 @@ export function GuidedTestPanel({
   }, [compatibleSteps, journey, targetStepId]);
 
   useEffect(() => {
-    setCandidates([]);
+    setDiscovery(null);
     setCandidateIndex(-1);
     setResult(null);
     setError(null);
@@ -155,17 +164,8 @@ export function GuidedTestPanel({
           stepValueOverrides,
         },
       );
-      const recommendedIndex = recommendCandidateIndex(
-        discovered.candidates,
-        targetStep,
-      );
-      setCandidates(discovered.candidates);
-      setCandidateIndex(recommendedIndex);
-      if (recommendedIndex < 0) {
-        setError(
-          'No browser request was detected for this action. Confirm the form is valid, then retry or use Advanced mode.',
-        );
-      }
+      setDiscovery(discovered);
+      setCandidateIndex(initialCandidateIndex(discovered));
     } catch (reason: unknown) {
       setError(messageOf(reason));
     } finally {
@@ -186,15 +186,15 @@ export function GuidedTestPanel({
         targetStepId: targetStep.id,
         triggerCount: recipe.triggerCount,
         intervalMs: recipe.intervalMs,
-        networkMatcher: {
-          method: selectedCandidate.method,
-          pathname: selectedCandidate.pathname,
-          host: new URL(selectedCandidate.origin).host,
-        },
+        networkMatcher: matcherForCandidate(selectedCandidate),
         assertions: [...assertions],
         continueAfterTarget: false,
         guided: true,
         normalizeJourney: true,
+        requestSelectionProvenance:
+          discovery === null
+            ? null
+            : selectionProvenance(discovery, selectedCandidate),
         stepValueOverrides,
       };
       const version = await createExternalExperiment(journey.id, input);
@@ -539,7 +539,7 @@ export function GuidedTestPanel({
               >
                 {busy === 'analyze'
                   ? 'Analyzing action…'
-                  : candidates.length > 0
+                  : discovery !== null
                     ? 'Analyze again'
                     : 'Analyze action'}
               </button>
@@ -551,7 +551,7 @@ export function GuidedTestPanel({
         )}
       </div>
 
-      {candidates.length > 0 ? (
+      {discovery !== null ? (
         <div className="panel guided-section">
           <div className="section-heading-row">
             <div>
@@ -559,25 +559,28 @@ export function GuidedTestPanel({
               <h3>Review FormCrash’s recommendation</h3>
             </div>
             <span className="status-badge">
-              {selectedCandidate === null
-                ? 'Request required'
-                : candidateConfidence(selectedCandidate)}
+              {recommendationOutcomeLabel(discovery)}
             </span>
           </div>
 
-          <div className="guided-candidate-list">
-            {candidates.map((candidate, index) => {
-              const recommended =
-                index === recommendCandidateIndex(candidates, targetStep);
-              return (
+          <p className="technical-note">
+            {discovery.recommendation.explanation}
+          </p>
+
+          {candidates.length > 0 ? (
+            <div className="guided-candidate-list">
+              {candidates.map((candidate, index) => (
                 <label
                   className={`guided-candidate ${
                     candidateIndex === index ? 'guided-candidate-selected' : ''
                   }`}
-                  key={`${candidate.method}-${candidate.origin}-${candidate.pathname}-${index}`}
+                  key={candidate.candidateId}
                 >
                   <input
                     checked={candidateIndex === index}
+                    disabled={
+                      discovery.recommendation.outcome === 'no_candidate'
+                    }
                     name="guided-candidate"
                     onChange={() => setCandidateIndex(index)}
                     type="radio"
@@ -585,7 +588,7 @@ export function GuidedTestPanel({
                   <span>
                     <strong>
                       {requestKind(candidate)}
-                      {recommended ? ' — Recommended' : ''}
+                      {candidate.recommended ? ' — Recommended' : ''}
                     </strong>
                     <code>
                       {candidate.method} {candidate.pathname}
@@ -595,11 +598,46 @@ export function GuidedTestPanel({
                       {candidate.occurrences} occurrence(s) ·{' '}
                       {new URL(candidate.origin).host}
                     </small>
+                    <small>{basicCandidateReasons(candidate)}</small>
                   </span>
                 </label>
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="empty-state">
+              <h4>No suitable request was observed</h4>
+              <p>
+                Check that the target action passed validation and caused the
+                intended operation. Interface-only assertions remain available
+                in Advanced mode.
+              </p>
+              <button
+                className="button button-secondary button-compact"
+                onClick={onOpenAdvanced}
+                type="button"
+              >
+                Open Advanced mode
+              </button>
+            </div>
+          )}
+          {discovery.recommendation.outcome === 'no_candidate' &&
+          candidates.length > 0 ? (
+            <div className="empty-state">
+              <h4>No request can be selected safely</h4>
+              <p>
+                The observed traffic was classified as static, analytics, or
+                background activity. Interface-only assertions remain available
+                in Advanced mode.
+              </p>
+              <button
+                className="button button-secondary button-compact"
+                onClick={onOpenAdvanced}
+                type="button"
+              >
+                Open Advanced mode
+              </button>
+            </div>
+          ) : null}
 
           {selectedCandidate !== null &&
           !isMutationMethod(selectedCandidate.method) ? (
@@ -678,7 +716,9 @@ export function GuidedTestPanel({
                 >
                   {busy === 'run'
                     ? 'Saving and running…'
-                    : 'Save and run recommended test'}
+                    : selectedCandidate.recommended
+                      ? 'Save and run recommended test'
+                      : 'Save and run selected test'}
                 </button>
                 <button
                   className="button button-secondary"
@@ -716,7 +756,7 @@ export function GuidedTestPanel({
             <button
               className="button button-secondary"
               onClick={() => {
-                setCandidates([]);
+                setDiscovery(null);
                 setCandidateIndex(-1);
                 setResult(null);
                 setError(null);
@@ -780,45 +820,6 @@ function recommendTargetStep(
   );
 }
 
-function recommendCandidateIndex(
-  candidates: readonly DiscoveredRequest[],
-  targetStep: RecordedJourneyStep | null,
-): number {
-  if (candidates.length === 0) return -1;
-  let bestIndex = 0;
-  let bestScore = Number.NEGATIVE_INFINITY;
-  for (const [index, candidate] of candidates.entries()) {
-    const score = scoreCandidate(candidate, targetStep);
-    if (score > bestScore) {
-      bestScore = score;
-      bestIndex = index;
-    }
-  }
-  return bestIndex;
-}
-
-function scoreCandidate(
-  candidate: DiscoveredRequest,
-  targetStep: RecordedJourneyStep | null,
-): number {
-  let score = isMutationMethod(candidate.method) ? 100 : 0;
-  if (
-    candidate.status !== null &&
-    candidate.status >= 200 &&
-    candidate.status < 400
-  ) {
-    score += 20;
-  }
-  if (candidate.occurrences === 1) score += 5;
-  const targetPath =
-    targetStep === null ? '' : new URL(targetStep.url).pathname.toLowerCase();
-  const candidatePath = candidate.pathname.toLowerCase();
-  for (const token of targetPath.split('/').filter((item) => item.length > 2)) {
-    if (candidatePath.includes(token)) score += 8;
-  }
-  return score - candidate.relativeTimestampMs / 100_000;
-}
-
 function assertionExplanation(assertion: ExternalAssertion): string {
   switch (assertion.type) {
     case 'network_request_max':
@@ -861,16 +862,45 @@ function analyzeJourney(
   };
 }
 
-function requestKind(candidate: DiscoveredRequest): string {
-  return isMutationMethod(candidate.method)
-    ? 'Likely create or update request'
-    : 'Read-only or background request';
+function requestKind(candidate: RankedRequestCandidate): string {
+  switch (candidate.classification) {
+    case 'likely_business_mutation':
+      return candidate.method === 'POST'
+        ? 'Likely create request'
+        : 'Possible related update';
+    case 'background_refresh':
+      return 'Background list refresh';
+    case 'analytics':
+      return 'Analytics request';
+    case 'static_asset':
+      return 'Static asset';
+    case 'other':
+      return 'Other related request';
+  }
 }
 
-function candidateConfidence(candidate: DiscoveredRequest): string {
-  return isMutationMethod(candidate.method)
-    ? 'High-confidence request'
-    : 'Review request';
+function recommendationOutcomeLabel(discovery: RequestDiscoveryResult): string {
+  switch (discovery.recommendation.outcome) {
+    case 'recommended':
+      return 'High confidence';
+    case 'review':
+      return 'Review required';
+    case 'ambiguous':
+      return 'Ambiguous requests';
+    case 'no_candidate':
+      return 'No suitable request';
+  }
+}
+
+function basicCandidateReasons(candidate: RankedRequestCandidate): string {
+  const limiting = candidate.reasons.filter((reason) => reason.scoreImpact < 0);
+  const supporting = candidate.reasons.filter(
+    (reason) => reason.scoreImpact > 0,
+  );
+  return [...limiting, ...supporting]
+    .slice(0, 2)
+    .map((reason) => reason.label)
+    .join(' ');
 }
 
 function isMutationMethod(method: string): boolean {

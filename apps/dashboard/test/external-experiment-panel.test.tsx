@@ -2,6 +2,8 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { CreateExternalExperimentRequest } from '@formcrash/contracts';
+
 import { ExternalExperimentPanel } from '../src/features/projects/components/external-experiment-panel';
 
 const mocks = vi.hoisted(() => ({
@@ -144,6 +146,7 @@ const version = {
   ],
   continueAfterTarget: false,
   guided: false,
+  requestSelectionProvenance: null,
   journeySnapshot: journey,
   createdAt: '2026-07-16T00:00:00.000Z',
 };
@@ -161,26 +164,72 @@ beforeEach(() => {
     offset: 0,
   });
   mocks.discoverRequests.mockResolvedValue({
+    discoveryId: '11111111-2222-4333-8444-555555555555',
+    discoveredAt: '2026-07-16T00:00:00.000Z',
     journeyId: journey.id,
     targetStepId: 'submit-profile',
     candidates: [
       {
+        candidateId: 'request-111111111111111111111111',
+        rank: 2,
+        score: 33,
+        classification: 'background_refresh',
+        confidence: 'review',
+        recommended: false,
+        reasons: [
+          {
+            code: 'read_only_method',
+            label: 'GET is normally read-only.',
+            scoreImpact: -25,
+          },
+          {
+            code: 'background_refresh',
+            label: 'Request resembles a list refresh.',
+            scoreImpact: -30,
+          },
+        ],
         method: 'GET',
         pathname: '/api/profile',
         origin: 'http://localhost:4300',
         status: 200,
+        failed: false,
         relativeTimestampMs: 2,
         occurrences: 1,
       },
       {
+        candidateId: 'request-222222222222222222222222',
+        rank: 1,
+        score: 108,
+        classification: 'likely_business_mutation',
+        confidence: 'high',
+        recommended: true,
+        reasons: [
+          {
+            code: 'mutation_method',
+            label: 'POST can change server state.',
+            scoreImpact: 50,
+          },
+          {
+            code: 'same_origin',
+            label: 'Request uses the target application origin.',
+            scoreImpact: 20,
+          },
+        ],
         method: 'POST',
         pathname: '/api/profile',
         origin: 'http://localhost:4300',
         status: 201,
+        failed: false,
         relativeTimestampMs: 4,
         occurrences: 1,
       },
     ],
+    recommendation: {
+      outcome: 'recommended',
+      recommendedCandidateId: 'request-222222222222222222222222',
+      explanation:
+        'FormCrash found one same-origin successful state-changing request with a clear evidence lead.',
+    },
   });
   mocks.createExternalExperiment.mockResolvedValue(version);
   const runResult = {
@@ -310,7 +359,7 @@ describe('external experiment dashboard workflow', () => {
       ),
     );
     expect(
-      await screen.findByText('Likely create or update request — Recommended'),
+      await screen.findByText('Likely create request — Recommended'),
     ).toBeVisible();
     expect(screen.getByText('POST /api/profile')).toBeVisible();
     expect(
@@ -368,6 +417,15 @@ describe('external experiment dashboard workflow', () => {
         }),
       ),
     );
+    expect(lastCreatedExperiment()).toMatchObject({
+      requestSelectionProvenance: {
+        selectionMode: 'confirmed_recommendation',
+        discoveryId: '11111111-2222-4333-8444-555555555555',
+        discoveryOutcome: 'recommended',
+        selectedCandidateId: 'request-222222222222222222222222',
+        userOverrodeRecommendation: false,
+      },
+    });
     expect(mocks.runExternalExperiment).toHaveBeenCalledWith(
       'version-1',
       {
@@ -417,7 +475,7 @@ describe('external experiment dashboard workflow', () => {
     await user.click(screen.getByRole('button', { name: 'Discover requests' }));
     expect(
       await screen.findByRole('option', {
-        name: 'POST /api/profile — 201 · 1x',
+        name: 'POST /api/profile — 201 · 1x · score 108',
       }),
     ).toBeVisible();
     await user.selectOptions(
@@ -484,4 +542,205 @@ describe('external experiment dashboard workflow', () => {
       true,
     );
   });
+
+  it('requires an explicit Guided choice when the server reports ambiguous mutations', async () => {
+    mocks.discoverRequests.mockResolvedValueOnce({
+      discoveryId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+      discoveredAt: '2026-07-16T00:00:00.000Z',
+      journeyId: journey.id,
+      targetStepId: 'submit-profile',
+      candidates: [
+        {
+          candidateId: 'request-aaaaaaaaaaaaaaaaaaaaaaaa',
+          rank: 1,
+          score: 108,
+          classification: 'likely_business_mutation',
+          confidence: 'ambiguous',
+          recommended: false,
+          reasons: [
+            {
+              code: 'mutation_method',
+              label: 'POST can change server state.',
+              scoreImpact: 50,
+            },
+          ],
+          method: 'POST',
+          pathname: '/api/profile',
+          origin: 'http://localhost:4300',
+          status: 201,
+          failed: false,
+          relativeTimestampMs: 4,
+          occurrences: 1,
+        },
+        {
+          candidateId: 'request-bbbbbbbbbbbbbbbbbbbbbbbb',
+          rank: 2,
+          score: 104,
+          classification: 'likely_business_mutation',
+          confidence: 'ambiguous',
+          recommended: false,
+          reasons: [
+            {
+              code: 'mutation_method',
+              label: 'POST can change server state.',
+              scoreImpact: 50,
+            },
+          ],
+          method: 'POST',
+          pathname: '/api/invitations',
+          origin: 'http://localhost:4300',
+          status: 201,
+          failed: false,
+          relativeTimestampMs: 5,
+          occurrences: 1,
+        },
+      ],
+      recommendation: {
+        outcome: 'ambiguous',
+        recommendedCandidateId: null,
+        explanation:
+          'Multiple plausible state-changing requests have similar evidence.',
+      },
+    });
+    const user = userEvent.setup();
+    render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
+
+    await user.type(
+      await screen.findByLabelText('Guided SECRET_TOKEN'),
+      'runtime-only',
+    );
+    await user.click(screen.getByRole('button', { name: 'Analyze action' }));
+
+    expect(await screen.findByText('Ambiguous requests')).toBeVisible();
+    const profile = screen.getByRole('radio', {
+      name: /POST \/api\/profile/,
+    });
+    const invitation = screen.getByRole('radio', {
+      name: /POST \/api\/invitations/,
+    });
+    expect(profile).not.toBeChecked();
+    expect(invitation).not.toBeChecked();
+    expect(
+      screen.queryByRole('button', {
+        name: /Save and run/,
+      }),
+    ).not.toBeInTheDocument();
+
+    await user.click(invitation);
+    await user.click(
+      screen.getByRole('button', { name: 'Save and run selected test' }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.createExternalExperiment).toHaveBeenCalledWith(
+        journey.id,
+        expect.objectContaining({
+          networkMatcher: {
+            method: 'POST',
+            pathname: '/api/invitations',
+            host: 'localhost:4300',
+          },
+        }),
+      ),
+    );
+    expect(lastCreatedExperiment()).toMatchObject({
+      requestSelectionProvenance: {
+        selectionMode: 'manual_override',
+        discoveryOutcome: 'ambiguous',
+        selectedCandidateId: 'request-bbbbbbbbbbbbbbbbbbbbbbbb',
+        recommendedMatcher: null,
+        userOverrodeRecommendation: false,
+      },
+    });
+  });
+
+  it('does not fabricate a Guided request matcher when discovery has no suitable candidate', async () => {
+    mocks.discoverRequests.mockResolvedValueOnce({
+      discoveryId: 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff',
+      discoveredAt: '2026-07-16T00:00:00.000Z',
+      journeyId: journey.id,
+      targetStepId: 'submit-profile',
+      candidates: [],
+      recommendation: {
+        outcome: 'no_candidate',
+        recommendedCandidateId: null,
+        explanation: 'No browser request was observed after the action.',
+      },
+    });
+    const user = userEvent.setup();
+    render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
+
+    await user.type(
+      await screen.findByLabelText('Guided SECRET_TOKEN'),
+      'runtime-only',
+    );
+    await user.click(screen.getByRole('button', { name: 'Analyze action' }));
+
+    expect(
+      await screen.findByRole('heading', {
+        name: 'No suitable request was observed',
+      }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: /Save and run/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getAllByRole('button', { name: 'Open Advanced mode' }).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it('persists an Advanced manual override instead of silently keeping the recommendation', async () => {
+    const user = userEvent.setup();
+    render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
+
+    await user.click(
+      await screen.findByRole('tab', {
+        name: /Advanced/,
+      }),
+    );
+    await user.type(screen.getByLabelText('SECRET_TOKEN'), 'runtime-only');
+    await user.click(screen.getByRole('button', { name: 'Discover requests' }));
+    await user.selectOptions(
+      await screen.findByLabelText('Required network matcher'),
+      '0',
+    );
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Save immutable experiment version',
+      }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.createExternalExperiment).toHaveBeenCalledWith(
+        journey.id,
+        expect.objectContaining({
+          networkMatcher: {
+            method: 'GET',
+            pathname: '/api/profile',
+            host: 'localhost:4300',
+          },
+        }),
+      ),
+    );
+    expect(lastCreatedExperiment()).toMatchObject({
+      requestSelectionProvenance: {
+        selectionMode: 'manual_override',
+        discoveryOutcome: 'recommended',
+        selectedCandidateId: 'request-111111111111111111111111',
+        recommendedMatcher: {
+          method: 'POST',
+          pathname: '/api/profile',
+          host: 'localhost:4300',
+        },
+        userOverrodeRecommendation: true,
+      },
+    });
+  });
 });
+
+function lastCreatedExperiment(): CreateExternalExperimentRequest {
+  const input = mocks.createExternalExperiment.mock.calls.at(-1)?.[1] as
+    CreateExternalExperimentRequest | undefined;
+  if (input === undefined) throw new Error('No experiment was created.');
+  return input;
+}

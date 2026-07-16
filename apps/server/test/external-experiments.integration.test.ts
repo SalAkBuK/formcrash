@@ -103,6 +103,13 @@ async function handleFixtureRequest(
     await new Promise((resolve) => setTimeout(resolve, 40));
     return sendJson(response, 201, { createdCount });
   }
+  if (url.pathname === '/api/invitations' && request.method === 'POST') {
+    if (!hasAuthentication(request))
+      return sendJson(response, 401, { error: 'unauthorized' });
+    await readBody(request);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    return sendJson(response, 201, { invited: true });
+  }
   response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
   response.end(fixtureHtml);
 }
@@ -153,7 +160,58 @@ describe.sequential('external impatient-user experiments in Chromium', () => {
         }),
       ]),
     );
-  }, 30_000);
+    expect(discovery.recommendation.outcome).toBe('recommended');
+    expect(discovery.recommendation.recommendedCandidateId).toBe(
+      discovery.candidates[0]?.candidateId,
+    );
+    expect(
+      discovery.candidates.find((candidate) => candidate.recommended),
+    ).toMatchObject({
+      method: 'POST',
+      pathname: '/api/profile',
+      classification: 'likely_business_mutation',
+      confidence: 'high',
+      rank: 1,
+    });
+    expect(
+      discovery.candidates.find(
+        (candidate) =>
+          candidate.method === 'GET' && candidate.pathname === '/api/profile',
+      ),
+    ).toMatchObject({
+      classification: 'background_refresh',
+      recommended: false,
+    });
+  }, 45_000);
+
+  it('requires explicit selection for ambiguous mutations and fabricates no candidate when the action sends none', async () => {
+    const ambiguous = await configureScenario('vulnerable', 'ambiguous');
+    const ambiguousDiscovery = await discoverScenario(ambiguous);
+
+    expect(ambiguousDiscovery.recommendation).toMatchObject({
+      outcome: 'ambiguous',
+      recommendedCandidateId: null,
+    });
+    expect(
+      ambiguousDiscovery.candidates.filter(
+        (candidate) => candidate.classification === 'likely_business_mutation',
+      ),
+    ).toHaveLength(2);
+    expect(
+      ambiguousDiscovery.candidates.some((candidate) => candidate.recommended),
+    ).toBe(false);
+
+    const noRequest = await configureScenario('vulnerable', 'none');
+    const noRequestDiscovery = await discoverScenario(noRequest);
+
+    expect(noRequestDiscovery.recommendation).toMatchObject({
+      outcome: 'no_candidate',
+      recommendedCandidateId: null,
+    });
+    expect(
+      noRequestDiscovery.candidates.some((candidate) => candidate.recommended),
+    ).toBe(false);
+  }, 45_000);
 
   it('fails the vulnerable endpoint and passes the fixed endpoint with durable sanitized evidence', async () => {
     const vulnerable = projects
@@ -213,45 +271,52 @@ describe.sequential('external impatient-user experiments in Chromium', () => {
   }, 45_000);
 });
 
-async function configureScenario(mode: 'vulnerable' | 'fixed'): Promise<{
+type ConfiguredScenario = {
   readonly projectId: string;
   readonly journeyId: string;
   readonly targetStepId: string;
-}> {
+};
+
+async function configureScenario(
+  mode: 'vulnerable' | 'fixed',
+  requestShape: 'single' | 'ambiguous' | 'none' = 'single',
+): Promise<ConfiguredScenario> {
+  const scenarioName =
+    requestShape === 'single' ? mode : `${mode}-${requestShape}`;
   const project = projects.createProject({
-    name: `External ${mode}`,
-    targetUrl: `${fixtureUrl}/protected?auth=required&mode=${mode}`,
-    description: `${mode} authenticated fixture`,
+    name: `External ${scenarioName}`,
+    targetUrl: `${fixtureUrl}/protected?auth=required&mode=${mode}&requestShape=${requestShape}`,
+    description: `${scenarioName} authenticated fixture`,
   });
-  const targetStepId = `${mode}-submit`;
+  const targetStepId = `${scenarioName}-submit`;
   const journey = projects.saveJourney({
     projectId: project.id,
-    name: `${mode} authenticated profile`,
+    name: `${scenarioName} authenticated profile`,
     steps: [
       step(
         project.targetUrl,
-        `${mode}-name`,
+        `${scenarioName}-name`,
         'fill',
         { strategy: 'data-formcrash', value: 'display-name' },
         { kind: 'safe', value: 'Ada Lovelace' },
       ),
       step(
         project.targetUrl,
-        `${mode}-email`,
+        `${scenarioName}-email`,
         'fill',
         { strategy: 'data-testid', value: 'email' },
         { kind: 'safe', value: '{{var.CUSTOMER_EMAIL}}' },
       ),
       step(
         project.targetUrl,
-        `${mode}-run`,
+        `${scenarioName}-run`,
         'fill',
         { strategy: 'data-testid', value: 'run-id' },
         { kind: 'safe', value: '{{var.RUN_KEY}}' },
       ),
       step(
         project.targetUrl,
-        `${mode}-password`,
+        `${scenarioName}-password`,
         'fill',
         { strategy: 'id', value: 'password' },
         { kind: 'sensitive', variableName: 'SECRET_PASSWORD' },
@@ -329,6 +394,20 @@ async function configureScenario(mode: 'vulnerable' | 'fixed'): Promise<{
   return { projectId: project.id, journeyId: journey.id, targetStepId };
 }
 
+async function discoverScenario(configured: ConfiguredScenario) {
+  return new RequestDiscoveryService(
+    temporary.config,
+    projects,
+    settings,
+    new AuthStateStore(temporary.config.artifactRoot, settings),
+    new BrowserOwnership(),
+  ).discover({
+    journeyId: configured.journeyId,
+    targetStepId: configured.targetStepId,
+    variables: { SECRET_PASSWORD: 'RuntimePasswordOnly' },
+  });
+}
+
 function createVersion(journeyId: string) {
   const journey = projects.getJourney(journeyId);
   if (journey === null) throw new Error('Journey is missing.');
@@ -372,6 +451,7 @@ function createVersion(journeyId: string) {
         },
       ],
       continueAfterTarget: false,
+      requestSelectionProvenance: null,
     },
   });
 }

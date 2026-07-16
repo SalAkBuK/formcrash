@@ -9,6 +9,13 @@
 > The homepage/sample-entry and transitive-secret findings below describe the
 > pre-patch state. Current behavior is documented in the root, dashboard, server,
 > and architecture READMEs.
+>
+> **Post-audit note, Chunk 1:** Server-owned request recommendation was
+> implemented after this point-in-time audit. Discovery now returns deterministic
+> ranked candidates with confidence, reasons, explicit ambiguity/no-candidate
+> outcomes, and experiment versions can persist bounded selection provenance.
+> Historical findings below about dashboard-owned scoring remain unchanged as
+> audit evidence.
 
 ## Evidence legend
 

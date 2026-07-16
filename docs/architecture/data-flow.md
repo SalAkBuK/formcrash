@@ -63,3 +63,30 @@ sequenceDiagram
 
 REST is used for finite commands and queries. SSE is used for one-way ordered
 progress because the MVP does not require bidirectional socket messaging.
+
+## External request recommendation flow
+
+```mermaid
+sequenceDiagram
+  actor Developer
+  participant Dashboard
+  participant Server as Control server
+  participant Browser as Chromium
+  participant Target as Controlled target
+  participant Store as SQLite
+
+  Developer->>Dashboard: Analyze selected action
+  Dashboard->>Server: POST request discovery
+  Server->>Browser: Replay prior steps and execute target once
+  Browser->>Target: Normal browser requests
+  Server->>Server: Group and score bounded request metadata
+  Server-->>Dashboard: Ranked candidates plus recommendation outcome
+  Developer->>Dashboard: Confirm or override selection
+  Dashboard->>Server: Create immutable experiment version
+  Server->>Store: Persist matcher and selection provenance
+```
+
+Discovery never executes the target more than once per request. The dashboard
+auto-selects only a server-declared high-confidence recommendation. Review and
+ambiguous outcomes require an explicit choice, and no-candidate results do not
+invent a matcher.

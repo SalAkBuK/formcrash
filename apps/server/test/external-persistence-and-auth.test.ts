@@ -205,6 +205,116 @@ describe('external experiment version persistence', () => {
       version.journeySnapshot.recordingMetadata.normalizationRule,
     ).toContain('Guided Test');
   });
+
+  it('persists automatic, confirmed, and manual request-selection provenance with backward-compatible defaults', () => {
+    const project = projects.createProject({
+      name: 'Recommendation provenance project',
+      targetUrl: 'https://example.test',
+      description: '',
+    });
+    const journey = projects.saveJourney({
+      projectId: project.id,
+      name: 'Create tenant',
+      steps: [step('submit-step', 'submit')],
+      metadata: {
+        recordingSessionId: null,
+        recordedAt: new Date(0).toISOString(),
+        warningCount: 0,
+        normalizationRule: 'test',
+      },
+    });
+    const legacy = experiments.createVersion({
+      projectId: project.id,
+      journey,
+      request: request('submit-step', 'Legacy version'),
+    });
+    const recommendedMatcher = {
+      method: 'POST',
+      pathname: '/api/tenants',
+      host: 'example.test',
+    };
+    const selectedMatcher = {
+      method: 'POST',
+      pathname: '/api/invitations',
+      host: 'example.test',
+    };
+    const automatic = experiments.createVersion({
+      projectId: project.id,
+      journey,
+      request: {
+        ...request('submit-step', 'Automatic selection'),
+        networkMatcher: recommendedMatcher,
+        requestSelectionProvenance: provenance(
+          'automatic',
+          recommendedMatcher,
+          recommendedMatcher,
+          false,
+        ),
+      },
+    });
+    const confirmed = experiments.createVersion({
+      projectId: project.id,
+      journey,
+      request: {
+        ...request('submit-step', 'Confirmed selection'),
+        networkMatcher: recommendedMatcher,
+        requestSelectionProvenance: provenance(
+          'confirmed_recommendation',
+          recommendedMatcher,
+          recommendedMatcher,
+          false,
+        ),
+      },
+    });
+    const overridden = experiments.createVersion({
+      projectId: project.id,
+      journey,
+      request: {
+        ...request('submit-step', 'Manual override'),
+        networkMatcher: selectedMatcher,
+        requestSelectionProvenance: provenance(
+          'manual_override',
+          recommendedMatcher,
+          selectedMatcher,
+          true,
+        ),
+      },
+    });
+    const reloaded = new ExternalExperimentRepository(database.connection);
+
+    expect(
+      reloaded.getVersion(legacy.id)?.requestSelectionProvenance,
+    ).toBeNull();
+    expect(
+      reloaded.getVersion(automatic.id)?.requestSelectionProvenance,
+    ).toMatchObject({
+      selectionMode: 'automatic',
+      userOverrodeRecommendation: false,
+    });
+    expect(
+      reloaded.getVersion(confirmed.id)?.requestSelectionProvenance,
+    ).toMatchObject({
+      selectionMode: 'confirmed_recommendation',
+      userOverrodeRecommendation: false,
+    });
+    expect(
+      reloaded.getVersion(overridden.id)?.requestSelectionProvenance,
+    ).toMatchObject({
+      selectionMode: 'manual_override',
+      recommendedMatcher,
+      selectedMatcher,
+      userOverrodeRecommendation: true,
+    });
+    const persisted = database.connection
+      .prepare(
+        `SELECT request_selection_provenance_json AS provenance
+           FROM external_experiment_versions WHERE id = ?`,
+      )
+      .get(overridden.id) as { readonly provenance: string };
+    expect(persisted.provenance).not.toContain('body');
+    expect(persisted.provenance).not.toContain('authorization');
+    expect(persisted.provenance).not.toContain('secret-value');
+  });
 });
 
 describe('browser workload exclusion', () => {
@@ -276,5 +386,41 @@ function request(targetStepId: string, name: string) {
       },
     ],
     continueAfterTarget: false,
+    requestSelectionProvenance: null,
+  };
+}
+
+function provenance(
+  selectionMode: 'automatic' | 'confirmed_recommendation' | 'manual_override',
+  recommendedMatcher: {
+    readonly method: string;
+    readonly pathname: string;
+    readonly host: string | null;
+  },
+  selectedMatcher: {
+    readonly method: string;
+    readonly pathname: string;
+    readonly host: string | null;
+  },
+  userOverrodeRecommendation: boolean,
+) {
+  return {
+    selectionMode,
+    discoveryId: '11111111-2222-4333-8444-555555555555',
+    discoveredAt: '2026-07-16T00:00:00.000Z',
+    discoveryOutcome: 'recommended' as const,
+    selectedCandidateId: 'request-1234567890abcdef12345678',
+    selectedCandidateScore: 108,
+    selectedCandidateConfidence: 'high' as const,
+    recommendationReasons: [
+      {
+        code: 'mutation_method' as const,
+        label: 'POST can change server state.',
+        scoreImpact: 50,
+      },
+    ],
+    recommendedMatcher,
+    selectedMatcher,
+    userOverrodeRecommendation,
   };
 }
