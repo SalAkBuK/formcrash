@@ -123,3 +123,9 @@ persists ephemeral secret values or raw HTTP hook headers/bodies.
 - Passwords and manually sensitive inputs are stored as masked markers or named
   references to fake test inputs. Raw sensitive values do not enter events,
   snapshots, logs, screenshots where practical, or exports.
+- Runtime values carry transitive sensitivity and source metadata in memory.
+  Mixed templates and multi-stage values inherit sensitivity from every secret
+  dependency. Only untainted values cross the persisted safe-snapshot boundary.
+- The seeded sample journey and user-recorded external journeys share the
+  `journeys` table but not the same public read model. Generic journey APIs
+  require recording metadata; sample APIs load the explicit seeded definition.

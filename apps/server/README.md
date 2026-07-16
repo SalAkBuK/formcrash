@@ -19,6 +19,26 @@ the SSE ID. `Last-Event-ID` resumes strictly after the acknowledged sequence.
 Terminal replay/live events close the stream; disconnect and shutdown remove all
 process-local subscriptions. SQLite remains the durable source of truth.
 
+## External project lifecycle
+
+The server also owns persisted projects, recording sessions, user-recorded
+journey versions, saved authentication state, runtime declarations, bounded
+before/after hooks, request discovery, immutable external Impatient User
+versions, external runs, assertions, events, and screenshots. External
+execution is currently synchronous over REST and has no SSE or stop endpoint.
+
+Runtime resolution carries a sensitivity taint and source set with every value.
+Direct secrets, explicitly sensitive journey/assertion values, mixed templates,
+and transitive variable dependencies remain sensitive. Only untainted resolved
+values can enter `external_runs.resolved_values_json`; resolved hook headers and
+bodies remain ephemeral and hook events contain only method, origin, path,
+status, and generic failure text.
+
+The seeded Sample Checkout definitions remain separate from generic
+user-recorded journey reads. Sample execution uses the sample-run APIs and
+runner; external journey APIs intentionally return only journeys with recording
+metadata.
+
 ## Local CORS
 
 `FORMCRASH_DASHBOARD_ORIGINS` is a comma-separated list of absolute dashboard
@@ -26,5 +46,6 @@ origins and defaults to `http://localhost:3000`. Wildcards are invalid. The serv
 allows only the GET, POST, and OPTIONS methods plus Content-Type and Last-Event-ID
 headers needed by the dashboard and SSE reconnect path.
 
-The current routes support only the bundled sample. There is no arbitrary target,
-recording, comparison, authentication, queue, Redis, or WebSocket support.
+There is no failed-versus-fixed comparison, report export, Playwright export,
+external SSE, queue, Redis, WebSocket support, or server-owned request
+recommendation contract. Current Guided request ranking remains in the dashboard.

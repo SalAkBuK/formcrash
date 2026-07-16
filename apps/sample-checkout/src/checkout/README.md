@@ -142,9 +142,10 @@ Invoke-RestMethod http://localhost:4200/api/test-support/state
 Both responses identify the same order; state shows two attempts and one order.
 Automated tests additionally prove the truly concurrent `Promise.all` case.
 
-## Intentionally deferred
+## Ownership boundary
 
 This target application intentionally owns none of the Playwright, persisted run,
-SSE, screenshot, or result workflow now implemented by the separate FormCrash
-server/dashboard. Comparison, reports, recording, and external targets remain
-later roadmap work.
+SSE, screenshot, project recording, or result workflow implemented by the
+separate FormCrash server/dashboard. The dashboard homepage uses this checkout as
+the guaranteed demonstration; external targets are configured separately through
+`/projects`. Failed-versus-fixed comparison and reports remain deferred.

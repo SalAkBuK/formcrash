@@ -5,6 +5,11 @@
 **Scope:** Repository and local runtime as inspected on the audit date  
 **Change policy:** Report only; no product behavior, roadmap checkbox, commit, or push changes
 
+> **Post-audit note:** Patch 0 was implemented after this point-in-time audit.
+> The homepage/sample-entry and transitive-secret findings below describe the
+> pre-patch state. Current behavior is documented in the root, dashboard, server,
+> and architecture READMEs.
+
 ## Evidence legend
 
 - **Observed in code** — confirmed by current implementation, schema, migration, or route code.

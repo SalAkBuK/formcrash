@@ -10,10 +10,10 @@ Priority 0 is the duplicate checkout-submission demonstration described there.
 
 ## Repository boundaries
 
-- `apps/dashboard` — Next.js interface for starting the bundled experiment,
-  following live progress, and inspecting persisted run evidence. It communicates
-  with the control server over REST/SSE and never launches browsers or reads the
-  FormCrash database.
+- `apps/dashboard` — Next.js interface whose homepage starts the guaranteed
+  bundled experiment and whose `/projects` route records and tests controlled
+  external applications. It communicates with the control server over REST/SSE
+  and never launches browsers or reads the FormCrash database.
 - `apps/server` — Fastify modular monolith that owns health, the hardcoded
   sample-run API, Playwright execution, assertions, SQLite metadata, and
   filesystem screenshot evidence, and persisted SSE replay/live publication.
@@ -88,8 +88,12 @@ example, a declaration named `API_TOKEN` reads `FORMCRASH_VAR_API_TOKEN`.
 Values may instead be supplied ephemerally when replaying or running an external
 experiment. Only variables referenced by the selected journey, hooks, or
 assertions are required; unused declarations do not block execution. Secret
-values are resolved in memory only and are excluded from API responses, events,
-persisted snapshots, errors, and masked screenshots.
+values and every value transitively derived from them are resolved in memory
+only. Sensitivity follows variable dependencies and mixed templates, so derived
+values are excluded from API responses, events, persisted safe snapshots,
+errors, and screenshot metadata. Browser fields populated from
+sensitive-derived values are added to the existing locator-based screenshot
+mask list; masking still depends on the target locator remaining available.
 
 Startup creates the configured directories, applies ordered migrations, and
 idempotently seeds the bundled Sample Checkout project, journey, Impatient User
@@ -141,11 +145,18 @@ for the selector contract and repeatable vulnerable/fixed verification steps.
 
 ## Dashboard-driven Priority 0 browser run
 
-Open `http://localhost:3000`, select **Vulnerable** or **Fixed**, and choose the
-prominent start action. The dashboard navigates only after the server returns a
-durable run ID, follows persisted and live SSE events, then reloads the
+Open `http://localhost:3000`, select **Vulnerable** or **Fixed**, and choose
+**Run Sample Experiment**. The dashboard navigates only after the server returns
+a durable run ID, follows persisted and live SSE events, then reloads the
 authoritative result. Recent runs survive server/dashboard restarts and open at
 stable URLs such as `http://localhost:3000/runs/<run-id>`.
+
+The bundled sample is the guaranteed judge/demo path. **Test Your Application**
+opens `http://localhost:3000/projects`, the reusable external-project workflow
+for recording, Guided Test, Advanced configuration, and persisted external
+results. The sample seed and recorded external journeys intentionally use
+different current read models; the sample is not disguised as a recorded
+journey.
 
 The result separates request attempts from created order records, shows the
 recovery assertion, presents the ordered timeline, and loads screenshot bytes
@@ -334,6 +345,8 @@ outcomes, matched network evidence, warnings, and screenshots; the dashboard
 lists prior runs, displays request statuses and screenshot previews, and exposes
 deliberate cleanup controls. The recorder and runner are verified against both the
 separate `fixtures/external-target` application and the bundled sample checkout.
+Request ranking and recommendation are currently dashboard-owned heuristics, not
+a server-owned recommendation contract with persisted confidence or provenance.
 It does **not** implement failed-versus-fixed comparison, reports, exports, other
 failure injectors, CI orchestration, or cloud execution.
 
