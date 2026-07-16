@@ -1,15 +1,26 @@
 import {
+  approveCriticalActionRequestSchema,
+  approveOutcomeCheckRequestSchema,
   createProjectRequestSchema,
+  criticalActionResponseSchema,
   deleteProjectResponseSchema,
   deleteResourceResponseSchema,
   journeyListSchema,
+  outcomeCaptureSessionSchema,
+  outcomeCheckListSchema,
+  outcomeCheckSchema,
   projectListSchema,
   runExternalExperimentRequestSchema,
   saveRecordedJourneyRequestSchema,
+  startOutcomeCaptureRequestSchema,
 } from '@formcrash/contracts';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 
 import type { ProjectJourneyRepository } from '../../persistence/project-journey-repository.js';
+import {
+  CriticalActionLockedError,
+  type OutcomeCheckRepository,
+} from '../../persistence/outcome-check-repository.js';
 import type { ExternalExperimentRepository } from '../../persistence/external-experiment-repository.js';
 import type { ScreenshotStore } from '../../artifacts/screenshot-store.js';
 import type { AuthStateStore } from '../../runner/external/auth-session.js';
@@ -23,6 +34,11 @@ import { ProductionConfirmationRequiredError } from '../../runner/external/produ
 import { SavedAuthenticationExpiredError } from '../../runner/external/authentication-redirect.js';
 import { RecordingNotActiveError } from '../../runner/recording/recording-manager.js';
 import type { RecordingManager } from '../../runner/recording/recording-manager.js';
+import {
+  OutcomeCaptureNotActiveError,
+  OutcomeCaptureStaleError,
+  type OutcomeCaptureManager,
+} from '../../runner/outcomes/outcome-capture-manager.js';
 
 interface ProjectParams {
   readonly projectId: string;
@@ -39,6 +55,10 @@ interface JourneyParams {
   readonly journeyId: string;
 }
 
+interface OutcomeCaptureParams {
+  readonly captureId: string;
+}
+
 export function registerProjectRoutes(
   app: FastifyInstance,
   repository: ProjectJourneyRepository,
@@ -48,6 +68,10 @@ export function registerProjectRoutes(
     readonly authStore: AuthStateStore;
     readonly experiments: ExternalExperimentRepository;
     readonly screenshots: ScreenshotStore;
+  },
+  outcome: {
+    readonly repository: OutcomeCheckRepository;
+    readonly captures: OutcomeCaptureManager;
   },
 ): void {
   app.get('/api/projects', async (_request, reply) =>
@@ -216,6 +240,218 @@ export function registerProjectRoutes(
       return journey === null
         ? notFound(reply, 'Journey')
         : reply.send(journey);
+    },
+  );
+
+  app.get<{ Params: JourneyParams }>(
+    '/api/journeys/:journeyId/critical-action',
+    async (request, reply) => {
+      if (repository.getJourney(request.params.journeyId) === null) {
+        return notFound(reply, 'Journey');
+      }
+      return reply.send(
+        criticalActionResponseSchema.parse({
+          criticalAction: outcome.repository.getCriticalAction(
+            request.params.journeyId,
+          ),
+        }),
+      );
+    },
+  );
+
+  app.put<{ Params: JourneyParams }>(
+    '/api/journeys/:journeyId/critical-action',
+    async (request, reply) => {
+      const journey = repository.getJourney(request.params.journeyId);
+      if (journey === null) return notFound(reply, 'Journey');
+      const parsed = approveCriticalActionRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return invalid(
+          reply,
+          'INVALID_CRITICAL_ACTION',
+          parsed.error.issues[0]?.message,
+        );
+      }
+      try {
+        return reply.send(
+          outcome.repository.approveCriticalAction(journey, parsed.data),
+        );
+      } catch (error: unknown) {
+        if (error instanceof CriticalActionLockedError) {
+          return reply.status(409).send({
+            error: {
+              code: 'CRITICAL_ACTION_LOCKED',
+              message: error.message,
+            },
+          });
+        }
+        return invalid(
+          reply,
+          'INVALID_CRITICAL_ACTION',
+          error instanceof Error ? error.message : undefined,
+        );
+      }
+    },
+  );
+
+  app.get<{ Params: JourneyParams }>(
+    '/api/journeys/:journeyId/outcome-checks',
+    async (request, reply) => {
+      if (repository.getJourney(request.params.journeyId) === null) {
+        return notFound(reply, 'Journey');
+      }
+      return reply.send(
+        outcomeCheckListSchema.parse({
+          items: outcome.repository.listOutcomeChecks(request.params.journeyId),
+        }),
+      );
+    },
+  );
+
+  app.post<{ Params: JourneyParams }>(
+    '/api/journeys/:journeyId/outcome-captures',
+    async (request, reply) => {
+      if (repository.getJourney(request.params.journeyId) === null) {
+        return notFound(reply, 'Journey');
+      }
+      const parsed = startOutcomeCaptureRequestSchema.safeParse(
+        request.body ?? {},
+      );
+      if (!parsed.success) {
+        return invalid(
+          reply,
+          'INVALID_OUTCOME_CAPTURE',
+          parsed.error.issues[0]?.message,
+        );
+      }
+      try {
+        return reply
+          .status(201)
+          .send(
+            outcomeCaptureSessionSchema.parse(
+              await outcome.captures.start(
+                request.params.journeyId,
+                parsed.data.variables,
+                parsed.data.confirmProduction,
+              ),
+            ),
+          );
+      } catch (error: unknown) {
+        if (error instanceof BrowserOwnershipConflictError) {
+          return conflict(reply, error.message);
+        }
+        if (error instanceof MissingRuntimeVariablesError) {
+          return reply.status(400).send({
+            error: {
+              code: 'MISSING_RUNTIME_VARIABLES',
+              message: 'Required runtime variables were not provided.',
+              missingVariables: error.missingVariables,
+            },
+          });
+        }
+        if (error instanceof InvalidTemplateError) {
+          return invalid(reply, 'INVALID_TEMPLATE', error.message);
+        }
+        if (error instanceof ProductionConfirmationRequiredError) {
+          return reply.status(409).send({
+            error: {
+              code: 'PRODUCTION_CONFIRMATION_REQUIRED',
+              message: error.message,
+            },
+          });
+        }
+        if (error instanceof SavedAuthenticationExpiredError) {
+          return reply.status(409).send({
+            error: {
+              code: 'AUTHENTICATION_REQUIRED',
+              message: error.message,
+            },
+          });
+        }
+        return invalid(
+          reply,
+          'INVALID_OUTCOME_CAPTURE',
+          error instanceof Error ? error.message : undefined,
+        );
+      }
+    },
+  );
+
+  app.get<{ Params: OutcomeCaptureParams }>(
+    '/api/outcome-captures/:captureId',
+    async (request, reply) => {
+      const capture = await outcome.captures.get(request.params.captureId);
+      return capture === null
+        ? notFound(reply, 'Outcome capture session')
+        : reply.send(outcomeCaptureSessionSchema.parse(capture));
+    },
+  );
+
+  app.post<{ Params: OutcomeCaptureParams }>(
+    '/api/outcome-captures/:captureId/outcome-checks',
+    async (request, reply) => {
+      const parsed = approveOutcomeCheckRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return invalid(
+          reply,
+          'INVALID_OUTCOME_CHECK',
+          parsed.error.issues[0]?.message,
+        );
+      }
+      try {
+        return reply
+          .status(201)
+          .send(
+            outcomeCheckSchema.parse(
+              await outcome.captures.approve(
+                request.params.captureId,
+                parsed.data,
+              ),
+            ),
+          );
+      } catch (error: unknown) {
+        if (error instanceof OutcomeCaptureStaleError) {
+          return reply.status(409).send({
+            error: { code: 'OUTCOME_CAPTURE_STALE', message: error.message },
+          });
+        }
+        if (error instanceof OutcomeCaptureNotActiveError) {
+          return reply.status(409).send({
+            error: {
+              code: 'OUTCOME_CAPTURE_NOT_ACTIVE',
+              message: error.message,
+            },
+          });
+        }
+        return invalid(
+          reply,
+          'INVALID_OUTCOME_CHECK',
+          error instanceof Error ? error.message : undefined,
+        );
+      }
+    },
+  );
+
+  app.post<{ Params: OutcomeCaptureParams }>(
+    '/api/outcome-captures/:captureId/close',
+    async (request, reply) => {
+      try {
+        return reply.send(
+          outcomeCaptureSessionSchema.parse(
+            await outcome.captures.close(request.params.captureId),
+          ),
+        );
+      } catch (error: unknown) {
+        if (error instanceof OutcomeCaptureNotActiveError) {
+          return reply.status(409).send({
+            error: {
+              code: 'OUTCOME_CAPTURE_NOT_ACTIVE',
+              message: error.message,
+            },
+          });
+        }
+        throw error;
+      }
     },
   );
 

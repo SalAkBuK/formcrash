@@ -125,6 +125,98 @@ select {
   gap: 0.7rem;
 }
 
+.outcome-definition {
+  width: 100%;
+  margin-top: 0.85rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.75rem;
+}
+
+.outcome-definition > summary {
+  color: var(--blue);
+  font-weight: 750;
+}
+
+.outcome-definition-body,
+.outcome-definition-step,
+.outcome-check-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.outcome-definition-body {
+  margin-top: 1rem;
+}
+
+.outcome-definition-step {
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 0.9rem;
+  background: #0b1012;
+}
+
+.outcome-definition-step p {
+  margin-bottom: 0;
+}
+
+.outcome-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.outcome-form-grid label,
+.outcome-definition-step > label {
+  display: grid;
+  gap: 0.4rem;
+  color: #d9e0e2;
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.outcome-form-grid input,
+.outcome-form-grid select,
+.outcome-definition-step > label select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 0.55rem;
+  padding: 0.65rem;
+  background: #090d0f;
+  color: var(--text);
+}
+
+.captured-outcome-preview {
+  display: grid;
+  gap: 0.35rem;
+  border: 1px solid #3f7549;
+  border-radius: 0.65rem;
+  padding: 0.75rem;
+  background: var(--safe-soft);
+}
+
+.captured-outcome-preview span,
+.captured-outcome-preview small {
+  color: var(--muted);
+}
+
+.outcome-check-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.outcome-check-list li {
+  display: grid;
+  gap: 0.25rem;
+  border-left: 3px solid var(--safe);
+  padding: 0.5rem 0.7rem;
+  background: rgb(126 212 138 / 6%);
+}
+
+.outcome-check-list span {
+  white-space: normal;
+}
+
 .project-card {
   display: flex;
   align-items: center;
@@ -1321,6 +1413,7 @@ select {
   .settings-grid,
   .builder-grid,
   .runtime-value-grid,
+  .outcome-form-grid,
   .project-grid {
     grid-template-columns: 1fr;
   }

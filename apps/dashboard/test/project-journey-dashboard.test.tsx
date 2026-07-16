@@ -6,20 +6,27 @@ import { ProjectJourneyDashboard } from '../src/features/projects/components/pro
 import { FormCrashApiError } from '../src/lib/api-client';
 
 const mocks = vi.hoisted(() => ({
+  approveCriticalAction: vi.fn(),
+  approveOutcomeCheck: vi.fn(),
+  closeOutcomeCapture: vi.fn(),
   confirmAuthenticationCapture: vi.fn(),
   createProject: vi.fn(),
   deleteJourney: vi.fn(),
   deleteProject: vi.fn(),
+  getCriticalAction: vi.fn(),
+  getOutcomeCapture: vi.fn(),
   getProjectSettings: vi.fn(),
   listExternalExperiments: vi.fn(),
   listExternalRuns: vi.fn(),
   getRecording: vi.fn(),
   listJourneys: vi.fn(),
+  listOutcomeChecks: vi.fn(),
   listProjects: vi.fn(),
   replayJourney: vi.fn(),
   saveJourney: vi.fn(),
   startRecording: vi.fn(),
   startAuthenticationCapture: vi.fn(),
+  startOutcomeCapture: vi.fn(),
   stopRecording: vi.fn(),
 }));
 
@@ -125,6 +132,8 @@ beforeEach(() => {
     offset: 0,
   });
   mocks.listProjects.mockResolvedValue([project]);
+  mocks.getCriticalAction.mockResolvedValue(null);
+  mocks.listOutcomeChecks.mockResolvedValue([]);
   mocks.deleteProject.mockResolvedValue(undefined);
   mocks.listJourneys.mockResolvedValue([]);
   mocks.startRecording.mockResolvedValue(recording);
@@ -324,6 +333,126 @@ describe('external project journey workflow', () => {
     );
     expect(
       await screen.findByText(/Authentication was recaptured/),
+    ).toBeVisible();
+  });
+
+  it('approves a Critical Action and saves a generated exactly-once Outcome Check', async () => {
+    const user = userEvent.setup();
+    const submitStep = {
+      ...step,
+      id: 'submit-profile',
+      name: 'Save profile',
+      type: 'submit' as const,
+      timestamp: 200,
+      locator: { strategy: 'data-testid' as const, value: 'profile-form' },
+      fingerprint: {
+        ...step.fingerprint,
+        tagName: 'form',
+        inputType: null,
+        dataFormcrash: null,
+        dataTestId: 'profile-form',
+        id: 'profile-form',
+        role: 'form',
+        accessibleName: 'Profile form',
+        name: 'profile-form',
+        label: null,
+        cssPath: '#profile-form',
+      },
+      value: null,
+    };
+    const outcomeJourney = {
+      ...journey,
+      steps: [step, submitStep],
+    };
+    const action = {
+      id: 'critical-action-1',
+      journeyId: journey.id,
+      stepId: submitStep.id,
+      label: 'Save profile',
+      createdAt: '2026-07-17T00:00:00.000Z',
+      updatedAt: '2026-07-17T00:00:00.000Z',
+    };
+    const target = {
+      locator: {
+        strategy: 'data-formcrash' as const,
+        value: 'profile-result',
+      },
+      fingerprint: {
+        tagName: 'li',
+        dataFormcrash: 'profile-result',
+        dataTestId: null,
+        id: null,
+        role: 'listitem',
+        accessibleName: 'Profile {{unique.email}}',
+        name: null,
+        cssPath: 'li',
+      },
+      preview: 'Profile {{unique.email}}',
+      reliability: 'high' as const,
+      warnings: [],
+      generatedBindings: [
+        {
+          expression: 'unique.email' as const,
+          template: '{{unique.email}}' as const,
+          label: 'Generated unique email',
+        },
+      ],
+    };
+    const capture = {
+      id: 'outcome-capture-1',
+      journeyId: journey.id,
+      criticalActionId: action.id,
+      status: 'selection_ready' as const,
+      selectedTarget: target,
+      selectionWarnings: [],
+      finalPathname: '/complete',
+      errorMessage: null,
+      startedAt: '2026-07-17T00:01:00.000Z',
+      expiresAt: '2026-07-17T00:11:00.000Z',
+      completedAt: null,
+    };
+    const savedCheck = {
+      id: 'outcome-check-1',
+      journeyId: journey.id,
+      criticalActionId: action.id,
+      type: 'matching_item_appears_exactly_once' as const,
+      description: 'Exactly one matching item should appear.',
+      target,
+      binding: target.generatedBindings[0]!,
+      createdAt: '2026-07-17T00:02:00.000Z',
+    };
+    mocks.listJourneys.mockResolvedValue([outcomeJourney]);
+    mocks.approveCriticalAction.mockResolvedValue(action);
+    mocks.startOutcomeCapture.mockResolvedValue(capture);
+    mocks.getOutcomeCapture.mockResolvedValue(capture);
+    mocks.approveOutcomeCheck.mockResolvedValue(savedCheck);
+
+    render(<ProjectJourneyDashboard />);
+    await user.click(
+      await screen.findByText('Define Critical Action and Outcome Checks'),
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Approve Critical Action' }),
+    );
+    expect(mocks.approveCriticalAction).toHaveBeenCalledWith(
+      journey.id,
+      submitStep.id,
+      'Save profile',
+    );
+
+    await user.click(
+      screen.getByRole('button', { name: 'Start outcome baseline' }),
+    );
+    expect(await screen.findByText('Profile {{unique.email}}')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Approve check' }));
+
+    expect(mocks.approveOutcomeCheck).toHaveBeenCalledWith(capture.id, {
+      type: 'matching_item_appears_exactly_once',
+      description: 'Exactly one matching item should appear.',
+      bindingExpression: 'unique.email',
+    });
+    expect(
+      await screen.findByText('matching item appears exactly once'),
     ).toBeVisible();
   });
 });

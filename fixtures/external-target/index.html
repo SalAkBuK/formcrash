@@ -76,6 +76,7 @@
       <section id="complete" class="complete" hidden>
         <strong>Profile fixture completed.</strong>
         <span id="created-count"></span>
+        <ul id="profile-results" data-testid="profile-results"></ul>
       </section>
       <section id="request-error" class="auth-panel error" hidden></section>
 
@@ -180,6 +181,7 @@
           const payload = await response.json();
           document.querySelector('#created-count').textContent =
             `Created records: ${payload.createdCount}`;
+          appendResult(body.email);
           form.hidden = true;
           document.querySelector('#complete').hidden = false;
         } catch (error) {
@@ -188,6 +190,7 @@
             localCreatedCount += 1;
             document.querySelector('#created-count').textContent =
               `Created records: ${localCreatedCount}`;
+            appendResult(body.email);
             form.hidden = true;
             document.querySelector('#complete').hidden = false;
           } else {
@@ -202,6 +205,13 @@
           }
         }
       });
+
+      function appendResult(email) {
+        const item = document.createElement('li');
+        item.setAttribute('data-formcrash', 'profile-result');
+        item.textContent = `Profile ${email}`;
+        document.querySelector('#profile-results').append(item);
+      }
 
       const root = document
         .querySelector('#shadow-host')

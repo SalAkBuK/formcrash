@@ -1,14 +1,21 @@
 import type {
   Browser,
   BrowserContext,
+  ElementHandle,
   Frame,
   Locator,
   Page,
   Request,
 } from 'playwright';
 import { chromium } from 'playwright';
+import { z } from 'zod';
 
-import type { ReplayLocator, TargetFingerprint } from '@formcrash/contracts';
+import {
+  replayLocatorSchema,
+  type OutcomeElementFingerprint,
+  type ReplayLocator,
+  type TargetFingerprint,
+} from '@formcrash/contracts';
 
 export interface RawRecordingEvent {
   readonly kind: 'click' | 'fill' | 'checkbox' | 'radio' | 'select' | 'submit';
@@ -84,9 +91,25 @@ export interface ReplayBrowserSession {
     type: 'click' | 'submit',
   ): Promise<ReplayLocator | null>;
   inspectSemanticElements?(): Promise<readonly SemanticElementSnapshot[]>;
+  enterOutcomeSelection?(
+    onSelection: (selection: OutcomeElementSelection) => void,
+  ): Promise<void>;
   currentUrl(): string;
   settle(milliseconds: number): Promise<void>;
   close(): Promise<void>;
+}
+
+export interface OutcomeElementSelection {
+  readonly topFrame: boolean;
+  readonly frameUrl: string;
+  readonly locator: ReplayLocator | null;
+  readonly fingerprint: OutcomeElementFingerprint;
+  readonly inputType: string | null;
+  readonly markedSensitive: boolean;
+  readonly text: string;
+  readonly value: string | null;
+  readonly matchCount: number;
+  readonly visibleMatchCount: number;
 }
 
 export interface SemanticElementSnapshot {
@@ -128,6 +151,7 @@ class PlaywrightExternalSession
     null;
   private requestSequence = 0;
   private screenshotMasks: readonly ReplayLocator[] = [];
+  private outcomeSelectionActive = false;
 
   constructor(
     private readonly browser: Browser,
@@ -356,43 +380,57 @@ class PlaywrightExternalSession
     const seen = new Set<string>();
     for (let index = 0; index < count; index += 1) {
       const candidate = candidates.nth(index);
-      const classification = await candidate.evaluate((element) => {
-        const tokens = [
-          element.getAttribute('data-formcrash'),
-          element.getAttribute('data-testid'),
-          element.id,
-          element.className,
-          element.getAttribute('role'),
-          element.getAttribute('aria-live'),
-        ]
-          .join(' ')
-          .toLowerCase();
-        if (
-          /(?:success|complete|completed|confirmation|confirmed|saved)/u.test(
-            tokens,
-          )
-        )
-          return 'success' as const;
-        if (/(?:error|invalid|failure|failed|danger|alert)/u.test(tokens))
-          return 'error' as const;
-        if (/(?:loading|pending|progress|spinner|busy)/u.test(tokens))
-          return 'loading' as const;
-        return null;
-      });
-      if (classification === null) continue;
-      const locator = await stableLocatorFor(candidate);
-      if (locator === null) continue;
-      const key = JSON.stringify(locator);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      snapshots.push({
-        locator,
-        classification,
-        visible: await candidate.isVisible(),
-      });
-      if (snapshots.length >= 20) break;
+      const handle = await candidate
+        .elementHandle({ timeout: Math.min(100, this.timeoutMs) })
+        .catch(() => null);
+      if (handle === null) {
+        const currentCount = await candidates.count().catch(() => 0);
+        if (index >= currentCount) break;
+        continue;
+      }
+      try {
+        const classification = await handle
+          .evaluate(classifySemanticElement)
+          .catch(() => null);
+        if (classification === null) continue;
+        const locator = await stableLocatorForElement(handle).catch(() => null);
+        if (locator === null) continue;
+        const key = JSON.stringify(locator);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        snapshots.push({
+          locator,
+          classification,
+          visible: await handle.isVisible().catch(() => false),
+        });
+        if (snapshots.length >= 20) break;
+      } finally {
+        await handle.dispose().catch(() => undefined);
+      }
     }
     return snapshots;
+  }
+
+  async enterOutcomeSelection(
+    onSelection: (selection: OutcomeElementSelection) => void,
+  ): Promise<void> {
+    if (this.outcomeSelectionActive) return;
+    this.outcomeSelectionActive = true;
+    await this.context.exposeBinding(
+      '__formcrashSelectOutcome',
+      ({ frame }, payload: unknown) => {
+        void this.handleOutcomeSelection(frame, payload, onSelection).catch(
+          () => undefined,
+        );
+      },
+    );
+    const script = buildOutcomeSelectorInitScript();
+    await this.context.addInitScript({ content: script });
+    await Promise.all(
+      this.page.frames().map(async (frame) => {
+        await frame.evaluate(script).catch(() => undefined);
+      }),
+    );
   }
 
   currentUrl(): string {
@@ -430,38 +468,110 @@ class PlaywrightExternalSession
       );
     }
   }
+
+  private async handleOutcomeSelection(
+    frame: Frame,
+    payload: unknown,
+    onSelection: (selection: OutcomeElementSelection) => void,
+  ): Promise<void> {
+    const parsed = rawOutcomeSelectionSchema.safeParse(payload);
+    if (!parsed.success) return;
+    const locatorResult = replayLocatorSchema.safeParse(parsed.data.locator);
+    const locator = locatorResult.success ? locatorResult.data : null;
+    let matchCount = 0;
+    let visibleMatchCount = 0;
+    if (locator !== null) {
+      const matches = resolveLocator(this.page, locator);
+      matchCount = await matches.count();
+      for (let index = 0; index < Math.min(matchCount, 100); index += 1) {
+        if (
+          await matches
+            .nth(index)
+            .isVisible()
+            .catch(() => false)
+        ) {
+          visibleMatchCount += 1;
+        }
+      }
+    }
+    onSelection({
+      topFrame: frame === this.page.mainFrame(),
+      frameUrl: frame.url(),
+      locator,
+      fingerprint: parsed.data.fingerprint,
+      inputType: parsed.data.inputType,
+      markedSensitive: parsed.data.markedSensitive,
+      text: parsed.data.text,
+      value: parsed.data.value,
+      matchCount,
+      visibleMatchCount,
+    });
+  }
 }
 
 async function stableLocatorFor(
   locator: Locator,
 ): Promise<ReplayLocator | null> {
-  return locator.evaluate((element) => {
-    const dataFormcrash = (element.getAttribute('data-formcrash') ?? '').trim();
-    if (dataFormcrash !== '' && dataFormcrash.length <= 160)
-      return {
-        strategy: 'data-formcrash' as const,
-        value: dataFormcrash,
-      };
-    const dataTestId = (element.getAttribute('data-testid') ?? '').trim();
-    if (dataTestId !== '' && dataTestId.length <= 160)
-      return { strategy: 'data-testid' as const, value: dataTestId };
-    if (
-      element.id !== '' &&
-      element.id.length <= 100 &&
-      !/\d{5,}/u.test(element.id) &&
-      !/^(react|radix|headlessui|:r|_r_)/iu.test(element.id)
-    )
-      return { strategy: 'id' as const, value: element.id };
-    const name = (element.getAttribute('name') ?? '').trim();
-    return name === '' || name.length > 160
-      ? null
-      : { strategy: 'name' as const, value: name };
-  });
+  return locator.evaluate(stableLocatorFromElement);
+}
+
+async function stableLocatorForElement(
+  element: ElementHandle<Element>,
+): Promise<ReplayLocator | null> {
+  return element.evaluate(stableLocatorFromElement);
+}
+
+function stableLocatorFromElement(element: Element): ReplayLocator | null {
+  const dataFormcrash = (element.getAttribute('data-formcrash') ?? '').trim();
+  if (dataFormcrash !== '' && dataFormcrash.length <= 160)
+    return {
+      strategy: 'data-formcrash' as const,
+      value: dataFormcrash,
+    };
+  const dataTestId = (element.getAttribute('data-testid') ?? '').trim();
+  if (dataTestId !== '' && dataTestId.length <= 160)
+    return { strategy: 'data-testid' as const, value: dataTestId };
+  if (
+    element.id !== '' &&
+    element.id.length <= 100 &&
+    !/\d{5,}/u.test(element.id) &&
+    !/^(react|radix|headlessui|:r|_r_)/iu.test(element.id)
+  )
+    return { strategy: 'id' as const, value: element.id };
+  const name = (element.getAttribute('name') ?? '').trim();
+  return name === '' || name.length > 160
+    ? null
+    : { strategy: 'name' as const, value: name };
+}
+
+function classifySemanticElement(
+  element: Element,
+): SemanticElementSnapshot['classification'] | null {
+  const tokens = [
+    element.getAttribute('data-formcrash'),
+    element.getAttribute('data-testid'),
+    element.id,
+    element.className,
+    element.getAttribute('role'),
+    element.getAttribute('aria-live'),
+  ]
+    .join(' ')
+    .toLowerCase();
+  if (
+    /(?:success|complete|completed|confirmation|confirmed|saved)/u.test(tokens)
+  )
+    return 'success';
+  if (/(?:error|invalid|failure|failed|danger|alert)/u.test(tokens))
+    return 'error';
+  if (/(?:loading|pending|progress|spinner|busy)/u.test(tokens))
+    return 'loading';
+  return null;
 }
 
 export class PlaywrightExternalBrowserOwner implements ExternalBrowserOwner {
   constructor(
     private readonly afterRecordingPageReady?: (page: Page) => Promise<void>,
+    private readonly onReplayPageCreated?: (page: Page) => void,
   ) {}
 
   async launchRecording(
@@ -544,6 +654,7 @@ export class PlaywrightExternalBrowserOwner implements ExternalBrowserOwner {
           : { storageState: options.storageStatePath },
       );
       const page = await context.newPage();
+      this.onReplayPageCreated?.(page);
       return new PlaywrightExternalSession(
         browser,
         context,
@@ -618,6 +729,180 @@ function resolveRoleTextFallback(
   return page.locator(selector).filter({
     hasText: new RegExp(`^\\s*${escapeRegularExpression(name)}\\s*$`, 'u'),
   });
+}
+
+const rawOutcomeSelectionSchema = z.object({
+  locator: z.unknown(),
+  fingerprint: z.object({
+    tagName: z.string().min(1).max(80),
+    dataFormcrash: z.string().max(160).nullable(),
+    dataTestId: z.string().max(160).nullable(),
+    id: z.string().max(160).nullable(),
+    role: z.string().max(80).nullable(),
+    accessibleName: z.string().max(240).nullable(),
+    name: z.string().max(160).nullable(),
+    cssPath: z.string().min(1).max(1_000),
+  }),
+  inputType: z.string().max(80).nullable(),
+  markedSensitive: z.boolean(),
+  text: z.string().max(1_000),
+  value: z.string().max(1_000).nullable(),
+});
+
+function buildOutcomeSelectorInitScript(): string {
+  return `(${installOutcomeSelector.toString()})();`;
+}
+
+function installOutcomeSelector(): void {
+  type Binding = (payload: unknown) => Promise<void>;
+  const bindings = window as typeof window & {
+    __formcrashSelectOutcome?: Binding;
+    __formcrashOutcomeSelectorReady?: boolean;
+  };
+  if (bindings.__formcrashOutcomeSelectorReady === true) return;
+  bindings.__formcrashOutcomeSelectorReady = true;
+
+  const clean = (
+    value: string | null | undefined,
+    maximum: number,
+  ): string | null => {
+    const normalized = value?.replace(/\s+/gu, ' ').trim() ?? '';
+    return normalized === '' ? null : normalized.slice(0, maximum);
+  };
+  const stableId = (value: string): boolean =>
+    value.length <= 100 &&
+    !/\d{5,}/u.test(value) &&
+    !/^(react|radix|headlessui|:r|_r_)/iu.test(value);
+  const cssPath = (element: Element): string => {
+    const parts: string[] = [];
+    let current: Element | null = element;
+    while (current !== null && current !== document.documentElement) {
+      let part = current.tagName.toLowerCase();
+      if (current.id !== '' && stableId(current.id)) {
+        part += `#${CSS.escape(current.id)}`;
+        parts.unshift(part);
+        break;
+      }
+      const parent: Element | null = current.parentElement;
+      if (parent !== null) {
+        const siblings = [...parent.children].filter(
+          (candidate) => candidate.tagName === current?.tagName,
+        );
+        if (siblings.length > 1) {
+          part += `:nth-of-type(${siblings.indexOf(current) + 1})`;
+        }
+      }
+      parts.unshift(part);
+      current = parent;
+    }
+    return (parts.join(' > ') || element.tagName.toLowerCase()).slice(0, 1_000);
+  };
+  const labelFor = (element: Element): string | null => {
+    if (!('labels' in element)) return null;
+    const labels = element.labels;
+    return labels instanceof NodeList
+      ? clean(labels.item(0)?.textContent, 240)
+      : null;
+  };
+  const roleFor = (element: Element): string | null => {
+    const explicit = clean(element.getAttribute('role'), 80);
+    if (explicit !== null) return explicit;
+    if (element instanceof HTMLButtonElement) return 'button';
+    if (element instanceof HTMLAnchorElement) return 'link';
+    if (element instanceof HTMLInputElement) return 'textbox';
+    if (element instanceof HTMLSelectElement) return 'combobox';
+    if (element instanceof HTMLTableRowElement) return 'row';
+    if (element instanceof HTMLLIElement) return 'listitem';
+    return null;
+  };
+  const accessibleNameFor = (
+    element: Element,
+    role: string | null,
+  ): string | null => {
+    const labelledBy = clean(element.getAttribute('aria-labelledby'), 240);
+    const labelledByText =
+      labelledBy === null
+        ? null
+        : clean(
+            labelledBy
+              .split(/\s+/u)
+              .map((id) => document.getElementById(id)?.textContent ?? '')
+              .join(' '),
+            240,
+          );
+    return (
+      clean(element.getAttribute('aria-label'), 240) ??
+      labelledByText ??
+      labelFor(element) ??
+      clean(element.getAttribute('title'), 240) ??
+      (role === 'row' || role === 'listitem'
+        ? clean(element.textContent, 240)
+        : null)
+    );
+  };
+  const describe = (element: Element) => {
+    const dataFormcrash = clean(element.getAttribute('data-formcrash'), 160);
+    const dataTestId = clean(element.getAttribute('data-testid'), 160);
+    const id = stableId(element.id) ? clean(element.id, 160) : null;
+    const name = clean(element.getAttribute('name'), 160);
+    const role = roleFor(element);
+    const accessibleName = accessibleNameFor(element, role);
+    const locator =
+      dataFormcrash !== null
+        ? { strategy: 'data-formcrash', value: dataFormcrash }
+        : dataTestId !== null
+          ? { strategy: 'data-testid', value: dataTestId }
+          : id !== null
+            ? { strategy: 'id', value: id }
+            : name !== null
+              ? { strategy: 'name', value: name }
+              : role !== null && accessibleName !== null
+                ? { strategy: 'role', role, name: accessibleName }
+                : { strategy: 'css', value: cssPath(element) };
+    return {
+      locator,
+      fingerprint: {
+        tagName: element.tagName.toLowerCase().slice(0, 80),
+        dataFormcrash,
+        dataTestId,
+        id,
+        role,
+        accessibleName,
+        name,
+        cssPath: cssPath(element),
+      },
+      inputType:
+        element instanceof HTMLInputElement ? clean(element.type, 80) : null,
+      markedSensitive:
+        element.getAttribute('data-formcrash-sensitive') === 'true',
+      text:
+        clean(
+          element instanceof HTMLInputElement ||
+            element instanceof HTMLTextAreaElement
+            ? element.value
+            : element.textContent,
+          1_000,
+        ) ?? '',
+      value:
+        element instanceof HTMLInputElement ||
+        element instanceof HTMLTextAreaElement ||
+        element instanceof HTMLSelectElement
+          ? clean(element.value, 1_000)
+          : null,
+    };
+  };
+  const select = (event: MouseEvent): void => {
+    const target = event.composedPath()[0];
+    if (!(target instanceof Element)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const selectable =
+      target.closest('[data-formcrash], [data-testid], [id], [name], [role]') ??
+      target;
+    void bindings.__formcrashSelectOutcome?.(describe(selectable));
+  };
+  document.addEventListener('click', select, true);
+  document.documentElement.style.cursor = 'crosshair';
 }
 
 export function buildBrowserRecorderInitScript(

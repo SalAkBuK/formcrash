@@ -33,6 +33,7 @@ describe('SQLite migrations and seeded definitions', () => {
       '0004_project_safety_and_cleanup.sql',
       '0005_request_selection_provenance.sql',
       '0006_assertion_selection_provenance.sql',
+      '0007_outcome_checks.sql',
     ]);
     expect(second).toEqual(first);
     expect(database.connection.pragma('foreign_keys', { simple: true })).toBe(

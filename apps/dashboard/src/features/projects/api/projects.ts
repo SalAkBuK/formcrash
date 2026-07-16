@@ -1,14 +1,23 @@
 import {
+  criticalActionSchema,
+  criticalActionResponseSchema,
   deleteProjectResponseSchema,
   deleteResourceResponseSchema,
   journeyListSchema,
+  outcomeCaptureSessionSchema,
+  outcomeCheckListSchema,
+  outcomeCheckSchema,
   persistedJourneySchema,
   projectListSchema,
   projectSchema,
   recordingSessionSchema,
   replayResultSchema,
+  type ApproveOutcomeCheckRequest,
+  type CriticalAction,
   type CreateProjectRequest,
   type EphemeralRuntimeValues,
+  type OutcomeCaptureSession,
+  type OutcomeCheck,
   type PersistedJourney,
   type Project,
   type RecordedJourneyStep,
@@ -119,4 +128,92 @@ export async function replayJourney(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ variables, confirmProduction }),
   });
+}
+
+export async function getCriticalAction(
+  journeyId: string,
+): Promise<CriticalAction | null> {
+  return (
+    await requestJson(
+      `/api/journeys/${journeyId}/critical-action`,
+      criticalActionResponseSchema,
+    )
+  ).criticalAction;
+}
+
+export async function approveCriticalAction(
+  journeyId: string,
+  stepId: string,
+  label: string,
+): Promise<CriticalAction> {
+  return requestJson(
+    `/api/journeys/${journeyId}/critical-action`,
+    criticalActionSchema,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stepId, label }),
+    },
+  );
+}
+
+export async function listOutcomeChecks(
+  journeyId: string,
+): Promise<readonly OutcomeCheck[]> {
+  return (
+    await requestJson(
+      `/api/journeys/${journeyId}/outcome-checks`,
+      outcomeCheckListSchema,
+    )
+  ).items;
+}
+
+export async function startOutcomeCapture(
+  journeyId: string,
+  variables: EphemeralRuntimeValues,
+  confirmProduction: boolean,
+): Promise<OutcomeCaptureSession> {
+  return requestJson(
+    `/api/journeys/${journeyId}/outcome-captures`,
+    outcomeCaptureSessionSchema,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ variables, confirmProduction }),
+    },
+  );
+}
+
+export async function getOutcomeCapture(
+  captureId: string,
+): Promise<OutcomeCaptureSession> {
+  return requestJson(
+    `/api/outcome-captures/${captureId}`,
+    outcomeCaptureSessionSchema,
+  );
+}
+
+export async function approveOutcomeCheck(
+  captureId: string,
+  input: ApproveOutcomeCheckRequest,
+): Promise<OutcomeCheck> {
+  return requestJson(
+    `/api/outcome-captures/${captureId}/outcome-checks`,
+    outcomeCheckSchema,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export async function closeOutcomeCapture(
+  captureId: string,
+): Promise<OutcomeCaptureSession> {
+  return requestJson(
+    `/api/outcome-captures/${captureId}/close`,
+    outcomeCaptureSessionSchema,
+    { method: 'POST' },
+  );
 }

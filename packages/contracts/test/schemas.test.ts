@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  approveOutcomeCheckRequestSchema,
   assertionResultStatusSchema,
+  capturedOutcomeTargetSchema,
   controlledTargetUrlSchema,
   createExternalExperimentRequestSchema,
   createProjectRequestSchema,
   experimentTypeSchema,
   journeyActionTypeSchema,
+  outcomeCheckSchema,
   requestDiscoveryResultSchema,
   runArtifactSchema,
   runEventEnvelopeSchema,
@@ -329,5 +332,81 @@ describe('foundational contracts', () => {
     });
 
     expect(result.success).toBe(false);
+  });
+
+  it('validates all three locked Outcome Check contracts', () => {
+    const target = capturedOutcomeTargetSchema.parse({
+      locator: { strategy: 'data-formcrash', value: 'tenant-row' },
+      fingerprint: {
+        tagName: 'li',
+        dataFormcrash: 'tenant-row',
+        dataTestId: null,
+        id: null,
+        role: 'listitem',
+        accessibleName: 'Tenant {{unique.email}}',
+        name: null,
+        cssPath: 'li',
+      },
+      preview: 'Tenant {{unique.email}}',
+      reliability: 'high',
+      warnings: [],
+      generatedBindings: [
+        {
+          expression: 'unique.email',
+          template: '{{unique.email}}',
+          label: 'Generated unique email',
+        },
+      ],
+    });
+    const common = {
+      journeyId: 'journey-1',
+      criticalActionId: 'critical-action-1',
+      createdAt: '2026-07-17T00:00:00.000Z',
+    };
+
+    expect(
+      outcomeCheckSchema.parse({
+        ...common,
+        id: 'visible-1',
+        type: 'visible_element_exists',
+        description: 'A tenant row appears.',
+        target,
+      }).type,
+    ).toBe('visible_element_exists');
+    expect(
+      outcomeCheckSchema.parse({
+        ...common,
+        id: 'matching-1',
+        type: 'matching_item_appears_exactly_once',
+        description: 'Exactly one tenant row appears.',
+        target,
+        binding: target.generatedBindings[0],
+      }).type,
+    ).toBe('matching_item_appears_exactly_once');
+    expect(
+      outcomeCheckSchema.parse({
+        ...common,
+        id: 'path-1',
+        type: 'final_pathname_matches',
+        description: 'The journey ends on tenants.',
+        expectedPathname: '/tenants',
+      }).type,
+    ).toBe('final_pathname_matches');
+  });
+
+  it('rejects an unsupported Outcome Check type and malformed binding', () => {
+    expect(
+      approveOutcomeCheckRequestSchema.safeParse({
+        type: 'database_record_exists',
+        description: 'A tenant exists.',
+      }).success,
+    ).toBe(false);
+    expect(
+      approveOutcomeCheckRequestSchema.safeParse({
+        type: 'matching_item_appears_exactly_once',
+        description: 'Exactly one tenant appears.',
+        bindingExpression: 'var.SECRET',
+      }).success,
+    ).toBe(false);
   });
 });

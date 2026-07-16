@@ -207,6 +207,157 @@ export const journeyListSchema = z.object({
   items: z.array(persistedJourneySchema),
 });
 
+export const criticalActionSchema = z.object({
+  id: z.string().min(1),
+  journeyId: z.string().min(1),
+  stepId: z.string().min(1),
+  label: z.string().trim().min(1).max(160),
+  createdAt: z.iso.datetime({ offset: true }),
+  updatedAt: z.iso.datetime({ offset: true }),
+});
+
+export const approveCriticalActionRequestSchema = z.object({
+  stepId: z.string().min(1),
+  label: criticalActionSchema.shape.label,
+});
+
+export const criticalActionResponseSchema = z.object({
+  criticalAction: criticalActionSchema.nullable(),
+});
+
+export const outcomeCheckTypeSchema = z.enum([
+  'visible_element_exists',
+  'matching_item_appears_exactly_once',
+  'final_pathname_matches',
+]);
+
+export const generatedValueExpressionSchema = z.enum([
+  'unique.email',
+  'unique.name',
+  'unique.phone',
+  'unique.text',
+]);
+
+export const generatedValueBindingSchema = z.object({
+  expression: generatedValueExpressionSchema,
+  template: z.string().regex(/^\{\{unique\.(email|name|phone|text)\}\}$/u),
+  label: z.string().min(1).max(120),
+});
+
+export const outcomeElementFingerprintSchema = z.object({
+  tagName: z.string().min(1).max(80),
+  dataFormcrash: z.string().max(160).nullable(),
+  dataTestId: z.string().max(160).nullable(),
+  id: z.string().max(160).nullable(),
+  role: z.string().max(80).nullable(),
+  accessibleName: z.string().max(240).nullable(),
+  name: z.string().max(160).nullable(),
+  cssPath: z.string().min(1).max(1_000),
+});
+
+export const outcomeCaptureWarningCodeSchema = z.enum([
+  'ambiguous_locator',
+  'unstable_locator',
+  'unsupported_iframe',
+  'sensitive_content',
+  'dynamic_locator',
+  'generated_binding_unavailable',
+]);
+
+export const outcomeCaptureWarningSchema = z.object({
+  code: outcomeCaptureWarningCodeSchema,
+  message: z.string().min(1).max(500),
+});
+
+export const capturedOutcomeTargetSchema = z.object({
+  locator: replayLocatorSchema,
+  fingerprint: outcomeElementFingerprintSchema,
+  preview: z.string().min(1).max(300),
+  reliability: z.enum(['high', 'review']),
+  warnings: z.array(outcomeCaptureWarningSchema).max(10),
+  generatedBindings: z.array(generatedValueBindingSchema).max(4),
+});
+
+export const outcomeCaptureStatusSchema = z.enum([
+  'launching',
+  'replaying',
+  'awaiting_selection',
+  'selection_ready',
+  'selection_rejected',
+  'closing',
+  'completed',
+  'runner_error',
+  'expired',
+]);
+
+export const outcomeCaptureSessionSchema = z.object({
+  id: z.string().min(1),
+  journeyId: z.string().min(1),
+  criticalActionId: z.string().min(1),
+  status: outcomeCaptureStatusSchema,
+  selectedTarget: capturedOutcomeTargetSchema.nullable(),
+  selectionWarnings: z.array(outcomeCaptureWarningSchema).max(10),
+  finalPathname: z.string().startsWith('/').max(2_000).nullable(),
+  errorMessage: z.string().min(1).max(1_000).nullable(),
+  startedAt: z.iso.datetime({ offset: true }),
+  expiresAt: z.iso.datetime({ offset: true }),
+  completedAt: z.iso.datetime({ offset: true }).nullable(),
+});
+
+export const startOutcomeCaptureRequestSchema = z.object({
+  variables: z
+    .record(z.string().regex(/^[A-Z][A-Z0-9_]*$/u), z.string().max(10_000))
+    .optional()
+    .default({}),
+  confirmProduction: z.boolean().optional().default(false),
+});
+
+const outcomeCheckApprovalBaseSchema = z.object({
+  description: z.string().trim().min(1).max(500),
+});
+
+export const approveOutcomeCheckRequestSchema = z.discriminatedUnion('type', [
+  outcomeCheckApprovalBaseSchema.extend({
+    type: z.literal('visible_element_exists'),
+  }),
+  outcomeCheckApprovalBaseSchema.extend({
+    type: z.literal('matching_item_appears_exactly_once'),
+    bindingExpression: generatedValueExpressionSchema,
+  }),
+  outcomeCheckApprovalBaseSchema.extend({
+    type: z.literal('final_pathname_matches'),
+    expectedPathname: z.string().startsWith('/').max(2_000),
+  }),
+]);
+
+const persistedOutcomeCheckBaseSchema = z.object({
+  id: z.string().min(1),
+  journeyId: z.string().min(1),
+  criticalActionId: z.string().min(1),
+  description: z.string().trim().min(1).max(500),
+  createdAt: z.iso.datetime({ offset: true }),
+});
+
+export const outcomeCheckSchema = z.discriminatedUnion('type', [
+  persistedOutcomeCheckBaseSchema.extend({
+    type: z.literal('visible_element_exists'),
+    target: capturedOutcomeTargetSchema,
+  }),
+  persistedOutcomeCheckBaseSchema.extend({
+    type: z.literal('matching_item_appears_exactly_once'),
+    target: capturedOutcomeTargetSchema,
+    binding: generatedValueBindingSchema,
+  }),
+  persistedOutcomeCheckBaseSchema.extend({
+    type: z.literal('final_pathname_matches'),
+    expectedPathname: z.string().startsWith('/').max(2_000),
+  }),
+]);
+
+export const outcomeCheckListSchema = z.object({
+  items: z.array(outcomeCheckSchema),
+});
+
 export const replayFailureSchema = z.object({
   stepId: z.string().min(1),
   stepName: z.string().min(1),
@@ -1216,6 +1367,36 @@ export type JourneyRecordingMetadata = z.infer<
 >;
 export type PersistedJourney = z.infer<typeof persistedJourneySchema>;
 export type JourneyList = z.infer<typeof journeyListSchema>;
+export type CriticalAction = z.infer<typeof criticalActionSchema>;
+export type ApproveCriticalActionRequest = z.infer<
+  typeof approveCriticalActionRequestSchema
+>;
+export type CriticalActionResponse = z.infer<
+  typeof criticalActionResponseSchema
+>;
+export type OutcomeCheckType = z.infer<typeof outcomeCheckTypeSchema>;
+export type GeneratedValueExpression = z.infer<
+  typeof generatedValueExpressionSchema
+>;
+export type GeneratedValueBinding = z.infer<typeof generatedValueBindingSchema>;
+export type OutcomeElementFingerprint = z.infer<
+  typeof outcomeElementFingerprintSchema
+>;
+export type OutcomeCaptureWarningCode = z.infer<
+  typeof outcomeCaptureWarningCodeSchema
+>;
+export type OutcomeCaptureWarning = z.infer<typeof outcomeCaptureWarningSchema>;
+export type CapturedOutcomeTarget = z.infer<typeof capturedOutcomeTargetSchema>;
+export type OutcomeCaptureStatus = z.infer<typeof outcomeCaptureStatusSchema>;
+export type OutcomeCaptureSession = z.infer<typeof outcomeCaptureSessionSchema>;
+export type StartOutcomeCaptureRequest = z.infer<
+  typeof startOutcomeCaptureRequestSchema
+>;
+export type ApproveOutcomeCheckRequest = z.infer<
+  typeof approveOutcomeCheckRequestSchema
+>;
+export type OutcomeCheck = z.infer<typeof outcomeCheckSchema>;
+export type OutcomeCheckList = z.infer<typeof outcomeCheckListSchema>;
 export type ReplayFailure = z.infer<typeof replayFailureSchema>;
 export type ReplayResult = z.infer<typeof replayResultSchema>;
 export type RuntimeVariableName = z.infer<typeof runtimeVariableNameSchema>;

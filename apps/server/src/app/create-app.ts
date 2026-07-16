@@ -13,6 +13,7 @@ import { RunRepository } from '../persistence/run-repository.js';
 import { ProjectJourneyRepository } from '../persistence/project-journey-repository.js';
 import { ProjectSettingsRepository } from '../persistence/project-settings-repository.js';
 import { ExternalExperimentRepository } from '../persistence/external-experiment-repository.js';
+import { OutcomeCheckRepository } from '../persistence/outcome-check-repository.js';
 import { SampleRunCoordinator } from '../runner/engine/sample-run-coordinator.js';
 import { PlaywrightSampleRunExecutor } from '../runner/engine/sample-runner.js';
 import { BrowserOwnership } from '../runner/infrastructure/browser-ownership.js';
@@ -26,6 +27,7 @@ import { ProjectSettingsService } from '../runner/external/project-settings-serv
 import { RequestDiscoveryService } from '../runner/external/request-discovery.js';
 import { ExternalExperimentRunner } from '../runner/external/external-experiment-runner.js';
 import { AuthValidationService } from '../runner/external/auth-validation.js';
+import { OutcomeCaptureManager } from '../runner/outcomes/outcome-capture-manager.js';
 
 export interface CreateAppOptions {
   readonly config: ServerConfig;
@@ -46,6 +48,9 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     database.connection,
   );
   const externalExperimentRepository = new ExternalExperimentRepository(
+    database.connection,
+  );
+  const outcomeCheckRepository = new OutcomeCheckRepository(
     database.connection,
   );
   const externalScreenshotStore = new ScreenshotStore(
@@ -110,6 +115,14 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     externalExperimentRepository,
     browserOwnership,
   );
+  const outcomeCaptures = new OutcomeCaptureManager(
+    options.config,
+    projectRepository,
+    projectSettingsRepository,
+    authStateStore,
+    outcomeCheckRepository,
+    browserOwnership,
+  );
 
   void app.register(cors, {
     origin: [...options.config.dashboardOrigins],
@@ -159,6 +172,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     runEventBroker.close();
   });
   app.addHook('onClose', async () => {
+    await outcomeCaptures.closeAll();
     await authCaptures.close();
     await recordingManager.close();
     await sampleRunCoordinator.waitForIdle();
@@ -180,6 +194,10 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
       authStore: authStateStore,
       experiments: externalExperimentRepository,
       screenshots: externalScreenshotStore,
+    },
+    {
+      repository: outcomeCheckRepository,
+      captures: outcomeCaptures,
     },
   );
   registerExternalExperimentRoutes(app, {

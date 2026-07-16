@@ -2,7 +2,7 @@ import { once } from 'node:events';
 import { createServer, type Server } from 'node:http';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { chromium } from 'playwright';
+import { chromium, type Page } from 'playwright';
 
 import {
   buildBrowserRecorderInitScript,
@@ -129,6 +129,47 @@ describe('external browser recorder injection', () => {
       classification: 'success',
       visible: false,
     });
+    await session.close();
+  });
+
+  it('skips semantic candidates that disappear during inspection', async () => {
+    let page: Page | null = null;
+    const owner = new PlaywrightExternalBrowserOwner(undefined, (created) => {
+      page = created;
+    });
+    const session = await owner.launchReplay({
+      targetUrl,
+      headless: true,
+      timeoutMs: 10_000,
+    });
+    await session.navigate(targetUrl);
+    if (page === null) throw new Error('Replay page was not exposed.');
+    await (page as Page).evaluate(() => {
+      const container = document.createElement('div');
+      for (let index = 0; index < 20; index += 1) {
+        const item = document.createElement('div');
+        item.id = `pending-transient-${index}`;
+        item.classList.add('transient-semantic');
+        container.append(item);
+      }
+      document.body.append(container);
+      const first = container.firstElementChild;
+      if (!(first instanceof HTMLElement)) return;
+      Object.defineProperty(first, 'className', {
+        configurable: true,
+        get() {
+          for (const item of document.querySelectorAll('.transient-semantic')) {
+            if (item !== first) item.remove();
+          }
+          return 'loading transient-semantic';
+        },
+      });
+    });
+
+    const startedAt = Date.now();
+    const semantic = await session.inspectSemanticElements?.();
+    expect(Array.isArray(semantic)).toBe(true);
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
     await session.close();
   });
 

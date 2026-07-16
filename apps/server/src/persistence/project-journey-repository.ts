@@ -369,6 +369,12 @@ function deleteJourneyActivity(
   journeyId: string,
 ): void {
   database
+    .prepare('DELETE FROM outcome_checks WHERE journey_id = ?')
+    .run(journeyId);
+  database
+    .prepare('DELETE FROM critical_actions WHERE journey_id = ?')
+    .run(journeyId);
+  database
     .prepare(
       `DELETE FROM external_assertion_results
         WHERE run_id IN (SELECT id FROM external_runs WHERE journey_id = ?)`,

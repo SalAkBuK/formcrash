@@ -5,6 +5,7 @@ export type BrowserWorkload =
   | 'auth_capture'
   | 'auth_validation'
   | 'request_discovery'
+  | 'outcome_capture'
   | 'external_experiment';
 
 export class BrowserOwnershipConflictError extends Error {

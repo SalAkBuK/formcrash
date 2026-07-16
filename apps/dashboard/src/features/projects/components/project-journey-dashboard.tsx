@@ -32,6 +32,7 @@ import {
   stopRecording,
 } from '../api/projects';
 import { ExternalExperimentPanel } from './external-experiment-panel';
+import { OutcomeDefinitionPanel } from './outcome-definition-panel';
 import { journeyRuntimeRequirements } from '../models/journey-runtime';
 
 export function ProjectJourneyDashboard() {
@@ -975,6 +976,27 @@ export function ProjectJourneyDashboard() {
                         ) : (
                           <span>No runtime values required.</span>
                         )}
+                        <OutcomeDefinitionPanel
+                          confirmProduction={
+                            selected.environment !== 'production' ||
+                            productionReplayConfirmed
+                          }
+                          disabled={
+                            busy !== null ||
+                            requirements.some(
+                              (requirement) =>
+                                (
+                                  replayValues[journey.id]?.[
+                                    requirement.name
+                                  ] ?? ''
+                                ).trim() === '',
+                            )
+                          }
+                          journey={journey}
+                          runtimeValues={nonEmptyValues(
+                            replayValues[journey.id] ?? {},
+                          )}
+                        />
                       </div>
                       <div className="journey-card-actions">
                         <button
