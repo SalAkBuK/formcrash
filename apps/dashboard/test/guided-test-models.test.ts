@@ -6,9 +6,9 @@ import type {
 } from '@formcrash/contracts';
 
 import {
-  guidedRecipe,
-  recipeAssertions,
-} from '../src/features/projects/models/guided-recipes';
+  recommendationSelections,
+  recommendationSetForCandidate,
+} from '../src/features/projects/models/assertion-recommendations';
 import { guidedStepValueOverrides } from '../src/features/projects/models/guided-values';
 import { assessJourneyReadiness } from '../src/features/projects/models/journey-readiness';
 import {
@@ -121,18 +121,11 @@ describe('guided test automation models', () => {
       'fill-email': '{{unique.email}}',
     });
 
-    const assertions = recipeAssertions(
-      guidedRecipe('server_duplicate_handling'),
-      {
-        method: 'POST',
-        pathname: '/api/residents',
-        origin: 'https://example.test',
-        status: 201,
-        failed: false,
-        relativeTimestampMs: 10,
-        occurrences: 1,
-      },
-    );
+    const discovery = discoveryResult();
+    const selected = discovery.candidates[1]!;
+    const assertions = recommendationSelections(
+      recommendationSetForCandidate(discovery, selected),
+    ).map((selection) => selection.assertion);
 
     expect(assertions).toEqual(
       expect.arrayContaining([
@@ -245,6 +238,69 @@ function discoveryResult(): RequestDiscoveryResult {
       outcome: 'recommended',
       recommendedCandidateId: 'request-bbbbbbbbbbbbbbbbbbbbbbbb',
       explanation: 'The server selected the business mutation.',
+    },
+    normalAction: {
+      targetControlLocator: null,
+      targetWasDisabledDuringPending: null,
+      finalPathname: '/residents',
+      elements: [],
+    },
+    assertionRecommendationSets: [
+      {
+        recipeType: 'server_duplicate_handling',
+        selectedRequestCandidateId: 'request-bbbbbbbbbbbbbbbbbbbbbbbb',
+        recommendations: [
+          recommendation('request', {
+            id: 'assertion-draft-aaaaaaaaaaaaaaaaaaaaaaaa',
+            type: 'network_request_max',
+            maximum: 2,
+            description: 'Request maximum',
+          }),
+          recommendation('success', {
+            id: 'assertion-draft-bbbbbbbbbbbbbbbbbbbbbbbb',
+            type: 'network_success_max',
+            maximum: 1,
+            description: 'Success maximum',
+          }),
+          recommendation('server', {
+            id: 'assertion-draft-cccccccccccccccccccccccc',
+            type: 'network_no_server_errors',
+            description: 'No server error',
+          }),
+          recommendation('status', {
+            id: 'assertion-draft-dddddddddddddddddddddddd',
+            type: 'network_all_status',
+            allowedStatuses: [201, 409],
+            description: 'Allowed statuses',
+          }),
+        ],
+        limitations: [],
+      },
+      {
+        recipeType: 'server_duplicate_handling',
+        selectedRequestCandidateId: null,
+        recommendations: [],
+        limitations: ['No candidate.'],
+      },
+    ],
+  };
+}
+
+function recommendation(
+  suffix: string,
+  assertion: RequestDiscoveryResult['assertionRecommendationSets'][number]['recommendations'][number]['assertion'],
+) {
+  return {
+    recommendationId: `assertion-rec-${suffix.padEnd(24, 'a')}`,
+    assertion,
+    category: 'response_outcome' as const,
+    confidence: 'high' as const,
+    defaultEnabled: true,
+    reasonCode: 'test_recommendation',
+    explanation: 'Server-generated recommendation.',
+    evidence: {
+      evidenceIds: ['request-bbbbbbbbbbbbbbbbbbbbbbbb'],
+      source: 'request_discovery' as const,
     },
   };
 }

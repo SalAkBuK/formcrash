@@ -53,6 +53,12 @@ explicit recommendation outcome. The dashboard displays that evidence and may
 persist the user's selection, but it does not recompute scores or silently select
 ambiguous requests.
 
+The same discovery execution captures a bounded normal-action observation and
+returns server-owned assertion recommendation sets tied to each candidate.
+Guided and Advanced modes edit and select from those sets; they do not maintain
+separate recommendation algorithms. Immutable versions retain request-selection
+and per-assertion selection provenance.
+
 The sample checkout is separate because it is the system under test. Depending
 on the control server would contaminate the experiment, hide real HTTP behavior,
 and make the guaranteed demo path less representative.
@@ -79,5 +85,6 @@ Chunks 1 through 6 now include the independent checkout, the seeded demonstratio
 external project recording/replay, authenticated storage-state restoration,
 runtime variables and controlled data hooks, plus persisted external Impatient
 User experiments and server-owned request recommendation. Automatic assertion
-expansion, reports, failed-versus-fixed comparison, other injectors, CI,
+recommendation is also implemented for the repeated-action family. Reports,
+failed-versus-fixed comparison, other injectors, CI,
 cross-browser execution, and cloud operation remain deferred.

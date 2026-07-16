@@ -148,6 +148,11 @@ describe.sequential('external impatient-user experiments in Chromium', () => {
       journeyId: configured.journeyId,
       targetStepId: configured.targetStepId,
       variables: { SECRET_PASSWORD: 'RuntimePasswordOnly' },
+      recipe: {
+        type: 'duplicate_action',
+        triggerCount: 2,
+        intervalMs: 0,
+      },
     });
 
     expect(discovery.candidates).toEqual(
@@ -182,6 +187,24 @@ describe.sequential('external impatient-user experiments in Chromium', () => {
       classification: 'background_refresh',
       recommended: false,
     });
+    const recommendationSet = discovery.assertionRecommendationSets.find(
+      (set) =>
+        set.selectedRequestCandidateId ===
+        discovery.recommendation.recommendedCandidateId,
+    );
+    expect(recommendationSet?.recommendations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: 'request_count',
+          defaultEnabled: true,
+        }),
+        expect.objectContaining({
+          category: 'success_interface',
+          defaultEnabled: false,
+        }),
+      ]),
+    );
+    expect(JSON.stringify(discovery)).not.toContain('RuntimePasswordOnly');
   }, 45_000);
 
   it('requires explicit selection for ambiguous mutations and fabricates no candidate when the action sends none', async () => {
@@ -251,6 +274,18 @@ describe.sequential('external impatient-user experiments in Chromium', () => {
     );
 
     const fixed = await configureScenario('fixed');
+    const fixedDiscovery = await discoverScenario(fixed);
+    const submitStateRecommendation = fixedDiscovery.assertionRecommendationSets
+      .find(
+        (set) =>
+          set.selectedRequestCandidateId ===
+          fixedDiscovery.recommendation.recommendedCandidateId,
+      )
+      ?.recommendations.find((item) => item.category === 'submit_state');
+    expect(submitStateRecommendation?.assertion).toMatchObject({
+      type: 'element_disabled',
+      observationWindow: 'during_repeated_action',
+    });
     const fixedVersion = createVersion(fixed.journeyId);
     const fixedRun = await createRunner().run(fixedVersion.id, {
       SECRET_PASSWORD: 'AnotherRuntimePassword',
@@ -405,6 +440,11 @@ async function discoverScenario(configured: ConfiguredScenario) {
     journeyId: configured.journeyId,
     targetStepId: configured.targetStepId,
     variables: { SECRET_PASSWORD: 'RuntimePasswordOnly' },
+    recipe: {
+      type: 'duplicate_action',
+      triggerCount: 2,
+      intervalMs: 0,
+    },
   });
 }
 

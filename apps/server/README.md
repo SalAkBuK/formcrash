@@ -3,6 +3,11 @@
 The Fastify server at `http://localhost:4100` is the sole owner of run
 orchestration, Playwright, SQLite, and screenshot files.
 
+During development, the server process builds shared contracts before startup,
+keeps their compiled runtime exports in watch mode, and restarts when either
+server code or compiled contract code changes. This prevents the server from
+loading stale `@formcrash/contracts` exports after a contract edit.
+
 ## Sample run lifecycle
 
 `POST /api/sample-runs` validates `{ "mode": "vulnerable" | "fixed" }`, acquires
@@ -36,6 +41,16 @@ without request/response bodies, headers, cookies, auth state, or runtime
 secrets. See
 [`docs/architecture/request-recommendation.md`](../../docs/architecture/request-recommendation.md).
 
+The same discovery action now captures bounded normal-action interface evidence
+and returns deterministic assertion recommendation sets for every selectable
+candidate. Network recommendations cover request/success maximums, HTTP 5xx,
+and observed allowed statuses. Stable pending controls, success/error elements,
+and final pathnames can produce review-confidence interface checks. Experiment
+versions persist generated, modified, disabled, and manual assertion provenance
+through migration 0006. No request/response bodies, page text, raw HTML, query
+strings, or generic business-record assumptions enter this model. See
+[`docs/architecture/assertion-recommendation.md`](../../docs/architecture/assertion-recommendation.md).
+
 Runtime resolution carries a sensitivity taint and source set with every value.
 Direct secrets, explicitly sensitive journey/assertion values, mixed templates,
 and transitive variable dependencies remain sensitive. Only untainted resolved
@@ -56,5 +71,5 @@ allows only the GET, POST, and OPTIONS methods plus Content-Type and Last-Event-
 headers needed by the dashboard and SSE reconnect path.
 
 There is no failed-versus-fixed comparison, report export, Playwright export,
-external SSE, queue, Redis, or WebSocket support. Automatic assertion
-recommendation and result diagnosis remain dashboard-owned.
+external SSE, queue, Redis, or WebSocket support. Deterministic result diagnosis
+remains dashboard-owned.

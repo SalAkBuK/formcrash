@@ -32,6 +32,7 @@ describe('SQLite migrations and seeded definitions', () => {
       '0003_external_experiments.sql',
       '0004_project_safety_and_cleanup.sql',
       '0005_request_selection_provenance.sql',
+      '0006_assertion_selection_provenance.sql',
     ]);
     expect(second).toEqual(first);
     expect(database.connection.pragma('foreign_keys', { simple: true })).toBe(
@@ -109,6 +110,28 @@ describe('SQLite migrations and seeded definitions', () => {
     expect(() => database.migrate(directory)).toThrow(
       'changed after it was applied',
     );
+    database.close();
+  });
+
+  it('treats LF and CRLF migration files as the same committed contents', () => {
+    const temporary = createTemporaryTestConfig();
+    cleanups.push(temporary.cleanup);
+    const directory = path.join(temporary.root, 'line-ending-migrations');
+    const migrationPath = path.join(directory, '0001_line_endings.sql');
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(
+      migrationPath,
+      'CREATE TABLE line_endings (\n  id TEXT PRIMARY KEY\n) STRICT;\n',
+    );
+    const database = new FormCrashDatabase(temporary.config.databasePath);
+    const first = database.migrate(directory);
+
+    writeFileSync(
+      migrationPath,
+      'CREATE TABLE line_endings (\r\n  id TEXT PRIMARY KEY\r\n) STRICT;\r\n',
+    );
+
+    expect(database.migrate(directory)).toEqual(first);
     database.close();
   });
 });

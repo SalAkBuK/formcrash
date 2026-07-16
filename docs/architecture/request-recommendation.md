@@ -67,6 +67,11 @@ Advanced mode.
 Advanced mode displays server rank, classification, confidence, score, and
 reasons while retaining manual override.
 
+Discovery also returns assertion recommendation sets tied to each candidate and
+to the no-selection case. Request ranking remains the input boundary; assertion
+generation is documented separately in
+[`assertion-recommendation.md`](assertion-recommendation.md).
+
 ## Immutable provenance
 
 An experiment version may store:

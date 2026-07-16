@@ -109,6 +109,15 @@ Versions created before migration 0005 retain `null` provenance. Request bodies,
 response bodies, headers, cookies, authentication state, and runtime secrets are
 not part of this snapshot.
 
+Migration 0006 adds `assertion_selection_provenance_json` to immutable external
+experiment versions. It stores one bounded entry per saved assertion plus honest
+entries for disabled recommendations: recommendation ID, generated/modified/manual
+origin, confidence, reason, explanation, default state, user action, and safe
+evidence IDs. Versions created before migration 0006 load with an empty list.
+The snapshot excludes raw HTML, arbitrary page text, query strings,
+request/response bodies, cookies, authorization headers, authentication state,
+and runtime secrets.
+
 ## Implemented database enforcement
 
 - Foreign keys are enabled on every connection.

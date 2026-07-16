@@ -41,8 +41,13 @@ Guided Test consumes server-ranked request candidates and preselects only a
 high-confidence recommendation. Review and ambiguous outcomes require explicit
 selection; no-candidate results do not fabricate a matcher. Advanced mode shows
 server score, rank, classification, confidence, and reasons and can persist a
-manual override. The dashboard still owns the current recipe-specific assertion
-generation and deterministic result diagnosis. There is no failed-versus-fixed
+manual override. Guided and Advanced modes consume the same server-owned
+assertion recommendation sets. High-confidence network checks are enabled by
+default; review checks require approval. Users can disable recommendations,
+edit supported values, and add manual Advanced assertions. The immutable
+version records generated, modified, disabled, and manual provenance.
+Deterministic result diagnosis remains dashboard-owned. There is no
+generic business-record assertion, failed-versus-fixed
 comparison, report export, Playwright export, external SSE, or failure injector
 beyond repeated click/submit behavior.
 

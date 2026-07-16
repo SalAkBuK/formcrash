@@ -50,11 +50,12 @@ export class FormCrashDatabase {
 
     for (const file of files) {
       const sql = readFileSync(path.join(directory, file), 'utf8');
-      const checksumSha256 = createHash('sha256').update(sql).digest('hex');
+      const compatibleChecksums = migrationChecksums(sql);
+      const checksumSha256 = compatibleChecksums[0];
       const applied = findMigration.get(file) as
         { readonly checksumSha256: string } | undefined;
       if (applied !== undefined) {
-        if (applied.checksumSha256 !== checksumSha256) {
+        if (!compatibleChecksums.includes(applied.checksumSha256)) {
           throw new Error(
             `Migration ${file} changed after it was applied. Create a new migration instead.`,
           );
@@ -81,4 +82,15 @@ export class FormCrashDatabase {
     this.closed = true;
     this.connection.close();
   }
+}
+
+function migrationChecksums(sql: string): readonly string[] {
+  const lineFeedSql = sql.replace(/\r\n?/gu, '\n');
+  const carriageReturnLineFeedSql = lineFeedSql.replace(/\n/gu, '\r\n');
+
+  return [checksum(lineFeedSql), checksum(carriageReturnLineFeedSql)] as const;
+}
+
+function checksum(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
 }

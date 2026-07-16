@@ -315,6 +315,114 @@ describe('external experiment version persistence', () => {
     expect(persisted.provenance).not.toContain('authorization');
     expect(persisted.provenance).not.toContain('secret-value');
   });
+
+  it('persists generated, modified, disabled and manual assertion provenance without unsafe evidence', () => {
+    const project = projects.createProject({
+      name: 'Assertion provenance project',
+      targetUrl: 'https://example.test',
+      description: '',
+    });
+    const journey = projects.saveJourney({
+      projectId: project.id,
+      name: 'Create profile',
+      steps: [step('submit-step', 'submit')],
+      metadata: {
+        recordingSessionId: null,
+        recordedAt: new Date(0).toISOString(),
+        warningCount: 0,
+        normalizationRule: 'test',
+      },
+    });
+    const legacy = experiments.createVersion({
+      projectId: project.id,
+      journey,
+      request: request('submit-step', 'Legacy assertion provenance'),
+    });
+    const assertions = [
+      {
+        id: 'generated',
+        type: 'network_request_max' as const,
+        maximum: 1,
+        description: 'At most one request.',
+      },
+      {
+        id: 'modified',
+        type: 'network_success_max' as const,
+        maximum: 2,
+        description: 'Edited success maximum.',
+      },
+      {
+        id: 'manual',
+        type: 'network_no_server_errors' as const,
+        description: 'Manual no-5xx.',
+      },
+    ];
+    const version = experiments.createVersion({
+      projectId: project.id,
+      journey,
+      request: {
+        ...request('submit-step', 'Assertion provenance'),
+        networkMatcher: {
+          method: 'POST',
+          pathname: '/api/profiles',
+          host: 'example.test',
+        },
+        assertions,
+        assertionSelectionProvenance: [
+          assertionProvenance('generated', 'generated', 'accepted'),
+          assertionProvenance('modified', 'generated_modified', 'modified'),
+          {
+            ...assertionProvenance(null, 'generated', 'disabled'),
+            defaultEnabled: false,
+          },
+          {
+            assertionId: 'manual',
+            recommendationId: null,
+            origin: 'manual',
+            confidence: null,
+            reasonCode: null,
+            explanation: null,
+            defaultEnabled: null,
+            action: 'manual',
+            evidenceIds: [],
+          },
+        ],
+      },
+    });
+    const reloaded = new ExternalExperimentRepository(database.connection);
+
+    expect(
+      reloaded.getVersion(legacy.id)?.assertionSelectionProvenance,
+    ).toEqual([]);
+    expect(
+      reloaded.getVersion(version.id)?.assertionSelectionProvenance,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          assertionId: 'generated',
+          origin: 'generated',
+        }),
+        expect.objectContaining({
+          assertionId: 'modified',
+          origin: 'generated_modified',
+        }),
+        expect.objectContaining({
+          assertionId: null,
+          action: 'disabled',
+        }),
+        expect.objectContaining({
+          assertionId: 'manual',
+          origin: 'manual',
+        }),
+      ]),
+    );
+    const serialized = JSON.stringify(
+      reloaded.getVersion(version.id)?.assertionSelectionProvenance,
+    );
+    expect(serialized).not.toContain('SyntheticSecret');
+    expect(serialized).not.toContain('authorization');
+    expect(serialized).not.toContain('query=');
+  });
 });
 
 describe('browser workload exclusion', () => {
@@ -422,5 +530,23 @@ function provenance(
     recommendedMatcher,
     selectedMatcher,
     userOverrodeRecommendation,
+  };
+}
+
+function assertionProvenance(
+  assertionId: string | null,
+  origin: 'generated' | 'generated_modified',
+  action: 'accepted' | 'modified' | 'disabled',
+) {
+  return {
+    assertionId,
+    recommendationId: `assertion-rec-${origin === 'generated' ? 'a' : 'b'.repeat(24)}`,
+    origin,
+    confidence: 'high' as const,
+    reasonCode: 'test_recommendation',
+    explanation: 'Bounded deterministic explanation.',
+    defaultEnabled: true,
+    action,
+    evidenceIds: ['request-1234567890abcdef12345678'],
   };
 }

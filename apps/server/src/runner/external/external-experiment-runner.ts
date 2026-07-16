@@ -127,6 +127,7 @@ export class ExternalExperimentRunner {
     let triggerAttempts = 0;
     let observations: readonly ExternalNetworkObservation[] = [];
     let assertionResults: readonly ExternalAssertionResult[] = [];
+    const disabledDuringRepeatedActionAssertionIds = new Set<string>();
     const warnings: ExternalRunWarning[] = [];
     let runnerError: ExternalRunnerError | null = null;
 
@@ -221,6 +222,15 @@ export class ExternalExperimentRunner {
             });
           },
         );
+        for (const assertion of experiment.assertions) {
+          if (
+            assertion.type === 'element_disabled' &&
+            assertion.observationWindow === 'during_repeated_action' &&
+            (await session.isDisabled(assertion.locator))
+          ) {
+            disabledDuringRepeatedActionAssertionIds.add(assertion.id);
+          }
+        }
       } catch (error: unknown) {
         throw new ExternalJourneyStepError(
           target,
@@ -265,6 +275,7 @@ export class ExternalExperimentRunner {
         observations,
         runtime,
         events,
+        disabledDuringRepeatedActionAssertionIds,
       });
       await this.capture(session, runId, 'final-result', events, warnings);
     } catch (error: unknown) {

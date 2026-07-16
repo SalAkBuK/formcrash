@@ -409,9 +409,28 @@ describe('external assertions', () => {
     ]);
     expect(results[1]?.observedDescription).toContain('missing or not visible');
   });
+
+  it('evaluates pending-window disabled evidence captured during repeated triggering', async () => {
+    const assertion: ExternalAssertion = {
+      id: 'pending-disabled',
+      type: 'element_disabled',
+      locator: { strategy: 'id', value: 'submit' },
+      targetDescription: 'Submit',
+      observationWindow: 'during_repeated_action',
+      description: 'Submit disables while pending.',
+    };
+
+    expect(
+      (await evaluate([assertion], new Set(['pending-disabled'])))[0]?.status,
+    ).toBe('passed');
+    expect((await evaluate([assertion]))[0]?.status).toBe('failed');
+  });
 });
 
-async function evaluate(assertions: readonly ExternalAssertion[]) {
+async function evaluate(
+  assertions: readonly ExternalAssertion[],
+  disabledDuringRepeatedActionAssertionIds?: ReadonlySet<string>,
+) {
   const runtime = resolveRuntime({
     runId: 'assertion-run',
     journey: journey([step('value', 'safe')]),
@@ -425,6 +444,9 @@ async function evaluate(assertions: readonly ExternalAssertion[]) {
     observations: networkObservations(),
     runtime,
     events: new RunEventLog('assertion-run'),
+    ...(disabledDuringRepeatedActionAssertionIds === undefined
+      ? {}
+      : { disabledDuringRepeatedActionAssertionIds }),
   });
 }
 

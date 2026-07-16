@@ -2,7 +2,11 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { CreateExternalExperimentRequest } from '@formcrash/contracts';
+import type {
+  AssertionRecommendationSet,
+  CreateExternalExperimentRequest,
+  RequestDiscoveryResult,
+} from '@formcrash/contracts';
 
 import { ExternalExperimentPanel } from '../src/features/projects/components/external-experiment-panel';
 
@@ -163,74 +167,76 @@ beforeEach(() => {
     limit: 20,
     offset: 0,
   });
-  mocks.discoverRequests.mockResolvedValue({
-    discoveryId: '11111111-2222-4333-8444-555555555555',
-    discoveredAt: '2026-07-16T00:00:00.000Z',
-    journeyId: journey.id,
-    targetStepId: 'submit-profile',
-    candidates: [
-      {
-        candidateId: 'request-111111111111111111111111',
-        rank: 2,
-        score: 33,
-        classification: 'background_refresh',
-        confidence: 'review',
-        recommended: false,
-        reasons: [
-          {
-            code: 'read_only_method',
-            label: 'GET is normally read-only.',
-            scoreImpact: -25,
-          },
-          {
-            code: 'background_refresh',
-            label: 'Request resembles a list refresh.',
-            scoreImpact: -30,
-          },
-        ],
-        method: 'GET',
-        pathname: '/api/profile',
-        origin: 'http://localhost:4300',
-        status: 200,
-        failed: false,
-        relativeTimestampMs: 2,
-        occurrences: 1,
+  mocks.discoverRequests.mockResolvedValue(
+    withAssertionRecommendations({
+      discoveryId: '11111111-2222-4333-8444-555555555555',
+      discoveredAt: '2026-07-16T00:00:00.000Z',
+      journeyId: journey.id,
+      targetStepId: 'submit-profile',
+      candidates: [
+        {
+          candidateId: 'request-111111111111111111111111',
+          rank: 2,
+          score: 33,
+          classification: 'background_refresh',
+          confidence: 'review',
+          recommended: false,
+          reasons: [
+            {
+              code: 'read_only_method',
+              label: 'GET is normally read-only.',
+              scoreImpact: -25,
+            },
+            {
+              code: 'background_refresh',
+              label: 'Request resembles a list refresh.',
+              scoreImpact: -30,
+            },
+          ],
+          method: 'GET',
+          pathname: '/api/profile',
+          origin: 'http://localhost:4300',
+          status: 200,
+          failed: false,
+          relativeTimestampMs: 2,
+          occurrences: 1,
+        },
+        {
+          candidateId: 'request-222222222222222222222222',
+          rank: 1,
+          score: 108,
+          classification: 'likely_business_mutation',
+          confidence: 'high',
+          recommended: true,
+          reasons: [
+            {
+              code: 'mutation_method',
+              label: 'POST can change server state.',
+              scoreImpact: 50,
+            },
+            {
+              code: 'same_origin',
+              label: 'Request uses the target application origin.',
+              scoreImpact: 20,
+            },
+          ],
+          method: 'POST',
+          pathname: '/api/profile',
+          origin: 'http://localhost:4300',
+          status: 201,
+          failed: false,
+          relativeTimestampMs: 4,
+          occurrences: 1,
+        },
+      ],
+      recommendation: {
+        outcome: 'recommended',
+        recommendedCandidateId: 'request-222222222222222222222222',
+        explanation:
+          'FormCrash found one same-origin successful state-changing request with a clear evidence lead.',
       },
-      {
-        candidateId: 'request-222222222222222222222222',
-        rank: 1,
-        score: 108,
-        classification: 'likely_business_mutation',
-        confidence: 'high',
-        recommended: true,
-        reasons: [
-          {
-            code: 'mutation_method',
-            label: 'POST can change server state.',
-            scoreImpact: 50,
-          },
-          {
-            code: 'same_origin',
-            label: 'Request uses the target application origin.',
-            scoreImpact: 20,
-          },
-        ],
-        method: 'POST',
-        pathname: '/api/profile',
-        origin: 'http://localhost:4300',
-        status: 201,
-        failed: false,
-        relativeTimestampMs: 4,
-        occurrences: 1,
-      },
-    ],
-    recommendation: {
-      outcome: 'recommended',
-      recommendedCandidateId: 'request-222222222222222222222222',
-      explanation:
-        'FormCrash found one same-origin successful state-changing request with a clear evidence lead.',
-    },
-  });
+    }),
+  );
   mocks.createExternalExperiment.mockResolvedValue(version);
   const runResult = {
     runId: 'run-1',
@@ -351,6 +357,11 @@ describe('external experiment dashboard workflow', () => {
         { SECRET_TOKEN: 'runtime-only' },
         true,
         {
+          recipe: {
+            type: 'server_duplicate_handling',
+            triggerCount: 2,
+            intervalMs: 300,
+          },
           normalizeJourney: true,
           stepValueOverrides: {
             'fill-name': '{{unique.name}}',
@@ -374,6 +385,16 @@ describe('external experiment dashboard workflow', () => {
     expect(
       screen.getByText('Every matching response uses 201 or 409.'),
     ).toBeVisible();
+    const noServerErrors = screen.getByRole('checkbox', {
+      name: 'Enable No matching response returns HTTP 5xx.',
+    });
+    expect(noServerErrors).toBeChecked();
+    await user.click(noServerErrors);
+    const requestMaximum = screen.getByLabelText(
+      'Edit No more than two matching requests are sent.',
+    );
+    await user.clear(requestMaximum);
+    await user.type(requestMaximum, '1');
 
     await user.click(
       screen.getByRole('button', {
@@ -399,25 +420,11 @@ describe('external experiment dashboard workflow', () => {
             pathname: '/api/profile',
             host: 'localhost:4300',
           },
-          assertions: [
-            expect.objectContaining({
-              type: 'network_request_max',
-              maximum: 2,
-            }),
-            expect.objectContaining({
-              type: 'network_success_max',
-              maximum: 1,
-            }),
-            expect.objectContaining({ type: 'network_no_server_errors' }),
-            expect.objectContaining({
-              type: 'network_all_status',
-              allowedStatuses: [201, 409],
-            }),
-          ],
         }),
       ),
     );
-    expect(lastCreatedExperiment()).toMatchObject({
+    const guidedCreated = lastCreatedExperiment();
+    expect(guidedCreated).toMatchObject({
       requestSelectionProvenance: {
         selectionMode: 'confirmed_recommendation',
         discoveryId: '11111111-2222-4333-8444-555555555555',
@@ -426,6 +433,35 @@ describe('external experiment dashboard workflow', () => {
         userOverrodeRecommendation: false,
       },
     });
+    expect(guidedCreated.assertions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'network_request_max',
+          maximum: 1,
+        }),
+        expect.objectContaining({
+          type: 'network_success_max',
+          maximum: 1,
+        }),
+        expect.objectContaining({
+          type: 'network_all_status',
+          allowedStatuses: [201, 409],
+        }),
+      ]),
+    );
+    expect(guidedCreated.assertionSelectionProvenance).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          origin: 'generated_modified',
+          action: 'modified',
+        }),
+        expect.objectContaining({
+          assertionId: null,
+          origin: 'generated',
+          action: 'disabled',
+        }),
+      ]),
+    );
     expect(mocks.runExternalExperiment).toHaveBeenCalledWith(
       'version-1',
       {
@@ -478,13 +514,19 @@ describe('external experiment dashboard workflow', () => {
         name: 'POST /api/profile — 201 · 1x · score 108',
       }),
     ).toBeVisible();
+    expect(screen.getAllByText('Generated unchanged')).toHaveLength(4);
+    expect(screen.queryByText('Manually added')).not.toBeInTheDocument();
+    const generatedMaximum = screen.getAllByLabelText('Maximum')[0]!;
+    await user.clear(generatedMaximum);
+    await user.type(generatedMaximum, '1');
     await user.selectOptions(
       screen.getByLabelText('Required network matcher'),
       '1',
     );
     await user.click(screen.getByRole('button', { name: 'Add assertion' }));
+    expect(screen.getByText('Manually added')).toBeVisible();
     await user.selectOptions(
-      screen.getByLabelText('Assertion 2 type'),
+      screen.getByLabelText('Assertion 5 type'),
       'network_no_server_errors',
     );
     await user.click(
@@ -503,12 +545,21 @@ describe('external experiment dashboard workflow', () => {
             pathname: '/api/profile',
             host: 'localhost:4300',
           },
-          assertions: [
-            expect.objectContaining({ type: 'network_request_max' }),
-            expect.objectContaining({ type: 'network_no_server_errors' }),
-          ],
         }),
       ),
+    );
+    expect(lastCreatedExperiment().assertions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'network_request_max' }),
+        expect.objectContaining({ type: 'network_no_server_errors' }),
+      ]),
+    );
+    expect(lastCreatedExperiment().assertionSelectionProvenance).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ origin: 'generated' }),
+        expect.objectContaining({ origin: 'generated_modified' }),
+        expect.objectContaining({ origin: 'manual' }),
+      ]),
     );
 
     await user.click(screen.getByRole('button', { name: 'Run' }));
@@ -544,64 +595,66 @@ describe('external experiment dashboard workflow', () => {
   });
 
   it('requires an explicit Guided choice when the server reports ambiguous mutations', async () => {
-    mocks.discoverRequests.mockResolvedValueOnce({
-      discoveryId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
-      discoveredAt: '2026-07-16T00:00:00.000Z',
-      journeyId: journey.id,
-      targetStepId: 'submit-profile',
-      candidates: [
-        {
-          candidateId: 'request-aaaaaaaaaaaaaaaaaaaaaaaa',
-          rank: 1,
-          score: 108,
-          classification: 'likely_business_mutation',
-          confidence: 'ambiguous',
-          recommended: false,
-          reasons: [
-            {
-              code: 'mutation_method',
-              label: 'POST can change server state.',
-              scoreImpact: 50,
-            },
-          ],
-          method: 'POST',
-          pathname: '/api/profile',
-          origin: 'http://localhost:4300',
-          status: 201,
-          failed: false,
-          relativeTimestampMs: 4,
-          occurrences: 1,
+    mocks.discoverRequests.mockResolvedValueOnce(
+      withAssertionRecommendations({
+        discoveryId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+        discoveredAt: '2026-07-16T00:00:00.000Z',
+        journeyId: journey.id,
+        targetStepId: 'submit-profile',
+        candidates: [
+          {
+            candidateId: 'request-aaaaaaaaaaaaaaaaaaaaaaaa',
+            rank: 1,
+            score: 108,
+            classification: 'likely_business_mutation',
+            confidence: 'ambiguous',
+            recommended: false,
+            reasons: [
+              {
+                code: 'mutation_method',
+                label: 'POST can change server state.',
+                scoreImpact: 50,
+              },
+            ],
+            method: 'POST',
+            pathname: '/api/profile',
+            origin: 'http://localhost:4300',
+            status: 201,
+            failed: false,
+            relativeTimestampMs: 4,
+            occurrences: 1,
+          },
+          {
+            candidateId: 'request-bbbbbbbbbbbbbbbbbbbbbbbb',
+            rank: 2,
+            score: 104,
+            classification: 'likely_business_mutation',
+            confidence: 'ambiguous',
+            recommended: false,
+            reasons: [
+              {
+                code: 'mutation_method',
+                label: 'POST can change server state.',
+                scoreImpact: 50,
+              },
+            ],
+            method: 'POST',
+            pathname: '/api/invitations',
+            origin: 'http://localhost:4300',
+            status: 201,
+            failed: false,
+            relativeTimestampMs: 5,
+            occurrences: 1,
+          },
+        ],
+        recommendation: {
+          outcome: 'ambiguous',
+          recommendedCandidateId: null,
+          explanation:
+            'Multiple plausible state-changing requests have similar evidence.',
         },
-        {
-          candidateId: 'request-bbbbbbbbbbbbbbbbbbbbbbbb',
-          rank: 2,
-          score: 104,
-          classification: 'likely_business_mutation',
-          confidence: 'ambiguous',
-          recommended: false,
-          reasons: [
-            {
-              code: 'mutation_method',
-              label: 'POST can change server state.',
-              scoreImpact: 50,
-            },
-          ],
-          method: 'POST',
-          pathname: '/api/invitations',
-          origin: 'http://localhost:4300',
-          status: 201,
-          failed: false,
-          relativeTimestampMs: 5,
-          occurrences: 1,
-        },
-      ],
-      recommendation: {
-        outcome: 'ambiguous',
-        recommendedCandidateId: null,
-        explanation:
-          'Multiple plausible state-changing requests have similar evidence.',
-      },
-    });
+      }),
+    );
     const user = userEvent.setup();
     render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
 
@@ -628,6 +681,11 @@ describe('external experiment dashboard workflow', () => {
 
     await user.click(invitation);
     await user.click(
+      screen.getByRole('checkbox', {
+        name: 'Enable No more than two matching requests are sent.',
+      }),
+    );
+    await user.click(
       screen.getByRole('button', { name: 'Save and run selected test' }),
     );
 
@@ -652,21 +710,31 @@ describe('external experiment dashboard workflow', () => {
         userOverrodeRecommendation: false,
       },
     });
+    expect(lastCreatedExperiment().assertionSelectionProvenance).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          origin: 'generated',
+          action: 'enabled',
+        }),
+      ]),
+    );
   });
 
   it('does not fabricate a Guided request matcher when discovery has no suitable candidate', async () => {
-    mocks.discoverRequests.mockResolvedValueOnce({
-      discoveryId: 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff',
-      discoveredAt: '2026-07-16T00:00:00.000Z',
-      journeyId: journey.id,
-      targetStepId: 'submit-profile',
-      candidates: [],
-      recommendation: {
-        outcome: 'no_candidate',
-        recommendedCandidateId: null,
-        explanation: 'No browser request was observed after the action.',
-      },
-    });
+    mocks.discoverRequests.mockResolvedValueOnce(
+      withAssertionRecommendations({
+        discoveryId: 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff',
+        discoveredAt: '2026-07-16T00:00:00.000Z',
+        journeyId: journey.id,
+        targetStepId: 'submit-profile',
+        candidates: [],
+        recommendation: {
+          outcome: 'no_candidate',
+          recommendedCandidateId: null,
+          explanation: 'No browser request was observed after the action.',
+        },
+      }),
+    );
     const user = userEvent.setup();
     render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
 
@@ -743,4 +811,121 @@ function lastCreatedExperiment(): CreateExternalExperimentRequest {
     CreateExternalExperimentRequest | undefined;
   if (input === undefined) throw new Error('No experiment was created.');
   return input;
+}
+
+function withAssertionRecommendations(
+  discovery: Omit<
+    RequestDiscoveryResult,
+    'normalAction' | 'assertionRecommendationSets'
+  >,
+): RequestDiscoveryResult {
+  const sets: AssertionRecommendationSet[] = discovery.candidates.map(
+    (candidate, candidateIndex) => {
+      const confidence: 'high' | 'review' =
+        candidate.confidence === 'high' ? 'high' : 'review';
+      const defaultEnabled = confidence === 'high';
+      const recommendations =
+        candidate.classification === 'likely_business_mutation'
+          ? [
+              {
+                recommendationId: `assertion-rec-${String(candidateIndex + 1).repeat(24)}`,
+                assertion: {
+                  id: `assertion-draft-${String(candidateIndex + 1).repeat(24)}`,
+                  type: 'network_request_max' as const,
+                  maximum: 2,
+                  description: 'No more than two matching requests are sent.',
+                },
+                category: 'request_count' as const,
+                confidence,
+                defaultEnabled,
+                reasonCode: 'repeated_action_request_limit',
+                explanation:
+                  'The server observed one mutation during the normal action.',
+                evidence: {
+                  evidenceIds: [candidate.candidateId],
+                  source: 'request_discovery' as const,
+                },
+              },
+              {
+                recommendationId: `assertion-rec-${String(candidateIndex + 3).repeat(24)}`,
+                assertion: {
+                  id: `assertion-draft-${String(candidateIndex + 3).repeat(24)}`,
+                  type: 'network_success_max' as const,
+                  maximum: 1,
+                  description: 'No more than one matching request succeeds.',
+                },
+                category: 'response_outcome' as const,
+                confidence,
+                defaultEnabled,
+                reasonCode: 'repeated_action_success_limit',
+                explanation:
+                  'The server observed one successful normal mutation.',
+                evidence: {
+                  evidenceIds: [candidate.candidateId],
+                  source: 'request_discovery' as const,
+                },
+              },
+              {
+                recommendationId: `assertion-rec-${String(candidateIndex + 5).repeat(24)}`,
+                assertion: {
+                  id: `assertion-draft-${String(candidateIndex + 5).repeat(24)}`,
+                  type: 'network_no_server_errors' as const,
+                  description: 'No matching response returns HTTP 5xx.',
+                },
+                category: 'server_error' as const,
+                confidence,
+                defaultEnabled,
+                reasonCode: 'repeated_action_no_server_error',
+                explanation: 'The recipe should not cause a server error.',
+                evidence: {
+                  evidenceIds: [candidate.candidateId],
+                  source: 'recipe' as const,
+                },
+              },
+              {
+                recommendationId: `assertion-rec-${String(candidateIndex + 7).repeat(24)}`,
+                assertion: {
+                  id: `assertion-draft-${String(candidateIndex + 7).repeat(24)}`,
+                  type: 'network_all_status' as const,
+                  allowedStatuses: [201, 409],
+                  description: 'Every matching response uses 201 or 409.',
+                },
+                category: 'response_outcome' as const,
+                confidence,
+                defaultEnabled,
+                reasonCode: 'observed_response_status',
+                explanation: 'The server observed HTTP 201.',
+                evidence: {
+                  evidenceIds: [candidate.candidateId],
+                  source: 'request_discovery' as const,
+                },
+              },
+            ]
+          : [];
+      return {
+        recipeType: 'duplicate_action' as const,
+        selectedRequestCandidateId: candidate.candidateId,
+        recommendations,
+        limitations: [],
+      };
+    },
+  );
+  return {
+    ...discovery,
+    normalAction: {
+      targetControlLocator: null,
+      targetWasDisabledDuringPending: null,
+      finalPathname: '/protected',
+      elements: [],
+    },
+    assertionRecommendationSets: [
+      ...sets,
+      {
+        recipeType: 'duplicate_action',
+        selectedRequestCandidateId: null,
+        recommendations: [],
+        limitations: ['No selected mutation request.'],
+      },
+    ],
+  };
 }

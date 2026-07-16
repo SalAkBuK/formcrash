@@ -1,8 +1,11 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import {
   requestDiscoveryResultSchema,
+  type AssertionRecommendationRecipe,
   type EphemeralRuntimeValues,
+  type NormalActionElementObservation,
+  type NormalActionObservation,
   type RecordedJourneyStep,
   type RequestDiscoveryResult,
 } from '@formcrash/contracts';
@@ -16,11 +19,16 @@ import {
   PlaywrightExternalBrowserOwner,
   type ExternalBrowserOwner,
   type ReplayBrowserSession,
+  type SemanticElementSnapshot,
 } from '../recording/external-browser.js';
 import type { AuthStateStore } from './auth-session.js';
 import { executeHttpHook } from './http-hooks.js';
+import { recommendAssertions } from './assertion-recommendation.js';
 import { createGuidedJourneySnapshot } from './guided-journey.js';
-import { executeRecordedStep } from './journey-actions.js';
+import {
+  executeRecordedStep,
+  preferredReplayLocator,
+} from './journey-actions.js';
 import { NetworkEvidenceCollector } from './network-evidence.js';
 import { rankRequestCandidates } from './request-recommendation.js';
 import {
@@ -50,6 +58,7 @@ export class RequestDiscoveryService {
   async discover(input: {
     readonly journeyId: string;
     readonly targetStepId: string;
+    readonly recipe: AssertionRecommendationRecipe;
     readonly variables: EphemeralRuntimeValues;
     readonly confirmProduction?: boolean;
     readonly normalizeJourney?: boolean;
@@ -121,11 +130,34 @@ export class RequestDiscoveryService {
       for (const step of journey.steps.slice(0, targetIndex)) {
         await executeDiscoveryStep(session, step, runtime);
       }
+      const beforeElements = await inspectSemanticElements(session);
+      const targetControlLocator =
+        target.locator === null
+          ? null
+          : ((await session.findActionControl?.(
+              preferredReplayLocator(target),
+              target.type,
+            )) ?? null);
       collector.markDiscoveryActionStarted();
       capture = true;
       await executeDiscoveryStep(session, target, runtime);
+      const targetWasDisabledDuringPending =
+        targetControlLocator === null
+          ? null
+          : await session.isDisabled(targetControlLocator);
       await session.settle(750);
       capture = false;
+      const afterElements = await inspectSemanticElements(session);
+      const normalAction = normalActionObservation({
+        targetControlLocator,
+        targetWasDisabledDuringPending,
+        finalUrl: session.currentUrl(),
+        sensitiveValues: [...runtime.values.values()]
+          .filter((value) => value.sensitive)
+          .map((value) => value.value),
+        beforeElements,
+        afterElements,
+      });
       const ranked = rankRequestCandidates({
         candidates: collector.discoveryCandidates(),
         targetOrigin: new URL(project.targetUrl).origin,
@@ -133,12 +165,32 @@ export class RequestDiscoveryService {
         targetStepName: target.name,
         targetPathname: new URL(target.url).pathname,
       });
+      const assertionRecommendationSets = [
+        ...ranked.candidates.map((candidate) =>
+          recommendAssertions({
+            recipe: input.recipe,
+            candidate,
+            discoveryOutcome: ranked.recommendation.outcome,
+            target,
+            normalAction,
+          }),
+        ),
+        recommendAssertions({
+          recipe: input.recipe,
+          candidate: null,
+          discoveryOutcome: ranked.recommendation.outcome,
+          target,
+          normalAction,
+        }),
+      ];
       return requestDiscoveryResultSchema.parse({
         discoveryId,
         discoveredAt,
         journeyId: journey.id,
         targetStepId: target.id,
         ...ranked,
+        normalAction,
+        assertionRecommendationSets,
       });
     } finally {
       if (session !== null) await session.close().catch(() => undefined);
@@ -156,6 +208,68 @@ export class RequestDiscoveryService {
       release();
     }
   }
+}
+
+async function inspectSemanticElements(
+  session: ReplayBrowserSession,
+): Promise<readonly SemanticElementSnapshot[]> {
+  return (await session.inspectSemanticElements?.()) ?? [];
+}
+
+function normalActionObservation(input: {
+  readonly targetControlLocator: NormalActionObservation['targetControlLocator'];
+  readonly targetWasDisabledDuringPending: boolean | null;
+  readonly finalUrl: string;
+  readonly sensitiveValues: readonly string[];
+  readonly beforeElements: readonly SemanticElementSnapshot[];
+  readonly afterElements: readonly SemanticElementSnapshot[];
+}): NormalActionObservation {
+  const elements = new Map<string, NormalActionElementObservation>();
+  for (const item of [...input.beforeElements, ...input.afterElements]) {
+    const key = JSON.stringify({
+      locator: item.locator,
+      classification: item.classification,
+    });
+    const before = input.beforeElements.find(
+      (candidate) =>
+        candidate.classification === item.classification &&
+        JSON.stringify(candidate.locator) === JSON.stringify(item.locator),
+    );
+    const after = input.afterElements.find(
+      (candidate) =>
+        candidate.classification === item.classification &&
+        JSON.stringify(candidate.locator) === JSON.stringify(item.locator),
+    );
+    elements.set(key, {
+      observationId: `element-${createHash('sha256')
+        .update(key)
+        .digest('hex')
+        .slice(0, 24)}`,
+      locator: item.locator,
+      classification: item.classification,
+      visibleBefore: before?.visible ?? false,
+      visibleAfter: after?.visible ?? false,
+    });
+  }
+  let finalPathname: string | null;
+  try {
+    const pathname = new URL(input.finalUrl).pathname;
+    const decodedPathname = decodeURIComponent(pathname);
+    finalPathname = input.sensitiveValues.some(
+      (value) => value.length >= 3 && decodedPathname.includes(value),
+    )
+      ? null
+      : pathname;
+  } catch {
+    // A missing final URL is represented explicitly rather than guessed.
+    finalPathname = null;
+  }
+  return {
+    targetControlLocator: input.targetControlLocator,
+    targetWasDisabledDuringPending: input.targetWasDisabledDuringPending,
+    finalPathname,
+    elements: [...elements.values()],
+  };
 }
 
 async function executeDiscoveryStep(

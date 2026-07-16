@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import type {
   CreateExternalExperimentRequest,
   EphemeralRuntimeValues,
-  ExternalAssertion,
   ExternalRunDetail,
   PersistedJourney,
   Project,
@@ -22,9 +21,18 @@ import {
 import {
   guidedRecipe,
   guidedRecipes,
-  recipeAssertions,
   type GuidedRecipeId,
 } from '../models/guided-recipes';
+import {
+  assertionSupportsValueEdit,
+  assertionWithEditedValue,
+  editableAssertionValue,
+  recommendationProvenance,
+  recommendationSelections,
+  recommendationSetForCandidate,
+  selectedAssertions,
+  type RecommendationSelection,
+} from '../models/assertion-recommendations';
 import { guidedStepValueOverrides } from '../models/guided-values';
 import { assessJourneyReadiness } from '../models/journey-readiness';
 import { journeyRuntimeRequirements } from '../models/journey-runtime';
@@ -64,6 +72,9 @@ export function GuidedTestPanel({
   const [candidateIndex, setCandidateIndex] = useState(-1);
   const [recipeId, setRecipeId] = useState<GuidedRecipeId>('duplicate_action');
   const [experimentName, setExperimentName] = useState('');
+  const [assertionSelections, setAssertionSelections] = useState<
+    readonly RecommendationSelection[]
+  >([]);
   const [result, setResult] = useState<ExternalRunDetail | null>(null);
   const [busy, setBusy] = useState<'analyze' | 'run' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -86,13 +97,11 @@ export function GuidedTestPanel({
   const recipe = guidedRecipe(recipeId);
   const candidates = discovery?.candidates ?? noCandidates;
   const selectedCandidate = candidates[candidateIndex] ?? null;
-  const assertions = useMemo(
-    () =>
-      selectedCandidate === null
-        ? []
-        : recipeAssertions(recipe, selectedCandidate),
-    [recipe, selectedCandidate],
-  );
+  const recommendationSet =
+    discovery === null
+      ? null
+      : recommendationSetForCandidate(discovery, selectedCandidate);
+  const assertions = selectedAssertions(assertionSelections);
   const stepValueOverrides = useMemo(
     () => (journey === null ? {} : guidedStepValueOverrides(journey)),
     [journey],
@@ -135,9 +144,18 @@ export function GuidedTestPanel({
   useEffect(() => {
     setDiscovery(null);
     setCandidateIndex(-1);
+    setAssertionSelections([]);
     setResult(null);
     setError(null);
-  }, [journeyId, targetStepId, targetStep]);
+  }, [journeyId, targetStepId, targetStep, recipeId]);
+
+  useEffect(() => {
+    setAssertionSelections(
+      recommendationSet === null
+        ? []
+        : recommendationSelections(recommendationSet),
+    );
+  }, [discovery?.discoveryId, selectedCandidate?.candidateId, recipe.id]);
 
   useEffect(() => {
     setResult(null);
@@ -160,6 +178,11 @@ export function GuidedTestPanel({
         nonEmptyValues(runtimeValues),
         project.environment !== 'production' || productionConfirmed,
         {
+          recipe: {
+            type: recipe.id,
+            triggerCount: recipe.triggerCount,
+            intervalMs: recipe.intervalMs,
+          },
           normalizeJourney: true,
           stepValueOverrides,
         },
@@ -195,6 +218,9 @@ export function GuidedTestPanel({
           discovery === null
             ? null
             : selectionProvenance(discovery, selectedCandidate),
+        assertionSelectionProvenance: [
+          ...recommendationProvenance(assertionSelections),
+        ],
         stepValueOverrides,
       };
       const version = await createExternalExperiment(journey.id, input);
@@ -226,7 +252,8 @@ export function GuidedTestPanel({
           </h2>
           <p>
             FormCrash selects the likely action, discovers its request, creates
-            four resilience checks, saves the experiment, and runs it.
+            evidence-backed resilience checks, saves the experiment, and runs
+            it.
           </p>
         </div>
         <button
@@ -671,15 +698,68 @@ export function GuidedTestPanel({
               </div>
 
               <div className="guided-assertion-list">
-                <h4>Safety checks FormCrash will create</h4>
-                {assertions.map((assertion) => (
-                  <div className="guided-assertion" key={assertion.id}>
-                    <span aria-hidden="true">✓</span>
+                <h4>Recommended checks</h4>
+                {assertionSelections.map((selection) => (
+                  <div
+                    className="guided-assertion"
+                    key={selection.recommendation.recommendationId}
+                  >
+                    <input
+                      aria-label={`Enable ${selection.assertion.description}`}
+                      checked={selection.enabled}
+                      onChange={(event) =>
+                        setAssertionSelections((current) =>
+                          current.map((item) =>
+                            item.recommendation.recommendationId ===
+                            selection.recommendation.recommendationId
+                              ? { ...item, enabled: event.target.checked }
+                              : item,
+                          ),
+                        )
+                      }
+                      type="checkbox"
+                    />
                     <div>
-                      <strong>{assertion.description}</strong>
-                      <small>{assertionExplanation(assertion)}</small>
+                      <strong>{selection.assertion.description}</strong>
+                      <small>
+                        {selection.recommendation.confidence === 'high'
+                          ? 'Enabled by default'
+                          : 'Review before enabling'}{' '}
+                        · {selection.recommendation.explanation}
+                      </small>
+                      <small>
+                        Evidence: {selection.recommendation.evidence.source}
+                      </small>
+                      {assertionSupportsValueEdit(selection.assertion) ? (
+                        <input
+                          aria-label={`Edit ${selection.assertion.description}`}
+                          disabled={!selection.enabled}
+                          value={editableAssertionValue(selection.assertion)}
+                          onChange={(event) =>
+                            setAssertionSelections((current) =>
+                              current.map((item) =>
+                                item.recommendation.recommendationId ===
+                                selection.recommendation.recommendationId
+                                  ? {
+                                      ...item,
+                                      assertion: assertionWithEditedValue(
+                                        item.assertion,
+                                        event.target.value,
+                                      ),
+                                    }
+                                  : item,
+                              ),
+                            )
+                          }
+                        />
+                      ) : null}
                     </div>
                   </div>
+                ))}
+                {recommendationSet?.limitations.map((limitation) => (
+                  <p className="technical-note" key={limitation}>
+                    {limitation}
+                  </p>
                 ))}
               </div>
 
@@ -709,7 +789,8 @@ export function GuidedTestPanel({
                   disabled={
                     busy !== null ||
                     experimentName.trim() === '' ||
-                    productionBlocked
+                    productionBlocked ||
+                    assertions.length === 0
                   }
                   onClick={() => void saveAndRun()}
                   type="button"
@@ -818,25 +899,6 @@ function recommendTargetStep(
     [...journey.steps].reverse().find((step) => step.type === 'click') ??
     null
   );
-}
-
-function assertionExplanation(assertion: ExternalAssertion): string {
-  switch (assertion.type) {
-    case 'network_request_max':
-      return `Maximum matching request count: ${assertion.maximum}.`;
-    case 'network_request_exact':
-      return `Expected request count: ${assertion.expected}.`;
-    case 'network_success_max':
-      return `Maximum successful response count: ${assertion.maximum}.`;
-    case 'network_success_exact':
-      return `Expected successful response count: ${assertion.expected}.`;
-    case 'network_no_server_errors':
-      return 'Any HTTP 500–599 response fails this check.';
-    case 'network_all_status':
-      return `Allowed statuses: ${assertion.allowedStatuses.join(', ')}.`;
-    default:
-      return assertion.description;
-  }
 }
 
 function analyzeJourney(

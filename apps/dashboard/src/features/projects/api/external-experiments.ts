@@ -95,11 +95,8 @@ export function discoverRequests(
   confirmProduction: boolean,
   options: Pick<
     RequestDiscoveryRequest,
-    'normalizeJourney' | 'stepValueOverrides'
-  > = {
-    normalizeJourney: false,
-    stepValueOverrides: {},
-  },
+    'recipe' | 'normalizeJourney' | 'stepValueOverrides'
+  >,
 ): Promise<RequestDiscoveryResult> {
   return requestJson(
     `/api/journeys/${journeyId}/request-discovery`,

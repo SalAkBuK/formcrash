@@ -16,6 +16,7 @@ export async function evaluateExternalAssertions(input: {
   readonly observations: readonly ExternalNetworkObservation[];
   readonly runtime: ResolvedRuntime;
   readonly events: RunEventLog;
+  readonly disabledDuringRepeatedActionAssertionIds?: ReadonlySet<string>;
 }): Promise<readonly ExternalAssertionResult[]> {
   const results: ExternalAssertionResult[] = [];
   for (const assertion of input.assertions) {
@@ -49,6 +50,7 @@ async function evaluateOne(
     readonly session: ReplayBrowserSession;
     readonly observations: readonly ExternalNetworkObservation[];
     readonly runtime: ResolvedRuntime;
+    readonly disabledDuringRepeatedActionAssertionIds?: ReadonlySet<string>;
   },
 ): Promise<ExternalAssertionResult> {
   const matched = input.observations.filter((item) => item.matched);
@@ -165,12 +167,24 @@ async function evaluateOne(
       });
     }
     case 'element_disabled': {
-      const disabled = await input.session.isDisabled(assertion.locator);
+      const disabled =
+        assertion.observationWindow === 'during_repeated_action'
+          ? (input.disabledDuringRepeatedActionAssertionIds?.has(
+              assertion.id,
+            ) ?? false)
+          : await input.session.isDisabled(assertion.locator);
       return createResult(assertion, disabled ? 'passed' : 'failed', {
-        expected: `${assertion.targetDescription} should become disabled.`,
+        expected:
+          assertion.observationWindow === 'during_repeated_action'
+            ? `${assertion.targetDescription} should become disabled during repeated triggering.`
+            : `${assertion.targetDescription} should become disabled.`,
         observed: disabled
-          ? `${assertion.targetDescription} was disabled.`
-          : `${assertion.targetDescription} was missing or remained enabled.`,
+          ? assertion.observationWindow === 'during_repeated_action'
+            ? `${assertion.targetDescription} was observed disabled during repeated triggering.`
+            : `${assertion.targetDescription} was disabled.`
+          : assertion.observationWindow === 'during_repeated_action'
+            ? `${assertion.targetDescription} was not observed disabled during repeated triggering.`
+            : `${assertion.targetDescription} was missing or remained enabled.`,
       });
     }
     case 'text_appeared': {

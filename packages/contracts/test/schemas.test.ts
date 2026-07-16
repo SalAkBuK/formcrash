@@ -225,6 +225,42 @@ describe('foundational contracts', () => {
         recommendedCandidateId: 'request-0123456789abcdef01234567',
         explanation: 'One high-confidence business mutation was identified.',
       },
+      normalAction: {
+        targetControlLocator: {
+          strategy: 'data-testid',
+          value: 'save-profile',
+        },
+        targetWasDisabledDuringPending: true,
+        finalPathname: '/profiles',
+        elements: [],
+      },
+      assertionRecommendationSets: [
+        {
+          recipeType: 'duplicate_action',
+          selectedRequestCandidateId: 'request-0123456789abcdef01234567',
+          recommendations: [
+            {
+              recommendationId: 'assertion-rec-0123456789abcdef01234567',
+              assertion: {
+                id: 'assertion-draft-0123456789abcdef01234567',
+                type: 'network_request_max',
+                maximum: 1,
+                description: 'At most one request.',
+              },
+              category: 'request_count',
+              confidence: 'high',
+              defaultEnabled: true,
+              reasonCode: 'repeated_action_request_limit',
+              explanation: 'The normal action sent one request.',
+              evidence: {
+                evidenceIds: ['request-0123456789abcdef01234567'],
+                source: 'request_discovery',
+              },
+            },
+          ],
+          limitations: ['No database state was inspected.'],
+        },
+      ],
     });
 
     expect(result.candidates[0]?.rank).toBe(1);
@@ -250,6 +286,7 @@ describe('foundational contracts', () => {
     });
 
     expect(result.requestSelectionProvenance).toBeNull();
+    expect(result.assertionSelectionProvenance).toBeUndefined();
   });
 
   it('rejects selection provenance that disagrees with the saved matcher', () => {

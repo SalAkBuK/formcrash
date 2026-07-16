@@ -96,6 +96,7 @@
       let localCreatedCount = 0;
       let fixedInFlight = false;
       const form = document.querySelector('form');
+      const saveButton = document.querySelector('[data-testid="save-profile"]');
       const authStatus = document.querySelector('#auth-status');
 
       function renderAuthentication() {
@@ -131,7 +132,10 @@
       form.addEventListener('submit', async (event) => {
         event.preventDefault();
         if (mode === 'fixed' && fixedInFlight) return;
-        if (mode === 'fixed') fixedInFlight = true;
+        if (mode === 'fixed') {
+          fixedInFlight = true;
+          saveButton.disabled = true;
+        }
         const fields = new FormData(form);
         const body = {
           displayName: fields.get('displayName'),
@@ -192,7 +196,10 @@
             target.hidden = false;
           }
         } finally {
-          if (mode === 'fixed') fixedInFlight = false;
+          if (mode === 'fixed') {
+            fixedInFlight = false;
+            saveButton.disabled = false;
+          }
         }
       });
 

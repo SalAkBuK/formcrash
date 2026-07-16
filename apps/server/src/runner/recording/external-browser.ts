@@ -79,9 +79,20 @@ export interface ReplayBrowserSession {
   isDisabled(locator: ReplayLocator): Promise<boolean>;
   textVisible(text: string): Promise<boolean>;
   inputValue(locator: ReplayLocator): Promise<string | null>;
+  findActionControl?(
+    locator: ReplayLocator,
+    type: 'click' | 'submit',
+  ): Promise<ReplayLocator | null>;
+  inspectSemanticElements?(): Promise<readonly SemanticElementSnapshot[]>;
   currentUrl(): string;
   settle(milliseconds: number): Promise<void>;
   close(): Promise<void>;
+}
+
+export interface SemanticElementSnapshot {
+  readonly locator: ReplayLocator;
+  readonly classification: 'success' | 'error' | 'loading';
+  readonly visible: boolean;
 }
 
 export type NetworkObservation =
@@ -311,6 +322,79 @@ class PlaywrightExternalSession
     }
   }
 
+  async findActionControl(
+    locator: ReplayLocator,
+    type: 'click' | 'submit',
+  ): Promise<ReplayLocator | null> {
+    const target = resolveLocator(this.page, locator);
+    if ((await target.count()) === 0) return null;
+    const control =
+      type === 'submit'
+        ? target
+            .locator(
+              'button[type="submit"], input[type="submit"], button:not([type])',
+            )
+            .first()
+        : target.first();
+    if ((await control.count()) === 0) return null;
+    return stableLocatorFor(control);
+  }
+
+  async inspectSemanticElements(): Promise<readonly SemanticElementSnapshot[]> {
+    const candidates = this.page.locator(
+      [
+        '[data-formcrash]',
+        '[data-testid]',
+        '[id]',
+        '[role="alert"]',
+        '[role="status"]',
+        '[aria-live]',
+      ].join(','),
+    );
+    const count = Math.min(await candidates.count(), 100);
+    const snapshots: SemanticElementSnapshot[] = [];
+    const seen = new Set<string>();
+    for (let index = 0; index < count; index += 1) {
+      const candidate = candidates.nth(index);
+      const classification = await candidate.evaluate((element) => {
+        const tokens = [
+          element.getAttribute('data-formcrash'),
+          element.getAttribute('data-testid'),
+          element.id,
+          element.className,
+          element.getAttribute('role'),
+          element.getAttribute('aria-live'),
+        ]
+          .join(' ')
+          .toLowerCase();
+        if (
+          /(?:success|complete|completed|confirmation|confirmed|saved)/u.test(
+            tokens,
+          )
+        )
+          return 'success' as const;
+        if (/(?:error|invalid|failure|failed|danger|alert)/u.test(tokens))
+          return 'error' as const;
+        if (/(?:loading|pending|progress|spinner|busy)/u.test(tokens))
+          return 'loading' as const;
+        return null;
+      });
+      if (classification === null) continue;
+      const locator = await stableLocatorFor(candidate);
+      if (locator === null) continue;
+      const key = JSON.stringify(locator);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      snapshots.push({
+        locator,
+        classification,
+        visible: await candidate.isVisible(),
+      });
+      if (snapshots.length >= 20) break;
+    }
+    return snapshots;
+  }
+
   currentUrl(): string {
     return this.page.url();
   }
@@ -346,6 +430,33 @@ class PlaywrightExternalSession
       );
     }
   }
+}
+
+async function stableLocatorFor(
+  locator: Locator,
+): Promise<ReplayLocator | null> {
+  return locator.evaluate((element) => {
+    const dataFormcrash = (element.getAttribute('data-formcrash') ?? '').trim();
+    if (dataFormcrash !== '' && dataFormcrash.length <= 160)
+      return {
+        strategy: 'data-formcrash' as const,
+        value: dataFormcrash,
+      };
+    const dataTestId = (element.getAttribute('data-testid') ?? '').trim();
+    if (dataTestId !== '' && dataTestId.length <= 160)
+      return { strategy: 'data-testid' as const, value: dataTestId };
+    if (
+      element.id !== '' &&
+      element.id.length <= 100 &&
+      !/\d{5,}/u.test(element.id) &&
+      !/^(react|radix|headlessui|:r|_r_)/iu.test(element.id)
+    )
+      return { strategy: 'id' as const, value: element.id };
+    const name = (element.getAttribute('name') ?? '').trim();
+    return name === '' || name.length > 160
+      ? null
+      : { strategy: 'name' as const, value: name };
+  });
 }
 
 export class PlaywrightExternalBrowserOwner implements ExternalBrowserOwner {

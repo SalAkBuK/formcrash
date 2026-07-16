@@ -25,8 +25,9 @@ beforeAll(async () => {
           <form id="profile" hidden>
             <label for="name">Name</label>
             <input id="name" name="name" />
-            <button type="submit">Save</button>
+            <button data-testid="save-profile" type="submit">Save</button>
           </form>
+          <section id="complete" class="complete" hidden>Completed</section>
           <script>
             document.querySelector('#open').addEventListener('click', () => {
               document.querySelector('#profile').hidden = false;
@@ -98,6 +99,37 @@ describe('external browser recorder injection', () => {
           : null,
       ),
     ).toEqual(['click', 'fill', 'submit']);
+  });
+
+  it('serializes stable action controls and semantic elements in the dev runtime callback shape', async () => {
+    const owner = new PlaywrightExternalBrowserOwner();
+    const session = await owner.launchReplay({
+      targetUrl,
+      headless: true,
+      timeoutMs: 10_000,
+    });
+    await session.navigate(targetUrl);
+
+    await expect(
+      session.findActionControl?.(
+        { strategy: 'id', value: 'profile' },
+        'submit',
+      ),
+    ).resolves.toEqual({
+      strategy: 'data-testid',
+      value: 'save-profile',
+    });
+    const semantic = await session.inspectSemanticElements?.();
+    expect(
+      semantic?.find(
+        (item) =>
+          item.locator.strategy === 'id' && item.locator.value === 'complete',
+      ),
+    ).toMatchObject({
+      classification: 'success',
+      visible: false,
+    });
+    await session.close();
   });
 
   it('does not record visible combobox text as a false accessible name', async () => {

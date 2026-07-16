@@ -46,6 +46,7 @@ interface ExperimentRow {
   readonly journeySnapshotJson: string;
   readonly assertionsSnapshotJson: string;
   readonly requestSelectionProvenanceJson: string | null;
+  readonly assertionSelectionProvenanceJson: string | null;
   readonly createdAt: string;
 }
 
@@ -200,8 +201,9 @@ export class ExternalExperimentRepository {
             `INSERT INTO external_experiment_versions
               (id, experiment_id, version, configuration_json,
                journey_snapshot_json, assertions_snapshot_json,
-               request_selection_provenance_json, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+               request_selection_provenance_json,
+               assertion_selection_provenance_json, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             id,
@@ -213,6 +215,9 @@ export class ExternalExperimentRepository {
             request.requestSelectionProvenance === null
               ? null
               : JSON.stringify(request.requestSelectionProvenance),
+            (request.assertionSelectionProvenance?.length ?? 0) === 0
+              ? null
+              : JSON.stringify(request.assertionSelectionProvenance),
             now,
           );
         const created = this.getVersion(id);
@@ -726,6 +731,7 @@ function experimentSelect(suffix: string): string {
                  ev.journey_snapshot_json AS journeySnapshotJson,
                  ev.assertions_snapshot_json AS assertionsSnapshotJson,
                  ev.request_selection_provenance_json AS requestSelectionProvenanceJson,
+                 ev.assertion_selection_provenance_json AS assertionSelectionProvenanceJson,
                  ev.created_at AS createdAt
             FROM external_experiment_versions ev
             JOIN external_experiments e ON e.id = ev.experiment_id
@@ -751,6 +757,10 @@ function mapExperiment(row: ExperimentRow): ExternalExperimentVersion {
       row.requestSelectionProvenanceJson === null
         ? null
         : parseJson(row.requestSelectionProvenanceJson),
+    assertionSelectionProvenance:
+      row.assertionSelectionProvenanceJson === null
+        ? []
+        : parseJson(row.assertionSelectionProvenanceJson),
     journeySnapshot: persistedJourneySchema.parse(
       parseJson(row.journeySnapshotJson),
     ),

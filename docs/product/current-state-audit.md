@@ -16,6 +16,13 @@
 > outcomes, and experiment versions can persist bounded selection provenance.
 > Historical findings below about dashboard-owned scoring remain unchanged as
 > audit evidence.
+>
+> **Post-audit note, Chunk 2:** Server-owned automatic assertion recommendation
+> was implemented after this point-in-time audit. Guided and Advanced now
+> consume the same deterministic evidence-backed network/interface
+> recommendations, and immutable experiment versions persist bounded generated,
+> modified, disabled, and manual assertion provenance. Historical findings below
+> about client-owned assertion generation remain unchanged as audit evidence.
 
 ## Evidence legend
 

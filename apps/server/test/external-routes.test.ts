@@ -215,6 +215,20 @@ describe('external lifecycle and safety routes', () => {
         recommendedCandidateId: 'request-0123456789abcdef01234567',
         explanation: 'One clear mutation was identified.',
       },
+      normalAction: {
+        targetControlLocator: null,
+        targetWasDisabledDuringPending: null,
+        finalPathname: '/form',
+        elements: [],
+      },
+      assertionRecommendationSets: [
+        {
+          recipeType: 'duplicate_action',
+          selectedRequestCandidateId: 'request-0123456789abcdef01234567',
+          recommendations: [],
+          limitations: [],
+        },
+      ],
     });
     vi.spyOn(RequestDiscoveryService.prototype, 'discover').mockResolvedValue(
       discovery,
@@ -227,6 +241,11 @@ describe('external lifecycle and safety routes', () => {
       url: `/api/journeys/${journey.id}/request-discovery`,
       payload: {
         targetStepId: 'submit',
+        recipe: {
+          type: 'duplicate_action',
+          triggerCount: 2,
+          intervalMs: 0,
+        },
         variables: {},
         confirmProduction: true,
       },

@@ -388,8 +388,22 @@ export const requestDiscoveryRecommendationSchema = z.object({
   explanation: z.string().min(1).max(1_000),
 });
 
+export const assertionRecommendationRecipeTypeSchema = z.enum([
+  'duplicate_action',
+  'rapid_triple_action',
+  'server_duplicate_handling',
+  'advanced_repeated_action',
+]);
+
+export const assertionRecommendationRecipeSchema = z.object({
+  type: assertionRecommendationRecipeTypeSchema,
+  triggerCount: z.union([z.literal(2), z.literal(3)]),
+  intervalMs: z.union([z.literal(0), z.literal(100), z.literal(300)]),
+});
+
 export const requestDiscoveryRequestSchema = z.object({
   targetStepId: z.string().min(1),
+  recipe: assertionRecommendationRecipeSchema,
   variables: ephemeralRuntimeValuesSchema.optional().default({}),
   confirmProduction: z.boolean().optional().default(false),
   normalizeJourney: z.boolean().optional().default(false),
@@ -398,47 +412,6 @@ export const requestDiscoveryRequestSchema = z.object({
     .optional()
     .default({}),
 });
-
-export const requestDiscoveryResultSchema = z
-  .object({
-    discoveryId: z.uuid(),
-    discoveredAt: z.iso.datetime({ offset: true }),
-    journeyId: z.string().min(1),
-    targetStepId: z.string().min(1),
-    candidates: z.array(rankedRequestCandidateSchema),
-    recommendation: requestDiscoveryRecommendationSchema,
-  })
-  .superRefine((value, context) => {
-    const recommended = value.candidates.filter(
-      (candidate) => candidate.recommended,
-    );
-    if (
-      value.recommendation.outcome === 'recommended' &&
-      (recommended.length !== 1 ||
-        recommended[0]?.candidateId !==
-          value.recommendation.recommendedCandidateId ||
-        recommended[0]?.confidence !== 'high')
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['recommendation'],
-        message:
-          'A recommended discovery must identify exactly one high-confidence recommended candidate.',
-      });
-    }
-    if (
-      value.recommendation.outcome !== 'recommended' &&
-      (value.recommendation.recommendedCandidateId !== null ||
-        recommended.length > 0)
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['recommendation'],
-        message:
-          'Review, ambiguous, and no-candidate discoveries cannot silently recommend a candidate.',
-      });
-    }
-  });
 
 export const requestSelectionModeSchema = z.enum([
   'automatic',
@@ -558,6 +531,7 @@ export const externalAssertionSchema = z.discriminatedUnion('type', [
     type: z.literal('element_disabled'),
     locator: replayLocatorSchema,
     targetDescription: z.string().min(1).max(300),
+    observationWindow: z.enum(['final', 'during_repeated_action']).optional(),
   }),
   assertionBaseSchema.extend({
     type: z.literal('text_appeared'),
@@ -579,6 +553,148 @@ export const externalAssertionSchema = z.discriminatedUnion('type', [
   }),
 ]);
 
+export const normalActionElementObservationSchema = z.object({
+  observationId: z.string().regex(/^element-[a-f0-9]{24}$/u),
+  locator: replayLocatorSchema,
+  classification: z.enum(['success', 'error', 'loading']),
+  visibleBefore: z.boolean(),
+  visibleAfter: z.boolean(),
+});
+
+export const normalActionObservationSchema = z.object({
+  targetControlLocator: replayLocatorSchema.nullable().default(null),
+  targetWasDisabledDuringPending: z.boolean().nullable().default(null),
+  finalPathname: z.string().startsWith('/').max(2_000).nullable().default(null),
+  elements: z.array(normalActionElementObservationSchema).max(20).default([]),
+});
+
+export const assertionRecommendationCategorySchema = z.enum([
+  'request_count',
+  'response_outcome',
+  'server_error',
+  'submit_state',
+  'success_interface',
+  'error_interface',
+  'navigation',
+  'field_retention',
+]);
+
+export const assertionRecommendationConfidenceSchema = z.enum([
+  'high',
+  'review',
+]);
+
+export const assertionRecommendationEvidenceSchema = z.object({
+  evidenceIds: z.array(z.string().min(1).max(160)).max(20),
+  source: z.enum([
+    'request_discovery',
+    'normal_action_state',
+    'normal_interface_state',
+    'normal_navigation',
+    'recipe',
+  ]),
+});
+
+export const assertionRecommendationSchema = z.object({
+  recommendationId: z.string().regex(/^assertion-rec-[a-f0-9]{24}$/u),
+  assertion: externalAssertionSchema,
+  category: assertionRecommendationCategorySchema,
+  confidence: assertionRecommendationConfidenceSchema,
+  defaultEnabled: z.boolean(),
+  reasonCode: z.string().regex(/^[a-z][a-z0-9_]{1,79}$/u),
+  explanation: z.string().min(1).max(1_000),
+  evidence: assertionRecommendationEvidenceSchema,
+});
+
+export const assertionRecommendationSetSchema = z.object({
+  recipeType: assertionRecommendationRecipeTypeSchema,
+  selectedRequestCandidateId: z.string().min(1).nullable().default(null),
+  recommendations: z.array(assertionRecommendationSchema).max(20),
+  limitations: z.array(z.string().min(1).max(500)).max(20),
+});
+
+export const requestDiscoveryResultSchema = z
+  .object({
+    discoveryId: z.uuid(),
+    discoveredAt: z.iso.datetime({ offset: true }),
+    journeyId: z.string().min(1),
+    targetStepId: z.string().min(1),
+    candidates: z.array(rankedRequestCandidateSchema),
+    recommendation: requestDiscoveryRecommendationSchema,
+    normalAction: normalActionObservationSchema,
+    assertionRecommendationSets: z
+      .array(assertionRecommendationSetSchema)
+      .min(1),
+  })
+  .superRefine((value, context) => {
+    const recommended = value.candidates.filter(
+      (candidate) => candidate.recommended,
+    );
+    if (
+      value.recommendation.outcome === 'recommended' &&
+      (recommended.length !== 1 ||
+        recommended[0]?.candidateId !==
+          value.recommendation.recommendedCandidateId ||
+        recommended[0]?.confidence !== 'high')
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['recommendation'],
+        message:
+          'A recommended discovery must identify exactly one high-confidence recommended candidate.',
+      });
+    }
+    if (
+      value.recommendation.outcome !== 'recommended' &&
+      (value.recommendation.recommendedCandidateId !== null ||
+        recommended.length > 0)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['recommendation'],
+        message:
+          'Review, ambiguous, and no-candidate discoveries cannot silently recommend a candidate.',
+      });
+    }
+    const setCandidateIds = value.assertionRecommendationSets.map(
+      (set) => set.selectedRequestCandidateId,
+    );
+    if (new Set(setCandidateIds).size !== setCandidateIds.length) {
+      context.addIssue({
+        code: 'custom',
+        path: ['assertionRecommendationSets'],
+        message:
+          'Assertion recommendation sets must identify unique request candidates.',
+      });
+    }
+  });
+
+export const assertionSelectionOriginSchema = z.enum([
+  'generated',
+  'generated_modified',
+  'manual',
+]);
+
+export const assertionSelectionActionSchema = z.enum([
+  'accepted',
+  'enabled',
+  'disabled',
+  'modified',
+  'manual',
+]);
+
+export const assertionSelectionProvenanceEntrySchema = z.object({
+  assertionId: z.string().min(1).nullable(),
+  recommendationId: z.string().min(1).nullable(),
+  origin: assertionSelectionOriginSchema,
+  confidence: assertionRecommendationConfidenceSchema.nullable(),
+  reasonCode: z.string().min(1).max(80).nullable(),
+  explanation: z.string().min(1).max(1_000).nullable(),
+  defaultEnabled: z.boolean().nullable(),
+  action: assertionSelectionActionSchema,
+  evidenceIds: z.array(z.string().min(1).max(160)).max(20),
+});
+
 export const createExternalExperimentRequestSchema = z
   .object({
     name: z.string().trim().min(1).max(160),
@@ -594,6 +710,10 @@ export const createExternalExperimentRequestSchema = z
       .nullable()
       .optional()
       .default(null),
+    assertionSelectionProvenance: z
+      .array(assertionSelectionProvenanceEntrySchema)
+      .max(40)
+      .optional(),
     stepValueOverrides: z
       .record(z.string().min(1), z.string().max(10_000))
       .optional(),
@@ -630,6 +750,31 @@ export const createExternalExperimentRequestSchema = z
           'The persisted selected matcher must match the experiment network matcher.',
       });
     }
+    if ((value.assertionSelectionProvenance?.length ?? 0) > 0) {
+      const persistedAssertionIds = value.assertions.map(
+        (assertion) => assertion.id,
+      );
+      const provenanceAssertionIds = (value.assertionSelectionProvenance ?? [])
+        .map((entry) => entry.assertionId)
+        .filter((id): id is string => id !== null);
+      if (
+        new Set(provenanceAssertionIds).size !==
+          provenanceAssertionIds.length ||
+        persistedAssertionIds.some(
+          (assertionId) => !provenanceAssertionIds.includes(assertionId),
+        ) ||
+        provenanceAssertionIds.some(
+          (assertionId) => !persistedAssertionIds.includes(assertionId),
+        )
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['assertionSelectionProvenance'],
+          message:
+            'Assertion provenance must identify every saved assertion exactly once.',
+        });
+      }
+    }
   });
 
 export const externalExperimentVersionSchema = z.object({
@@ -650,6 +795,9 @@ export const externalExperimentVersionSchema = z.object({
   requestSelectionProvenance: requestSelectionProvenanceSchema
     .nullable()
     .default(null),
+  assertionSelectionProvenance: z
+    .array(assertionSelectionProvenanceEntrySchema)
+    .default([]),
   journeySnapshot: persistedJourneySchema,
   createdAt: z.iso.datetime({ offset: true }),
 });
@@ -1119,6 +1267,39 @@ export type RequestDiscoveryRequest = z.infer<
 >;
 export type RequestDiscoveryResult = z.infer<
   typeof requestDiscoveryResultSchema
+>;
+export type AssertionRecommendationRecipeType = z.infer<
+  typeof assertionRecommendationRecipeTypeSchema
+>;
+export type AssertionRecommendationRecipe = z.infer<
+  typeof assertionRecommendationRecipeSchema
+>;
+export type NormalActionElementObservation = z.infer<
+  typeof normalActionElementObservationSchema
+>;
+export type NormalActionObservation = z.infer<
+  typeof normalActionObservationSchema
+>;
+export type AssertionRecommendationCategory = z.infer<
+  typeof assertionRecommendationCategorySchema
+>;
+export type AssertionRecommendationConfidence = z.infer<
+  typeof assertionRecommendationConfidenceSchema
+>;
+export type AssertionRecommendation = z.infer<
+  typeof assertionRecommendationSchema
+>;
+export type AssertionRecommendationSet = z.infer<
+  typeof assertionRecommendationSetSchema
+>;
+export type AssertionSelectionOrigin = z.infer<
+  typeof assertionSelectionOriginSchema
+>;
+export type AssertionSelectionAction = z.infer<
+  typeof assertionSelectionActionSchema
+>;
+export type AssertionSelectionProvenanceEntry = z.infer<
+  typeof assertionSelectionProvenanceEntrySchema
 >;
 export type RequestSelectionMode = z.infer<typeof requestSelectionModeSchema>;
 export type RequestSelectionProvenance = z.infer<

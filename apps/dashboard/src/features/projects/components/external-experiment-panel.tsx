@@ -10,6 +10,7 @@ import {
 import type {
   AuthCaptureSession,
   AuthValidationResult,
+  AssertionRecommendation,
   CreateExternalExperimentRequest,
   EphemeralRuntimeValues,
   ExternalAssertion,
@@ -48,6 +49,13 @@ import {
   matcherForCandidate,
   selectionProvenance,
 } from '../models/request-selection';
+import {
+  assertionWithEditedValue,
+  editableAssertionValue,
+  recommendationProvenance,
+  recommendationSetForCandidate,
+  type RecommendationSelection,
+} from '../models/assertion-recommendations';
 import { ExternalRunResult } from './external-run-result';
 import { GuidedTestPanel } from './guided-test-panel';
 
@@ -69,6 +77,8 @@ interface AssertionDraft {
   readonly type: ExternalAssertionType;
   readonly value: string;
   readonly stepId: string;
+  readonly enabled: boolean;
+  readonly recommendation: AssertionRecommendation | null;
 }
 
 export function ExternalExperimentPanel({ project, journeys }: Props) {
@@ -122,13 +132,44 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
   );
   const targetStep =
     compatibleSteps.find((step) => step.id === targetStepId) ?? null;
-  const networkAssertionSelected = assertionDrafts.some((draft) =>
-    draft.type.startsWith('network_'),
+  const networkAssertionSelected = assertionDrafts.some(
+    (draft) => draft.enabled && draft.type.startsWith('network_'),
   );
   const candidates = discovery?.candidates ?? noCandidates;
   const selectedNetworkCandidate = candidates[candidateIndex] ?? null;
   const networkMatcherMissing =
     networkAssertionSelected && selectedNetworkCandidate === null;
+
+  useEffect(() => {
+    if (discovery === null) return;
+    const recommendationSet = recommendationSetForCandidate(
+      discovery,
+      selectedNetworkCandidate,
+    );
+    setAssertionDrafts((current) => {
+      const manual = current.filter((draft) => draft.recommendation === null);
+      const retainedManual =
+        recommendationSet.recommendations.length > 0 &&
+        manual.length === 1 &&
+        isPristineManualDraft(manual[0]!)
+          ? []
+          : manual;
+      if (
+        recommendationSet.recommendations.length === 0 &&
+        retainedManual.length === 0
+      ) {
+        return [newAssertionDraft(targetStep?.id ?? '')];
+      }
+      return [
+        ...recommendationSet.recommendations.map(recommendationDraft),
+        ...retainedManual,
+      ];
+    });
+  }, [
+    discovery?.discoveryId,
+    selectedNetworkCandidate?.candidateId,
+    targetStep?.id,
+  ]);
 
   useEffect(() => {
     setWorkspaceMode('guided');
@@ -176,6 +217,11 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
     setCandidateIndex(-1);
     void refreshExperiments(journey.id);
   }, [journey, targetStepId]);
+
+  useEffect(() => {
+    setDiscovery(null);
+    setCandidateIndex(-1);
+  }, [triggerCount, intervalMs]);
 
   async function refreshExperiments(selectedJourneyId: string): Promise<void> {
     try {
@@ -262,6 +308,15 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
         targetStep.id,
         runtimeValues,
         project.environment !== 'production' || productionConfirmed,
+        {
+          recipe: {
+            type: 'advanced_repeated_action',
+            triggerCount,
+            intervalMs,
+          },
+          normalizeJourney: false,
+          stepValueOverrides: {},
+        },
       );
       setDiscovery(discovered);
       setCandidateIndex(initialCandidateIndex(discovered));
@@ -284,11 +339,51 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
     setError(null);
     try {
       const candidate = selectedNetworkCandidate;
-      const assertions = assertionDrafts.map((draft) => {
-        const assertionStep =
-          journey.steps.find((step) => step.id === draft.stepId) ?? targetStep;
-        return buildAssertion(draft.type, draft.value, assertionStep);
-      });
+      const assertions = assertionDrafts
+        .filter((draft) => draft.enabled)
+        .map((draft) => {
+          const assertionStep =
+            journey.steps.find((step) => step.id === draft.stepId) ??
+            targetStep;
+          if (draft.recommendation !== null) {
+            const original = draft.recommendation.assertion;
+            if (draft.type === original.type) {
+              return assertionWithEditedValue(original, draft.value);
+            }
+            return {
+              ...buildAssertion(draft.type, draft.value, assertionStep),
+              id: original.id,
+            };
+          }
+          return buildAssertion(draft.type, draft.value, assertionStep);
+        });
+      const generatedSelections: RecommendationSelection[] = assertionDrafts
+        .filter(
+          (
+            draft,
+          ): draft is AssertionDraft & {
+            readonly recommendation: AssertionRecommendation;
+          } => draft.recommendation !== null,
+        )
+        .map((draft) => {
+          const assertion =
+            assertions.find(
+              (item) => item.id === draft.recommendation.assertion.id,
+            ) ?? draft.recommendation.assertion;
+          return {
+            recommendation: draft.recommendation,
+            assertion,
+            enabled: draft.enabled,
+          };
+        });
+      const generatedAssertionIds = new Set(
+        generatedSelections.map(
+          (selection) => selection.recommendation.assertion.id,
+        ),
+      );
+      const manualAssertions = assertions.filter(
+        (assertion) => !generatedAssertionIds.has(assertion.id),
+      );
       const input: CreateExternalExperimentRequest = {
         name: experimentName,
         targetStepId: targetStep.id,
@@ -302,6 +397,9 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
           candidate === null || discovery === null
             ? null
             : selectionProvenance(discovery, candidate),
+        assertionSelectionProvenance: [
+          ...recommendationProvenance(generatedSelections, manualAssertions),
+        ],
       };
       await createExternalExperiment(journey.id, input);
       await refreshExperiments(journey.id);
@@ -885,6 +983,35 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
                   const fieldOnly = draft.type === 'field_retained';
                   return (
                     <div className="assertion-draft" key={draft.key}>
+                      <label>
+                        <input
+                          checked={draft.enabled}
+                          onChange={(event) =>
+                            setAssertionDrafts((current) =>
+                              current.map((item) =>
+                                item.key === draft.key
+                                  ? {
+                                      ...item,
+                                      enabled: event.target.checked,
+                                    }
+                                  : item,
+                              ),
+                            )
+                          }
+                          type="checkbox"
+                        />{' '}
+                        {draft.recommendation === null
+                          ? 'Manually added'
+                          : draftMatchesRecommendation(draft)
+                            ? 'Generated unchanged'
+                            : 'Generated and modified'}
+                      </label>
+                      {draft.recommendation !== null ? (
+                        <p className="technical-note">
+                          {draft.recommendation.confidence} confidence ·{' '}
+                          {draft.recommendation.explanation}
+                        </p>
+                      ) : null}
                       <div className="builder-grid">
                         <label>
                           Assertion {index + 1} type
@@ -961,7 +1088,8 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
                           </label>
                         ) : null}
                       </div>
-                      {assertionDrafts.length > 1 ? (
+                      {draft.recommendation === null &&
+                      assertionDrafts.length > 1 ? (
                         <button
                           className="copy-button"
                           onClick={() =>
@@ -986,9 +1114,10 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
                 targetStep === null ||
                 experimentName.trim() === '' ||
                 networkMatcherMissing ||
-                assertionDrafts.length === 0 ||
+                !assertionDrafts.some((draft) => draft.enabled) ||
                 assertionDrafts.some(
                   (draft) =>
+                    draft.enabled &&
                     assertionNeedsValue(draft.type) &&
                     draft.value.trim() === '',
                 )
@@ -1348,7 +1477,40 @@ function newAssertionDraft(stepId = ''): AssertionDraft {
     type: 'network_request_max',
     value: '1',
     stepId,
+    enabled: true,
+    recommendation: null,
   };
+}
+
+function recommendationDraft(
+  recommendation: AssertionRecommendation,
+): AssertionDraft {
+  return {
+    key: recommendation.recommendationId,
+    type: recommendation.assertion.type,
+    value: editableAssertionValue(recommendation.assertion),
+    stepId: '',
+    enabled: recommendation.defaultEnabled,
+    recommendation,
+  };
+}
+
+function draftMatchesRecommendation(draft: AssertionDraft): boolean {
+  if (draft.recommendation === null) return false;
+  return (
+    draft.type === draft.recommendation.assertion.type &&
+    draft.value === editableAssertionValue(draft.recommendation.assertion)
+  );
+}
+
+function isPristineManualDraft(draft: AssertionDraft): boolean {
+  return (
+    draft.recommendation === null &&
+    draft.enabled &&
+    draft.type === 'network_request_max' &&
+    draft.value === '1' &&
+    draft.stepId === ''
+  );
 }
 function emptyHook(): HttpHook {
   return { method: 'POST', url: '', headers: {}, body: null, timeoutMs: 5000 };

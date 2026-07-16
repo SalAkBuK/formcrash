@@ -233,8 +233,9 @@ External target and journey endpoints:
   Each candidate includes a stable ID, score, rank, classification, confidence,
   recommendation flag, and plain-language score reasons. The result is
   `recommended`, `review`, `ambiguous`, or `no_candidate`. Discovery executes
-  the real action once and requires production confirmation for production
-  projects.
+  the real action once, captures bounded normal interface/path evidence, and
+  returns server-owned assertion recommendation sets for every selectable
+  candidate. It requires production confirmation for production projects.
 - `POST` and `GET /api/journeys/:journeyId/experiments` — create immutable
   Impatient User versions and list them.
 - `GET` or `DELETE /api/external-experiments/:experimentVersionId` — inspect or
@@ -268,9 +269,15 @@ same-origin successful mutation with a clear score lead; similar mutations are
 reported as ambiguous and no matcher is fabricated when evidence is unsuitable.
 Network assertions support maximum and exact request/success counts,
 allowed-status checks, and explicit HTTP 5xx rejection; multiple assertions may
-be combined in one version. The full scoring and confidence model is documented
-in
-[`docs/architecture/request-recommendation.md`](docs/architecture/request-recommendation.md).
+be combined in one version. Stable pending controls, success/error selectors,
+and final pathnames may also produce review-confidence interface
+recommendations. Guided and Advanced consume the same server sets, and versions
+retain generated, modified, disabled, and manual assertion provenance. The
+system does not infer generic business-record counts. The request and assertion
+models are documented in
+[`docs/architecture/request-recommendation.md`](docs/architecture/request-recommendation.md)
+and
+[`docs/architecture/assertion-recommendation.md`](docs/architecture/assertion-recommendation.md).
 
 Before-run and cleanup hooks accept only bounded `POST` or `DELETE` requests and
 should exist only in controlled test environments. A failed before-run hook is a
@@ -340,8 +347,10 @@ Guided Test is the default external-testing workflow: it recommends the last
 recorded submit or click, replays it once, consumes the server-ranked browser
 requests, auto-selects only a high-confidence state-changing request, generates
 unique common field values, normalizes adjacent recorded fills, creates four
-duplicate-safety network assertions, saves an immutable experiment version,
-runs it, and explains the outcome in plain language. Ambiguous or review
+evidence-backed network assertions plus supported review-confidence interface
+checks, saves an immutable experiment version, runs it, and explains the outcome
+in plain language. Users may disable recommendations, approve review checks, or
+edit supported values. Ambiguous or review
 outcomes require explicit selection, while no-candidate results do not invent a
 matcher. Before opening a browser it now scores journey
 readiness, blocks unresolved runtime values or missing replay targets, and warns
@@ -360,7 +369,9 @@ separate `fixtures/external-target` application and the bundled sample checkout.
 Request recommendation is now a typed server contract with deterministic scores,
 plain reasons, explicit ambiguity handling, and immutable selection provenance
 for automatic, confirmed, or overridden choices. The dashboard does not
-recompute ranking.
+recompute ranking. Assertion recommendation is likewise server-owned, uses only
+bounded evidence from the same discovery action, and persists per-assertion
+selection provenance. Generic business-record assertions remain unsupported.
 It does **not** implement failed-versus-fixed comparison, reports, exports, other
 failure injectors, CI orchestration, or cloud execution.
 
