@@ -8,12 +8,18 @@ const mocks = vi.hoisted(() => ({
   clearAuthentication: vi.fn(),
   confirmAuthenticationCapture: vi.fn(),
   createExternalExperiment: vi.fn(),
+  deleteExternalExperimentVersion: vi.fn(),
+  deleteExternalRun: vi.fn(),
   discoverRequests: vi.fn(),
+  getExternalArtifactUrl: vi.fn(),
+  getExternalRun: vi.fn(),
   getProjectSettings: vi.fn(),
   listExternalExperiments: vi.fn(),
+  listExternalRuns: vi.fn(),
   runExternalExperiment: vi.fn(),
   saveProjectSettings: vi.fn(),
   startAuthenticationCapture: vi.fn(),
+  testAuthentication: vi.fn(),
 }));
 
 vi.mock('../src/features/projects/api/external-experiments', () => mocks);
@@ -22,6 +28,7 @@ const project = {
   id: 'project-1',
   name: 'Authenticated fixture',
   targetUrl: 'http://localhost:4300/protected',
+  environment: 'staging' as const,
   description: '',
   createdAt: '2026-07-16T00:00:00.000Z',
   updatedAt: '2026-07-16T00:00:00.000Z',
@@ -116,8 +123,16 @@ const version = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.getExternalArtifactUrl.mockReturnValue(
+    'http://localhost:4100/api/external-runs/run-1/artifacts/screen-1',
+  );
   mocks.getProjectSettings.mockResolvedValue(settings);
   mocks.listExternalExperiments.mockResolvedValue([version]);
+  mocks.listExternalRuns.mockResolvedValue({
+    items: [],
+    limit: 20,
+    offset: 0,
+  });
   mocks.discoverRequests.mockResolvedValue({
     journeyId: journey.id,
     targetStepId: 'submit-profile',
@@ -133,9 +148,22 @@ beforeEach(() => {
     ],
   });
   mocks.createExternalExperiment.mockResolvedValue(version);
-  mocks.runExternalExperiment.mockResolvedValue({
+  const runResult = {
     runId: 'run-1',
+    experimentVersionId: version.id,
+    projectId: project.id,
+    journeyId: journey.id,
     status: 'passed',
+    startedAt: '2026-07-16T00:00:00.000Z',
+    completedAt: '2026-07-16T00:00:01.000Z',
+    durationMs: 1_000,
+    targetUrl: project.targetUrl,
+    projectName: project.name,
+    journeyName: journey.name,
+    experimentName: version.name,
+    experimentSnapshot: version,
+    resolvedValues: {},
+    triggerAttempts: 2,
     assertions: [
       {
         assertionResultId: 'result-1',
@@ -150,9 +178,39 @@ beforeEach(() => {
     ],
     runnerError: null,
     warnings: [],
-    networkObservations: [{ matched: true }],
-    artifacts: [{ artifactId: 'screen-1' }],
-  });
+    networkObservations: [
+      {
+        requestId: 'request-1',
+        method: 'POST',
+        pathname: '/api/profile',
+        origin: 'http://localhost:4300',
+        startedAtMs: 10,
+        completedAtMs: 20,
+        status: 201,
+        failed: false,
+        matched: true,
+      },
+    ],
+    events: [],
+    artifacts: [
+      {
+        artifactId: 'screen-1',
+        runId: 'run-1',
+        artifactType: 'screenshot',
+        label: 'final-result',
+        relativePath: 'artifacts/run-1/final-result.png',
+        mimeType: 'image/png',
+        sizeBytes: 10,
+        checksumSha256: 'a'.repeat(64),
+        captureSequence: 1,
+        createdAt: '2026-07-16T00:00:01.000Z',
+        metadata: {},
+      },
+    ],
+    createdAt: '2026-07-16T00:00:00.000Z',
+  };
+  mocks.getExternalRun.mockResolvedValue(runResult);
+  mocks.runExternalExperiment.mockResolvedValue(runResult);
 });
 
 describe('external experiment dashboard workflow', () => {
@@ -172,6 +230,14 @@ describe('external experiment dashboard workflow', () => {
         (option) => option.value === 'fill-name',
       )?.disabled,
     ).toBe(true);
+    expect(
+      screen.getByRole('button', {
+        name: 'Save immutable experiment version',
+      }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText(/Network assertions cannot run without a matcher/),
+    ).toBeVisible();
 
     await user.type(screen.getByLabelText('SECRET_TOKEN'), 'runtime-only');
     await user.click(screen.getByRole('button', { name: 'Discover requests' }));
@@ -181,8 +247,13 @@ describe('external experiment dashboard workflow', () => {
       }),
     ).toBeVisible();
     await user.selectOptions(
-      screen.getByLabelText('Optional network matcher'),
+      screen.getByLabelText('Required network matcher'),
       '0',
+    );
+    await user.click(screen.getByRole('button', { name: 'Add assertion' }));
+    await user.selectOptions(
+      screen.getByLabelText('Assertion 2 type'),
+      'network_no_server_errors',
     );
     await user.click(
       screen.getByRole('button', {
@@ -200,6 +271,10 @@ describe('external experiment dashboard workflow', () => {
             pathname: '/api/profile',
             host: 'localhost:4300',
           },
+          assertions: [
+            expect.objectContaining({ type: 'network_request_max' }),
+            expect.objectContaining({ type: 'network_no_server_errors' }),
+          ],
         }),
       ),
     );
@@ -209,8 +284,16 @@ describe('external experiment dashboard workflow', () => {
       await screen.findByRole('heading', { name: 'passed' }),
     ).toBeVisible();
     expect(screen.getByText('1/1 assertions passed')).toBeVisible();
-    expect(mocks.runExternalExperiment).toHaveBeenCalledWith('version-1', {
-      SECRET_TOKEN: 'runtime-only',
-    });
+    expect(screen.getByText('POST /api/profile')).toBeVisible();
+    expect(
+      screen.getByRole('img', { name: 'final-result screenshot' }),
+    ).toBeVisible();
+    expect(mocks.runExternalExperiment).toHaveBeenCalledWith(
+      'version-1',
+      {
+        SECRET_TOKEN: 'runtime-only',
+      },
+      true,
+    );
   });
 });

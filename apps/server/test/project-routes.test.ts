@@ -103,4 +103,58 @@ describe('project API', () => {
       },
     });
   });
+
+  it('deletes an empty external project and removes it from the list', async () => {
+    const temporary = createTemporaryTestConfig();
+    cleanups.push(temporary.cleanup);
+    const app = createApp({ config: temporary.config, logger: false });
+    apps.push(app);
+    const created = projectSchema.parse(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/projects',
+          payload: {
+            name: 'Disposable target',
+            targetUrl: 'https://example.test/disposable',
+          },
+        })
+      ).json(),
+    );
+
+    const deleted = await app.inject({
+      method: 'DELETE',
+      url: `/api/projects/${created.id}`,
+    });
+
+    expect(deleted.statusCode).toBe(200);
+    expect(deleted.json()).toEqual({ deletedProjectId: created.id });
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/api/projects/${created.id}`,
+        })
+      ).statusCode,
+    ).toBe(404);
+  });
+
+  it('protects the bundled Sample Checkout project from deletion', async () => {
+    const temporary = createTemporaryTestConfig();
+    cleanups.push(temporary.cleanup);
+    const app = createApp({ config: temporary.config, logger: false });
+    apps.push(app);
+
+    for (const suffix of ['', '?force=true']) {
+      const response = await app.inject({
+        method: 'DELETE',
+        url: `/api/projects/project-sample-checkout${suffix}`,
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({
+        error: { code: 'PROTECTED_PROJECT' },
+      });
+    }
+  });
 });

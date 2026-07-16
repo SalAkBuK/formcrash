@@ -13,6 +13,7 @@ import {
   type JourneyRecordingMetadata,
   type PersistedJourney,
   type Project,
+  type ProjectEnvironment,
   type RecordedJourneyStep,
   type RecordingSession,
   type RecordingSessionStatus,
@@ -20,10 +21,13 @@ import {
 } from '@formcrash/contracts';
 import type Database from 'better-sqlite3';
 
+import { SAMPLE_DEFINITION_IDS } from './sample-seed.js';
+
 interface ProjectRow {
   readonly id: string;
   readonly name: string;
   readonly targetUrl: string;
+  readonly environment: string;
   readonly description: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -58,6 +62,8 @@ export class ProjectJourneyRepository {
     const project = projectSchema.parse({
       id: randomUUID(),
       ...input,
+      environment:
+        input.environment ?? inferProjectEnvironment(input.targetUrl),
       description: input.description ?? '',
       createdAt: now,
       updatedAt: now,
@@ -65,13 +71,14 @@ export class ProjectJourneyRepository {
     this.database
       .prepare(
         `INSERT INTO projects
-          (id, name, target_url, description, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+          (id, name, target_url, environment, description, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         project.id,
         project.name,
         project.targetUrl,
+        project.environment,
         project.description,
         project.createdAt,
         project.updatedAt,
@@ -82,7 +89,7 @@ export class ProjectJourneyRepository {
   listProjects(): readonly Project[] {
     const rows = this.database
       .prepare(
-        `SELECT id, name, target_url AS targetUrl, description,
+        `SELECT id, name, target_url AS targetUrl, environment, description,
                 created_at AS createdAt, updated_at AS updatedAt
            FROM projects ORDER BY updated_at DESC, id DESC`,
       )
@@ -93,12 +100,65 @@ export class ProjectJourneyRepository {
   getProject(projectId: string): Project | null {
     const row = this.database
       .prepare(
-        `SELECT id, name, target_url AS targetUrl, description,
+        `SELECT id, name, target_url AS targetUrl, environment, description,
                 created_at AS createdAt, updated_at AS updatedAt
            FROM projects WHERE id = ?`,
       )
       .get(projectId) as ProjectRow | undefined;
     return row === undefined ? null : projectSchema.parse(row);
+  }
+
+  deleteProject(
+    projectId: string,
+    force = false,
+  ): 'deleted' | 'not_found' | 'protected' | 'has_activity' {
+    if (projectId === SAMPLE_DEFINITION_IDS.projectId) return 'protected';
+    if (this.getProject(projectId) === null) return 'not_found';
+
+    const dependentTables = [
+      'journeys',
+      'recording_sessions',
+      'auth_capture_sessions',
+      'experiments',
+      'external_experiments',
+      'external_runs',
+    ] as const;
+    const hasActivity = dependentTables.some((table) => {
+      const row = this.database
+        .prepare(`SELECT 1 FROM ${table} WHERE project_id = ? LIMIT 1`)
+        .get(projectId);
+      return row !== undefined;
+    });
+    if (hasActivity && !force) return 'has_activity';
+
+    const remove = this.database.transaction(() => {
+      if (force) {
+        deleteProjectActivity(this.database, projectId);
+      }
+      this.database
+        .prepare('DELETE FROM project_execution_settings WHERE project_id = ?')
+        .run(projectId);
+      this.database
+        .prepare('DELETE FROM project_auth_sessions WHERE project_id = ?')
+        .run(projectId);
+      this.database.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
+    });
+    remove();
+    return 'deleted';
+  }
+
+  deleteJourney(journeyId: string): 'deleted' | 'not_found' {
+    const journey = this.getJourney(journeyId);
+    if (journey === null) return 'not_found';
+    const remove = this.database.transaction(() => {
+      deleteJourneyActivity(this.database, journeyId);
+      this.database.prepare('DELETE FROM journeys WHERE id = ?').run(journeyId);
+      this.database
+        .prepare('UPDATE projects SET updated_at = ? WHERE id = ?')
+        .run(new Date().toISOString(), journey.projectId);
+    });
+    remove();
+    return 'deleted';
   }
 
   createRecordingSession(projectId: string): RecordingSession {
@@ -278,4 +338,125 @@ function mapJourney(row: JourneyRow): PersistedJourney {
     recordingMetadata: JSON.parse(row.recordingMetadataJson) as unknown,
     createdAt: row.createdAt,
   });
+}
+
+function inferProjectEnvironment(targetUrl: string): ProjectEnvironment {
+  const hostname = new URL(targetUrl).hostname;
+  return ['localhost', '127.0.0.1', '::1'].includes(hostname)
+    ? 'local'
+    : 'production';
+}
+
+function deleteProjectActivity(
+  database: Database.Database,
+  projectId: string,
+): void {
+  const journeyIds = database
+    .prepare('SELECT id FROM journeys WHERE project_id = ?')
+    .all(projectId) as Array<{ readonly id: string }>;
+  for (const { id } of journeyIds) deleteJourneyActivity(database, id);
+  database
+    .prepare('DELETE FROM auth_capture_sessions WHERE project_id = ?')
+    .run(projectId);
+  database
+    .prepare('DELETE FROM recording_sessions WHERE project_id = ?')
+    .run(projectId);
+  database.prepare('DELETE FROM journeys WHERE project_id = ?').run(projectId);
+}
+
+function deleteJourneyActivity(
+  database: Database.Database,
+  journeyId: string,
+): void {
+  database
+    .prepare(
+      `DELETE FROM external_assertion_results
+        WHERE run_id IN (SELECT id FROM external_runs WHERE journey_id = ?)`,
+    )
+    .run(journeyId);
+  database
+    .prepare(
+      `DELETE FROM external_run_events
+        WHERE run_id IN (SELECT id FROM external_runs WHERE journey_id = ?)`,
+    )
+    .run(journeyId);
+  database
+    .prepare(
+      `DELETE FROM external_artifacts
+        WHERE run_id IN (SELECT id FROM external_runs WHERE journey_id = ?)`,
+    )
+    .run(journeyId);
+  database
+    .prepare('DELETE FROM external_runs WHERE journey_id = ?')
+    .run(journeyId);
+  database
+    .prepare(
+      `DELETE FROM external_experiment_versions
+        WHERE experiment_id IN (
+          SELECT id FROM external_experiments WHERE journey_id = ?
+        )`,
+    )
+    .run(journeyId);
+  database
+    .prepare('DELETE FROM external_experiments WHERE journey_id = ?')
+    .run(journeyId);
+
+  database
+    .prepare(
+      `DELETE FROM artifacts WHERE run_id IN (
+        SELECT r.id FROM runs r
+        JOIN experiment_versions ev ON ev.id = r.experiment_version_id
+        JOIN experiments e ON e.id = ev.experiment_id
+        WHERE e.journey_id = ?
+      )`,
+    )
+    .run(journeyId);
+  database
+    .prepare(
+      `DELETE FROM assertion_results WHERE run_id IN (
+        SELECT r.id FROM runs r
+        JOIN experiment_versions ev ON ev.id = r.experiment_version_id
+        JOIN experiments e ON e.id = ev.experiment_id
+        WHERE e.journey_id = ?
+      )`,
+    )
+    .run(journeyId);
+  database
+    .prepare(
+      `DELETE FROM run_events WHERE run_id IN (
+        SELECT r.id FROM runs r
+        JOIN experiment_versions ev ON ev.id = r.experiment_version_id
+        JOIN experiments e ON e.id = ev.experiment_id
+        WHERE e.journey_id = ?
+      )`,
+    )
+    .run(journeyId);
+  database
+    .prepare(
+      `DELETE FROM runs WHERE experiment_version_id IN (
+        SELECT ev.id FROM experiment_versions ev
+        JOIN experiments e ON e.id = ev.experiment_id
+        WHERE e.journey_id = ?
+      )`,
+    )
+    .run(journeyId);
+  database
+    .prepare(
+      `DELETE FROM recovery_assertions WHERE experiment_version_id IN (
+        SELECT ev.id FROM experiment_versions ev
+        JOIN experiments e ON e.id = ev.experiment_id
+        WHERE e.journey_id = ?
+      )`,
+    )
+    .run(journeyId);
+  database
+    .prepare(
+      `DELETE FROM experiment_versions WHERE experiment_id IN (
+        SELECT id FROM experiments WHERE journey_id = ?
+      )`,
+    )
+    .run(journeyId);
+  database
+    .prepare('DELETE FROM experiments WHERE journey_id = ?')
+    .run(journeyId);
 }

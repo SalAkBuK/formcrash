@@ -16,6 +16,7 @@ import { z } from 'zod';
 
 import type { ServerConfig } from '../../app/config.js';
 import type { ProjectJourneyRepository } from '../../persistence/project-journey-repository.js';
+import type { AuthStateStore } from '../external/auth-session.js';
 import type { BrowserOwnership } from '../infrastructure/browser-ownership.js';
 import {
   PlaywrightExternalBrowserOwner,
@@ -73,6 +74,7 @@ export class RecordingManager {
     private readonly repository: ProjectJourneyRepository,
     private readonly ownership: BrowserOwnership,
     browserOwner?: ExternalBrowserOwner,
+    private readonly authStore?: AuthStateStore,
   ) {
     this.browserOwner = browserOwner ?? new PlaywrightExternalBrowserOwner();
   }
@@ -94,11 +96,13 @@ export class RecordingManager {
     });
 
     try {
+      const storageStatePath = this.authStore?.usablePath(projectId) ?? null;
       const browser = await this.browserOwner.launchRecording(
         {
           targetUrl: project.targetUrl,
           headless: this.config.browserHeadless,
           timeoutMs: this.config.browserTimeoutMs,
+          ...(storageStatePath === null ? {} : { storageStatePath }),
         },
         {
           onEvent: (event, topFrame) =>
@@ -207,7 +211,7 @@ export class RecordingManager {
         recordedAt: session.startedAt,
         warningCount: session.warnings.length,
         normalizationRule:
-          'Consecutive input events for one locator are coalesced. A top-frame navigation immediately caused by a recorded click or submit is omitted.',
+          'Consecutive input events for one locator are coalesced until another recorded action occurs. A top-frame navigation immediately caused by a recorded click or submit is omitted.',
       },
     });
   }
@@ -250,7 +254,7 @@ export class RecordingManager {
       : event.value === null
         ? null
         : { kind: 'safe' as const, value: event.value };
-    const step = recordedJourneyStepSchema.parse({
+    const parsedStep = recordedJourneyStepSchema.safeParse({
       id: randomUUID(),
       name: defaultStepName(event),
       type: event.kind,
@@ -261,13 +265,14 @@ export class RecordingManager {
       value,
       sensitive: event.sensitive,
     });
+    if (!parsedStep.success) return;
+    const step = parsedStep.data;
     const previous = pending.steps.at(-1);
     if (
       step.type === 'fill' &&
       previous?.type === 'fill' &&
       previous.locator !== null &&
-      JSON.stringify(previous.locator) === JSON.stringify(step.locator) &&
-      step.timestamp - previous.timestamp <= 1_500
+      JSON.stringify(previous.locator) === JSON.stringify(step.locator)
     ) {
       pending.steps[pending.steps.length - 1] = { ...step, id: previous.id };
       return;
@@ -303,19 +308,20 @@ export class RecordingManager {
     }
     if (previous?.type === 'navigate' && previous.url === parsedUrl.data)
       return;
-    pending.steps.push(
-      recordedJourneyStepSchema.parse({
-        id: randomUUID(),
-        name: `Navigate to ${new URL(parsedUrl.data).pathname || '/'}`,
-        type: 'navigate',
-        timestamp,
-        url: parsedUrl.data,
-        locator: null,
-        fingerprint: null,
-        value: null,
-        sensitive: false,
-      }),
-    );
+    const parsedStep = recordedJourneyStepSchema.safeParse({
+      id: randomUUID(),
+      name: boundedStepName(
+        `Navigate to ${new URL(parsedUrl.data).pathname || '/'}`,
+      ),
+      type: 'navigate',
+      timestamp,
+      url: parsedUrl.data,
+      locator: null,
+      fingerprint: null,
+      value: null,
+      sensitive: false,
+    });
+    if (parsedStep.success) pending.steps.push(parsedStep.data);
   }
 
   private captureWarning(
@@ -396,7 +402,11 @@ function defaultStepName(event: RawRecordingEvent): string {
     select: 'Select',
     submit: 'Submit',
   }[event.kind];
-  return `${verb} ${target}`;
+  return boundedStepName(`${verb} ${target}`);
+}
+
+function boundedStepName(value: string): string {
+  return value.slice(0, 160).trimEnd();
 }
 
 function publicError(error: unknown, fallback: string): string {

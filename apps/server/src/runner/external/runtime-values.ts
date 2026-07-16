@@ -74,11 +74,14 @@ export function resolveRuntime(input: {
   const declarations = new Map(
     input.declarations.map((declaration) => [declaration.name, declaration]),
   );
-  const referenced = collectReferencedVariables(input.journey, input.hooks);
-  collectAssertionVariables(input.assertions ?? [], referenced);
-  for (const name of Object.keys(input.ephemeral)) referenced.add(name);
+  const required = collectReferencedVariables(input.journey, input.hooks);
+  collectAssertionVariables(input.assertions ?? [], required);
 
-  for (const name of new Set([...declarations.keys(), ...referenced])) {
+  for (const name of new Set([
+    ...declarations.keys(),
+    ...required,
+    ...Object.keys(input.ephemeral),
+  ])) {
     const declaration = declarations.get(name);
     const ephemeral = input.ephemeral[name];
     const fromEnvironment =
@@ -91,15 +94,20 @@ export function resolveRuntime(input: {
     if (direct !== undefined) {
       values.set(name, {
         value: direct,
-        secret: declaration?.secret ?? referenced.has(name),
+        secret: declaration?.secret ?? required.has(name),
       });
     }
   }
 
-  const pendingTemplates = [...declarations.values()].filter(
-    (declaration) =>
-      declaration.template !== null && !values.has(declaration.name),
-  );
+  expandTemplateDependencies(required, declarations, values);
+  const pendingTemplates = [...required]
+    .map((name) => declarations.get(name))
+    .filter(
+      (declaration): declaration is RuntimeVariableDeclarationInput =>
+        declaration !== undefined &&
+        declaration.template !== null &&
+        !values.has(declaration.name),
+    );
   for (let pass = 0; pass <= pendingTemplates.length; pass += 1) {
     for (const declaration of pendingTemplates) {
       if (values.has(declaration.name) || declaration.template === null)
@@ -116,14 +124,13 @@ export function resolveRuntime(input: {
     }
   }
 
-  const missing = [...new Set([...declarations.keys(), ...referenced])]
-    .filter((name) => !values.has(name))
-    .sort();
+  const missing = [...required].filter((name) => !values.has(name)).sort();
   if (missing.length > 0) throw new MissingRuntimeVariablesError(missing);
 
-  // Validate every configured template before any network or browser side effect.
-  for (const declaration of declarations.values()) {
-    if (declaration.template !== null) {
+  // Validate every template used by this execution before any side effect.
+  for (const name of required) {
+    const declaration = declarations.get(name);
+    if (declaration?.template !== null && declaration !== undefined) {
       resolveTemplate(declaration.template, values, context);
     }
   }
@@ -290,5 +297,26 @@ function collectFromString(value: string, names: Set<string>): void {
   for (const match of value.matchAll(/\{\{var\.([A-Z][A-Z0-9_]*)\}\}/gu)) {
     const name = match[1];
     if (name !== undefined) names.add(name);
+  }
+}
+
+function expandTemplateDependencies(
+  required: Set<string>,
+  declarations: ReadonlyMap<string, RuntimeVariableDeclarationInput>,
+  values: ReadonlyMap<string, ResolvedRuntimeValue>,
+): void {
+  const pending = [...required];
+  for (let index = 0; index < pending.length; index += 1) {
+    const name = pending[index];
+    if (name === undefined || values.has(name)) continue;
+    const template = declarations.get(name)?.template;
+    if (template === null || template === undefined) continue;
+    const dependencies = new Set<string>();
+    collectFromString(template, dependencies);
+    for (const dependency of dependencies) {
+      if (required.has(dependency)) continue;
+      required.add(dependency);
+      pending.push(dependency);
+    }
   }
 }

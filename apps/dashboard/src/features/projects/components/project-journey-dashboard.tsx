@@ -4,14 +4,18 @@ import { useEffect, useState, type FormEvent } from 'react';
 import type {
   PersistedJourney,
   Project,
+  ProjectExecutionSettings,
   RecordedJourneyStep,
   RecordingSession,
   ReplayLocator,
   ReplayResult,
 } from '@formcrash/contracts';
 
+import { getProjectSettings } from '../api/external-experiments';
 import {
   createProject,
+  deleteJourney,
+  deleteProject,
   getRecording,
   listJourneys,
   listProjects,
@@ -32,6 +36,16 @@ export function ProjectJourneyDashboard() {
   >([]);
   const [journeyName, setJourneyName] = useState('');
   const [replayResult, setReplayResult] = useState<ReplayResult | null>(null);
+  const [executionSettings, setExecutionSettings] =
+    useState<ProjectExecutionSettings | null>(null);
+  const [replayValues, setReplayValues] = useState<
+    Readonly<Record<string, Readonly<Record<string, string>>>>
+  >({});
+  const [productionReplayConfirmed, setProductionReplayConfirmed] =
+    useState(false);
+  const [selectedProjectIds, setSelectedProjectIds] = useState<
+    ReadonlySet<string>
+  >(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,8 +55,16 @@ export function ProjectJourneyDashboard() {
 
   useEffect(() => {
     if (selected === null) return;
-    void listJourneys(selected.id)
-      .then(setJourneys)
+    setProductionReplayConfirmed(false);
+    void Promise.all([
+      listJourneys(selected.id),
+      getProjectSettings(selected.id),
+    ])
+      .then(([nextJourneys, nextSettings]) => {
+        setJourneys(nextJourneys);
+        setExecutionSettings(nextSettings);
+        setReplayValues({});
+      })
       .catch((reason: unknown) => setError(messageOf(reason)));
   }, [selected]);
 
@@ -63,6 +85,12 @@ export function ProjectJourneyDashboard() {
     try {
       const items = await listProjects();
       setProjects(items);
+      setSelectedProjectIds(
+        (current) =>
+          new Set(
+            [...current].filter((id) => items.some((item) => item.id === id)),
+          ),
+      );
       setSelected((current) =>
         current === null
           ? (items[0] ?? null)
@@ -79,14 +107,16 @@ export function ProjectJourneyDashboard() {
     event.preventDefault();
     setBusy('project');
     setError(null);
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     try {
       const created = await createProject({
         name: formValue(form, 'name'),
         targetUrl: formValue(form, 'targetUrl'),
+        environment: formValue(form, 'environment') as Project['environment'],
         description: formValue(form, 'description'),
       });
-      event.currentTarget.reset();
+      formElement.reset();
       await refreshProjects();
       setSelected(created);
       setRecording(null);
@@ -108,6 +138,102 @@ export function ProjectJourneyDashboard() {
       setRecording(session);
       setReviewSteps(session.steps);
       if (session.status === 'runner_error') setError(session.errorMessage);
+    } catch (reason: unknown) {
+      setError(messageOf(reason));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function removeProject(project: Project): Promise<void> {
+    if (
+      !window.confirm(
+        `Delete "${project.name}" and all of its recordings, journeys, experiments, runs, screenshots, and saved authentication? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(`delete-project-${project.id}`);
+    setError(null);
+    try {
+      await deleteProject(project.id, true);
+      const remaining = await listProjects();
+      setProjects(remaining);
+      setSelectedProjectIds((current) => {
+        const next = new Set(current);
+        next.delete(project.id);
+        return next;
+      });
+      if (selected?.id === project.id) {
+        setSelected(remaining[0] ?? null);
+        setJourneys([]);
+        setRecording(null);
+        setReviewSteps([]);
+        setReplayResult(null);
+        setExecutionSettings(null);
+        setReplayValues({});
+      }
+    } catch (reason: unknown) {
+      setError(messageOf(reason));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function removeSelectedProjects(): Promise<void> {
+    const selectedProjects = projects.filter(
+      (project) =>
+        project.id !== 'project-sample-checkout' &&
+        selectedProjectIds.has(project.id),
+    );
+    if (selectedProjects.length === 0) return;
+    if (
+      !window.confirm(
+        `Delete ${selectedProjects.length} selected projects and all associated recordings, journeys, experiments, runs, screenshots, and saved authentication? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+
+    setBusy('delete-projects');
+    setError(null);
+    const deletedIds = new Set<string>();
+    const failures: string[] = [];
+    for (const project of selectedProjects) {
+      try {
+        await deleteProject(project.id, true);
+        deletedIds.add(project.id);
+      } catch (reason: unknown) {
+        failures.push(
+          `${project.name} (${project.id.slice(0, 8)}): ${messageOf(reason)}`,
+        );
+      }
+    }
+
+    try {
+      const remaining = await listProjects();
+      setProjects(remaining);
+      setSelectedProjectIds(
+        new Set(
+          selectedProjects
+            .filter((project) => !deletedIds.has(project.id))
+            .map((project) => project.id),
+        ),
+      );
+      if (selected !== null && deletedIds.has(selected.id)) {
+        setSelected(remaining[0] ?? null);
+        setJourneys([]);
+        setRecording(null);
+        setReviewSteps([]);
+        setReplayResult(null);
+        setExecutionSettings(null);
+        setReplayValues({});
+      }
+      if (failures.length > 0) {
+        setError(
+          `${deletedIds.size} deleted. ${failures.length} could not be deleted: ${failures.join('; ')}`,
+        );
+      }
     } catch (reason: unknown) {
       setError(messageOf(reason));
     } finally {
@@ -157,7 +283,39 @@ export function ProjectJourneyDashboard() {
     setError(null);
     setReplayResult(null);
     try {
-      setReplayResult(await replayJourney(journey.id));
+      setReplayResult(
+        await replayJourney(
+          journey.id,
+          nonEmptyValues(replayValues[journey.id] ?? {}),
+          selected?.environment !== 'production' || productionReplayConfirmed,
+        ),
+      );
+    } catch (reason: unknown) {
+      setError(messageOf(reason));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function removeJourney(journey: PersistedJourney): Promise<void> {
+    if (
+      !window.confirm(
+        `Delete "${journey.name}" v${journey.version} and all associated experiment versions, runs, and screenshots? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(`delete-journey-${journey.id}`);
+    setError(null);
+    try {
+      await deleteJourney(journey.id);
+      if (selected !== null) setJourneys(await listJourneys(selected.id));
+      setReplayResult(null);
+      setReplayValues((current) =>
+        Object.fromEntries(
+          Object.entries(current).filter(([id]) => id !== journey.id),
+        ),
+      );
     } catch (reason: unknown) {
       setError(messageOf(reason));
     } finally {
@@ -175,6 +333,17 @@ export function ProjectJourneyDashboard() {
       ),
     );
   }
+
+  const deletableProjects = projects.filter(
+    (project) => project.id !== 'project-sample-checkout',
+  );
+  const selectedProjectCount = deletableProjects.filter((project) =>
+    selectedProjectIds.has(project.id),
+  ).length;
+  const allDeletableProjectsSelected =
+    deletableProjects.length > 0 &&
+    selectedProjectCount === deletableProjects.length;
+  const qualityWarnings = journeyQualityWarnings(reviewSteps);
 
   return (
     <main className="dashboard-shell project-workbench">
@@ -224,6 +393,14 @@ export function ProjectJourneyDashboard() {
             />
           </label>
           <label>
+            Environment
+            <select defaultValue="production" name="environment" required>
+              <option value="local">Local development</option>
+              <option value="staging">Staging / disposable test data</option>
+              <option value="production">Production / real data</option>
+            </select>
+          </label>
+          <label>
             Description <span>(optional)</span>
             <textarea name="description" maxLength={1000} rows={3} />
           </label>
@@ -243,25 +420,101 @@ export function ProjectJourneyDashboard() {
               <h2>Saved targets</h2>
             </div>
           </div>
+          {deletableProjects.length > 0 ? (
+            <div className="project-bulk-actions">
+              <label>
+                <input
+                  checked={allDeletableProjectsSelected}
+                  disabled={busy !== null}
+                  onChange={(event) =>
+                    setSelectedProjectIds(
+                      event.target.checked
+                        ? new Set(
+                            deletableProjects.map((project) => project.id),
+                          )
+                        : new Set(),
+                    )
+                  }
+                  type="checkbox"
+                />{' '}
+                Select all
+              </label>
+              <button
+                className="project-delete-button"
+                disabled={busy !== null || selectedProjectCount === 0}
+                onClick={() => void removeSelectedProjects()}
+                type="button"
+              >
+                {busy === 'delete-projects'
+                  ? 'Deleting selected…'
+                  : `Delete selected (${selectedProjectCount})`}
+              </button>
+            </div>
+          ) : null}
           {projects.length === 0 ? (
             <p className="empty-state">No projects yet.</p>
           ) : (
             <div className="project-list">
               {projects.map((project) => (
-                <button
+                <article
                   className={`project-card ${selected?.id === project.id ? 'project-card-selected' : ''}`}
                   key={project.id}
-                  onClick={() => {
-                    setSelected(project);
-                    setRecording(null);
-                    setReviewSteps([]);
-                    setReplayResult(null);
-                  }}
-                  type="button"
                 >
-                  <strong>{project.name}</strong>
-                  <span>{project.targetUrl}</span>
-                </button>
+                  {project.id !== 'project-sample-checkout' ? (
+                    <label
+                      aria-label={`Select ${project.name} ${project.id.slice(0, 8)}`}
+                      className="project-checkbox"
+                    >
+                      <input
+                        checked={selectedProjectIds.has(project.id)}
+                        disabled={busy !== null}
+                        onChange={(event) =>
+                          setSelectedProjectIds((current) => {
+                            const next = new Set(current);
+                            if (event.target.checked) next.add(project.id);
+                            else next.delete(project.id);
+                            return next;
+                          })
+                        }
+                        type="checkbox"
+                      />
+                    </label>
+                  ) : (
+                    <span
+                      aria-hidden="true"
+                      className="project-checkbox-placeholder"
+                    />
+                  )}
+                  <button
+                    className="project-card-select"
+                    onClick={() => {
+                      setSelected(project);
+                      setRecording(null);
+                      setReviewSteps([]);
+                      setReplayResult(null);
+                    }}
+                    type="button"
+                  >
+                    <strong>{project.name}</strong>
+                    <span>
+                      {project.targetUrl} · {project.environment} ·{' '}
+                      {project.id.slice(0, 8)}
+                    </span>
+                  </button>
+                  {project.id !== 'project-sample-checkout' ? (
+                    <button
+                      aria-label={`Delete ${project.name} ${project.id.slice(0, 8)}`}
+                      className="project-delete-button"
+                      disabled={busy !== null}
+                      onClick={() => void removeProject(project)}
+                      type="button"
+                    >
+                      {busy === `delete-project-${project.id}`
+                        ? 'Deleting…'
+                        : 'Delete'}
+                    </button>
+                  ) : null}
+                </article>
               ))}
             </div>
           )}
@@ -345,6 +598,16 @@ export function ProjectJourneyDashboard() {
                   maxLength={160}
                 />
               </label>
+              {qualityWarnings.length > 0 ? (
+                <div className="journey-quality-warnings">
+                  <strong>Review these journey risks before saving:</strong>
+                  <ul>
+                    {qualityWarnings.map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
               <ol className="step-review-list">
                 {reviewSteps.map((step, index) => (
                   <li className="step-review-card" key={step.id}>
@@ -392,6 +655,11 @@ export function ProjectJourneyDashboard() {
                         </dd>
                       </div>
                     </dl>
+                    {locatorRisk(step.locator) !== null ? (
+                      <p className="recording-warning">
+                        {locatorRisk(step.locator)}
+                      </p>
+                    ) : null}
                     {step.value?.kind === 'safe' ? (
                       <label>
                         Test value
@@ -412,6 +680,7 @@ export function ProjectJourneyDashboard() {
                       <label className="sensitive-toggle">
                         <input
                           checked={step.sensitive}
+                          disabled={step.value.kind === 'sensitive'}
                           onChange={(event) =>
                             updateStep(
                               index,
@@ -434,10 +703,31 @@ export function ProjectJourneyDashboard() {
                       </label>
                     ) : null}
                     {step.value?.kind === 'sensitive' ? (
-                      <p className="masked-value">
-                        Masked · runtime variable{' '}
-                        <code>{step.value.variableName}</code>
-                      </p>
+                      <>
+                        <label>
+                          Runtime variable name
+                          <input
+                            maxLength={100}
+                            pattern="[A-Z][A-Z0-9_]*"
+                            required
+                            value={step.value.variableName}
+                            onChange={(event) =>
+                              updateStep(index, {
+                                value: {
+                                  kind: 'sensitive',
+                                  variableName: normalizeVariableName(
+                                    event.target.value,
+                                  ),
+                                },
+                              })
+                            }
+                          />
+                        </label>
+                        <p className="masked-value">
+                          The captured value was discarded and cannot be
+                          restored. Supply this variable when replaying.
+                        </p>
+                      </>
                     ) : null}
                   </li>
                 ))}
@@ -447,7 +737,12 @@ export function ProjectJourneyDashboard() {
                 disabled={
                   busy !== null ||
                   journeyName.trim() === '' ||
-                  reviewSteps.length === 0
+                  reviewSteps.length === 0 ||
+                  reviewSteps.some(
+                    (step) =>
+                      step.value?.kind === 'sensitive' &&
+                      !/^[A-Z][A-Z0-9_]*$/u.test(step.value.variableName),
+                  )
                 }
                 onClick={() => void persistJourney()}
                 type="button"
@@ -466,6 +761,19 @@ export function ProjectJourneyDashboard() {
                 <h2>Reproducible normal paths</h2>
               </div>
             </div>
+            {selected.environment === 'production' ? (
+              <label className="production-confirmation">
+                <input
+                  checked={productionReplayConfirmed}
+                  onChange={(event) =>
+                    setProductionReplayConfirmed(event.target.checked)
+                  }
+                  type="checkbox"
+                />{' '}
+                I understand that replay can submit forms and change real
+                production data.
+              </label>
+            ) : null}
             {replayResult !== null ? (
               <div
                 className={`replay-result replay-${replayResult.status}`}
@@ -475,6 +783,30 @@ export function ProjectJourneyDashboard() {
                 {replayResult.failedStep === null
                   ? ' — every persisted step completed.'
                   : ` — step ${replayResult.failedStep.stepNumber}, “${replayResult.failedStep.stepName}”, failed.`}
+                {replayResult.failedStep?.technicalMessage !== null &&
+                replayResult.failedStep?.technicalMessage !== undefined ? (
+                  <p>{replayResult.failedStep.technicalMessage}</p>
+                ) : null}
+                {replayResult.failedStep !== null ? (
+                  <dl className="replay-diagnostics">
+                    <div>
+                      <dt>Locator</dt>
+                      <dd>
+                        <code>
+                          {formatLocator(replayResult.failedStep.locator)}
+                        </code>
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Browser URL</dt>
+                      <dd>
+                        <code>
+                          {replayResult.failedStep.currentUrl ?? 'Unavailable'}
+                        </code>
+                      </dd>
+                    </div>
+                  </dl>
+                ) : null}
               </div>
             ) : null}
             {journeys.length === 0 ? (
@@ -483,26 +815,90 @@ export function ProjectJourneyDashboard() {
               </p>
             ) : (
               <div className="journey-list">
-                {journeys.map((journey) => (
-                  <article className="journey-card" key={journey.id}>
-                    <div>
-                      <strong>{journey.name}</strong>
-                      <span>
-                        Version {journey.version} · {journey.steps.length} steps
-                      </span>
-                    </div>
-                    <button
-                      className="button button-secondary button-compact"
-                      disabled={busy !== null}
-                      onClick={() => void runReplay(journey)}
-                      type="button"
-                    >
-                      {busy === `replay-${journey.id}`
-                        ? 'Replaying…'
-                        : 'Replay'}
-                    </button>
-                  </article>
-                ))}
+                {journeys.map((journey) => {
+                  const requirements = replayRequirements(
+                    journey,
+                    executionSettings,
+                  );
+                  return (
+                    <article className="journey-card" key={journey.id}>
+                      <div>
+                        <strong>{journey.name}</strong>
+                        <span>
+                          Version {journey.version} · {journey.steps.length}{' '}
+                          steps
+                        </span>
+                        {requirements.length > 0 ? (
+                          <div className="runtime-value-grid replay-runtime-grid">
+                            {requirements.map((requirement) => (
+                              <label key={requirement.name}>
+                                {requirement.label}
+                                <input
+                                  aria-label={`${journey.name} ${requirement.name}`}
+                                  autoComplete="off"
+                                  placeholder={requirement.name}
+                                  type={
+                                    requirement.secret ? 'password' : 'text'
+                                  }
+                                  value={
+                                    replayValues[journey.id]?.[
+                                      requirement.name
+                                    ] ?? ''
+                                  }
+                                  onChange={(event) =>
+                                    setReplayValues((current) => ({
+                                      ...current,
+                                      [journey.id]: {
+                                        ...current[journey.id],
+                                        [requirement.name]: event.target.value,
+                                      },
+                                    }))
+                                  }
+                                />
+                              </label>
+                            ))}
+                          </div>
+                        ) : (
+                          <span>No runtime values required.</span>
+                        )}
+                      </div>
+                      <div className="journey-card-actions">
+                        <button
+                          className="button button-secondary button-compact"
+                          disabled={
+                            busy !== null ||
+                            (selected.environment === 'production' &&
+                              !productionReplayConfirmed) ||
+                            requirements.some(
+                              (requirement) =>
+                                (
+                                  replayValues[journey.id]?.[
+                                    requirement.name
+                                  ] ?? ''
+                                ).trim() === '',
+                            )
+                          }
+                          onClick={() => void runReplay(journey)}
+                          type="button"
+                        >
+                          {busy === `replay-${journey.id}`
+                            ? 'Replaying…'
+                            : 'Replay'}
+                        </button>
+                        <button
+                          className="copy-button"
+                          disabled={busy !== null}
+                          onClick={() => void removeJourney(journey)}
+                          type="button"
+                        >
+                          {busy === `delete-journey-${journey.id}`
+                            ? 'Deleting…'
+                            : 'Delete'}
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
               </div>
             )}
           </section>
@@ -538,4 +934,131 @@ function messageOf(reason: unknown): string {
 function formValue(form: FormData, name: string): string {
   const value = form.get(name);
   return typeof value === 'string' ? value : '';
+}
+
+interface ReplayRequirement {
+  readonly name: string;
+  readonly label: string;
+  readonly secret: boolean;
+}
+
+function replayRequirements(
+  journey: PersistedJourney,
+  settings: ProjectExecutionSettings | null,
+): readonly ReplayRequirement[] {
+  if (settings === null) return [];
+  const declarations = new Map(
+    settings.variables.map((variable) => [variable.name, variable]),
+  );
+  const names = new Set<string>();
+  const labels = new Map<string, string>();
+  for (const step of journey.steps) {
+    if (step.value?.kind === 'sensitive') {
+      names.add(step.value.variableName);
+      labels.set(
+        step.value.variableName,
+        `${step.name} (${step.value.variableName})`,
+      );
+    } else if (step.value?.kind === 'safe') {
+      collectVariableNames(step.value.value, names);
+    }
+  }
+  collectVariableNames(JSON.stringify(settings.beforeRunHook), names);
+  collectVariableNames(JSON.stringify(settings.afterRunHook), names);
+
+  const pending = [...names];
+  for (let index = 0; index < pending.length; index += 1) {
+    const name = pending[index];
+    if (name === undefined) continue;
+    const template = declarations.get(name)?.template;
+    if (template === null || template === undefined) continue;
+    const dependencies = new Set<string>();
+    collectVariableNames(template, dependencies);
+    for (const dependency of dependencies) {
+      if (names.has(dependency)) continue;
+      names.add(dependency);
+      pending.push(dependency);
+    }
+  }
+
+  return [...names]
+    .filter((name) => declarations.get(name)?.configured !== true)
+    .sort()
+    .map((name) => {
+      const declaration = declarations.get(name);
+      const description = declaration?.description.trim();
+      return {
+        name,
+        label:
+          labels.get(name) ??
+          (description !== undefined && description !== ''
+            ? description
+            : name),
+        secret: declaration?.secret ?? true,
+      };
+    });
+}
+
+function collectVariableNames(value: string, names: Set<string>): void {
+  for (const match of value.matchAll(/\{\{var\.([A-Z][A-Z0-9_]*)\}\}/gu)) {
+    const name = match[1];
+    if (name !== undefined) names.add(name);
+  }
+}
+
+function nonEmptyValues(
+  values: Readonly<Record<string, string>>,
+): Readonly<Record<string, string>> {
+  return Object.fromEntries(
+    Object.entries(values).filter(([, value]) => value.trim() !== ''),
+  );
+}
+
+function locatorRisk(locator: ReplayLocator | null): string | null {
+  if (locator?.strategy !== 'css') return null;
+  if (
+    locator.value.includes('nth-of-type') ||
+    locator.value.includes('nth-child')
+  ) {
+    return 'High-risk locator: this CSS path depends on element order and is likely to break when the page layout changes.';
+  }
+  return 'Brittle locator: this step uses a generated CSS path because no stable ID, name, label, role, or test attribute was available.';
+}
+
+function journeyQualityWarnings(
+  steps: readonly RecordedJourneyStep[],
+): readonly string[] {
+  const warnings = new Set<string>();
+  if (!steps.some((step) => step.type === 'click' || step.type === 'submit')) {
+    warnings.add(
+      'No click or submit step was captured, so this journey cannot be used for an impatient-user experiment.',
+    );
+  }
+  if (steps.some((step) => locatorRisk(step.locator) !== null)) {
+    warnings.add(
+      'One or more steps use brittle CSS locators. Prefer stable IDs, names, labels, roles, or data-testid attributes in the target application.',
+    );
+  }
+  for (let index = 1; index < steps.length; index += 1) {
+    const current = steps[index];
+    const previous = steps[index - 1];
+    if (
+      current?.type === 'navigate' &&
+      previous?.type === 'navigate' &&
+      current.url === previous.url
+    ) {
+      warnings.add(
+        'Consecutive duplicate navigation steps were detected and should be removed.',
+      );
+    }
+  }
+  return [...warnings];
+}
+
+function normalizeVariableName(value: string): string {
+  const normalized = value
+    .toUpperCase()
+    .replace(/[^A-Z0-9_]/gu, '_')
+    .replace(/^[^A-Z]+/u, '');
+  return normalized.slice(0, 100);
 }

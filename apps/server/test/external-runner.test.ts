@@ -64,6 +64,21 @@ describe('external runner terminal paths', () => {
     expect(owner.launchCount).toBe(1);
     expect(owner.lastOptions?.storageStatePath).toBeUndefined();
     expect(ownership.activeWorkload).toBeNull();
+    expect(
+      experiments.listRuns({
+        projectId: configured.projectId,
+        limit: 20,
+        offset: 0,
+      }).items,
+    ).toEqual([
+      expect.objectContaining({
+        runId: result.runId,
+        triggerAttempts: 2,
+        screenshotCount: 3,
+      }),
+    ]);
+    expect(experiments.deleteRun(result.runId)).toHaveLength(3);
+    expect(experiments.getRun(result.runId)).toBeNull();
   });
 
   it('fails missing variables before browser launch', async () => {
@@ -201,14 +216,16 @@ function configure(options: {
         {
           id: 'completion',
           type: 'text_appeared',
-          text: options.assertionText ?? 'Complete',
+          text:
+            options.assertionText ??
+            (options.requiredVariable ? '{{var.API_TOKEN}}' : 'Complete'),
           description: 'Completion appears.',
         },
       ],
       continueAfterTarget: false,
     },
   });
-  return { versionId: version.id };
+  return { versionId: version.id, projectId: project.id };
 }
 
 function runner(owner: ExternalBrowserOwner, ownership: BrowserOwnership) {

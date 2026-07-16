@@ -9,6 +9,7 @@ import {
 } from 'react';
 import type {
   AuthCaptureSession,
+  AuthValidationResult,
   CreateExternalExperimentRequest,
   DiscoveredRequest,
   EphemeralRuntimeValues,
@@ -16,6 +17,7 @@ import type {
   ExternalAssertionType,
   ExternalExperimentVersion,
   ExternalRunDetail,
+  ExternalRunSummary,
   HttpHook,
   PersistedJourney,
   Project,
@@ -28,12 +30,18 @@ import {
   clearAuthentication,
   confirmAuthenticationCapture,
   createExternalExperiment,
+  deleteExternalExperimentVersion,
+  deleteExternalRun,
   discoverRequests,
+  getExternalArtifactUrl,
+  getExternalRun,
   getProjectSettings,
   listExternalExperiments,
+  listExternalRuns,
   runExternalExperiment,
   saveProjectSettings,
   startAuthenticationCapture,
+  testAuthentication,
 } from '../api/external-experiments';
 
 interface Props {
@@ -47,6 +55,13 @@ const emptySettings: ProjectExecutionSettingsInput = {
   afterRunHook: null,
 };
 
+interface AssertionDraft {
+  readonly key: string;
+  readonly type: ExternalAssertionType;
+  readonly value: string;
+  readonly stepId: string;
+}
+
 export function ExternalExperimentPanel({ project, journeys }: Props) {
   const [settings, setSettings] =
     useState<ProjectExecutionSettingsInput>(emptySettings);
@@ -56,6 +71,8 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
     {},
   );
   const [capture, setCapture] = useState<AuthCaptureSession | null>(null);
+  const [authValidation, setAuthValidation] =
+    useState<AuthValidationResult | null>(null);
   const [journeyId, setJourneyId] = useState('');
   const [targetStepId, setTargetStepId] = useState('');
   const [experimentName, setExperimentName] = useState('Impatient submit');
@@ -66,16 +83,19 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
     [],
   );
   const [candidateIndex, setCandidateIndex] = useState(-1);
-  const [assertionType, setAssertionType] = useState<ExternalAssertionType>(
-    'network_request_max',
-  );
-  const [assertionValue, setAssertionValue] = useState('1');
+  const [assertionDrafts, setAssertionDrafts] = useState<
+    readonly AssertionDraft[]
+  >([newAssertionDraft()]);
   const [experiments, setExperiments] = useState<
     readonly ExternalExperimentVersion[]
   >([]);
   const [result, setResult] = useState<ExternalRunDetail | null>(null);
+  const [runHistory, setRunHistory] = useState<readonly ExternalRunSummary[]>(
+    [],
+  );
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [productionConfirmed, setProductionConfirmed] = useState(false);
 
   const journey = useMemo(
     () => journeys.find((item) => item.id === journeyId) ?? null,
@@ -90,14 +110,31 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
   );
   const targetStep =
     compatibleSteps.find((step) => step.id === targetStepId) ?? null;
+  const networkAssertionSelected = assertionDrafts.some((draft) =>
+    draft.type.startsWith('network_'),
+  );
+  const selectedNetworkCandidate = candidates[candidateIndex] ?? null;
+  const networkMatcherMissing =
+    networkAssertionSelected && selectedNetworkCandidate === null;
 
   useEffect(() => {
     setBusy('load-settings');
     setError(null);
-    void getProjectSettings(project.id)
-      .then((value) => {
+    setProductionConfirmed(false);
+    setAuthValidation(null);
+    void Promise.all([
+      getProjectSettings(project.id),
+      listExternalRuns(project.id),
+    ])
+      .then(async ([value, history]) => {
         setSettingsState(value);
         setSettings(toSettingsInput(value));
+        setRunHistory(history.items);
+        setResult(
+          history.items[0] === undefined
+            ? null
+            : await getExternalRun(history.items[0].runId),
+        );
       })
       .catch((reason: unknown) => setError(messageOf(reason)))
       .finally(() => setBusy(null));
@@ -181,6 +218,19 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
     try {
       setSettingsState(await clearAuthentication(project.id));
       setCapture(null);
+      setAuthValidation(null);
+    } catch (reason: unknown) {
+      setError(messageOf(reason));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function validateAuth(): Promise<void> {
+    setBusy('auth-test');
+    setError(null);
+    try {
+      setAuthValidation(await testAuthentication(project.id));
     } catch (reason: unknown) {
       setError(messageOf(reason));
     } finally {
@@ -197,6 +247,7 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
         journey.id,
         targetStep.id,
         runtimeValues,
+        project.environment !== 'production' || productionConfirmed,
       );
       setCandidates(discovered.candidates);
       setCandidateIndex(discovered.candidates.length === 0 ? -1 : 0);
@@ -209,15 +260,21 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
 
   async function saveExperiment(): Promise<void> {
     if (journey === null || targetStep === null) return;
+    if (networkMatcherMissing) {
+      setError(
+        'Run request discovery and select the request that this network assertion should measure.',
+      );
+      return;
+    }
     setBusy('experiment');
     setError(null);
     try {
-      const candidate = candidates[candidateIndex] ?? null;
-      const assertion = buildAssertion(
-        assertionType,
-        assertionValue,
-        targetStep,
-      );
+      const candidate = selectedNetworkCandidate;
+      const assertions = assertionDrafts.map((draft) => {
+        const assertionStep =
+          journey.steps.find((step) => step.id === draft.stepId) ?? targetStep;
+        return buildAssertion(draft.type, draft.value, assertionStep);
+      });
       const input: CreateExternalExperimentRequest = {
         name: experimentName,
         targetStepId: targetStep.id,
@@ -231,7 +288,7 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
                 pathname: candidate.pathname,
                 host: new URL(candidate.origin).host,
               },
-        assertions: [assertion],
+        assertions,
         continueAfterTarget,
       };
       await createExternalExperiment(journey.id, input);
@@ -248,7 +305,66 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
     setResult(null);
     setError(null);
     try {
-      setResult(await runExternalExperiment(version.id, runtimeValues));
+      const completed = await runExternalExperiment(
+        version.id,
+        runtimeValues,
+        project.environment !== 'production' || productionConfirmed,
+      );
+      setResult(completed);
+      setRunHistory((await listExternalRuns(project.id)).items);
+    } catch (reason: unknown) {
+      setError(messageOf(reason));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function removeExperimentVersion(
+    version: ExternalExperimentVersion,
+  ): Promise<void> {
+    if (
+      !window.confirm(
+        `Delete "${version.name}" v${version.version} and its persisted runs and screenshots? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(`delete-version-${version.id}`);
+    setError(null);
+    try {
+      await deleteExternalExperimentVersion(version.id);
+      if (journey !== null) await refreshExperiments(journey.id);
+      const history = await listExternalRuns(project.id);
+      setRunHistory(history.items);
+      if (result?.experimentVersionId === version.id) setResult(null);
+    } catch (reason: unknown) {
+      setError(messageOf(reason));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function removeRun(runId: string): Promise<void> {
+    if (
+      !window.confirm(
+        'Delete this external run, its assertion evidence, events, and screenshots? This cannot be undone.',
+      )
+    ) {
+      return;
+    }
+    setBusy(`delete-run-${runId}`);
+    setError(null);
+    try {
+      await deleteExternalRun(runId);
+      const history = await listExternalRuns(project.id);
+      setRunHistory(history.items);
+      if (result?.runId === runId) {
+        setResult(
+          history.items[0] === undefined
+            ? null
+            : await getExternalRun(history.items[0].runId),
+        );
+      }
     } catch (reason: unknown) {
       setError(messageOf(reason));
     } finally {
@@ -279,13 +395,31 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
             {error}
           </div>
         ) : null}
+        {project.environment === 'production' ? (
+          <label className="production-confirmation">
+            <input
+              checked={productionConfirmed}
+              onChange={(event) => setProductionConfirmed(event.target.checked)}
+              type="checkbox"
+            />{' '}
+            I understand that discovery, replay, and repeated triggers can
+            create, modify, or delete real production data.
+          </label>
+        ) : (
+          <p className="technical-note">
+            Environment: {project.environment}. Use disposable data and a
+            cleanup hook whenever the target action changes state.
+          </p>
+        )}
         <div className="settings-grid">
           <div className="settings-column">
             <h3>Authentication state</h3>
             <p className="technical-note">
               Launch a visible browser, sign in yourself, then confirm.
               FormCrash stores Playwright state on disk; credentials are never
-              entered in this dashboard.
+              entered in this dashboard. Saved authentication is restored
+              automatically for new recordings, replays, and experiment runs; it
+              does not appear as a runtime variable.
             </p>
             <div className="recording-actions">
               <button
@@ -321,6 +455,17 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
               >
                 Clear
               </button>
+              <button
+                className="button button-secondary button-compact"
+                disabled={
+                  busy !== null ||
+                  settingsState?.authentication.available !== true
+                }
+                onClick={() => void validateAuth()}
+                type="button"
+              >
+                {busy === 'auth-test' ? 'Testing…' : 'Test authentication'}
+              </button>
             </div>
             {capture !== null ? (
               <p className="technical-note">Capture: {capture.status}</p>
@@ -330,6 +475,18 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
               <p className="recording-warning">
                 {settingsState.authentication.missingReason}
               </p>
+            ) : null}
+            {authValidation !== null ? (
+              <div
+                className={`auth-validation auth-validation-${authValidation.status}`}
+                role="status"
+              >
+                <strong>{authValidation.status.replaceAll('_', ' ')}</strong>
+                <span>{authValidation.message}</span>
+                {authValidation.currentUrl !== null ? (
+                  <code>{authValidation.currentUrl}</code>
+                ) : null}
+              </div>
             ) : null}
           </div>
           <div className="settings-column">
@@ -535,13 +692,18 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
             <div>
               <h3>Request discovery</h3>
               <p>
-                Replays through the target once and shows method/path evidence
-                caused by that action.
+                Replays through the target once and shows method/path evidence.
+                This executes the real action once and may create or modify
+                target data.
               </p>
             </div>
             <button
               className="button button-secondary button-compact"
-              disabled={busy !== null || targetStep === null}
+              disabled={
+                busy !== null ||
+                targetStep === null ||
+                (project.environment === 'production' && !productionConfirmed)
+              }
               onClick={() => void discover()}
               type="button"
             >
@@ -549,14 +711,20 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
             </button>
           </div>
           <label>
-            Optional network matcher
+            {networkAssertionSelected
+              ? 'Required network matcher'
+              : 'Optional network matcher'}
             <select
               value={candidateIndex}
               onChange={(event) =>
                 setCandidateIndex(Number(event.target.value))
               }
             >
-              <option value={-1}>No matcher</option>
+              <option value={-1}>
+                {networkAssertionSelected
+                  ? 'Select a discovered request'
+                  : 'No matcher'}
+              </option>
               {candidates.map((candidate, index) => (
                 <option
                   key={`${candidate.method}-${candidate.origin}-${candidate.pathname}-${index}`}
@@ -568,50 +736,147 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
               ))}
             </select>
           </label>
+          {networkMatcherMissing ? (
+            <p className="recording-warning">
+              Network assertions cannot run without a matcher. Discover
+              requests, then select the POST or other request caused by the
+              target action.
+            </p>
+          ) : null}
         </div>
 
         <div className="assertion-box">
-          <h3>Assertion</h3>
-          <div className="builder-grid">
-            <label>
-              Type
-              <select
-                value={assertionType}
-                onChange={(event) => {
-                  setAssertionType(event.target.value as ExternalAssertionType);
-                  setAssertionValue(
-                    defaultAssertionValue(
-                      event.target.value as ExternalAssertionType,
-                    ),
-                  );
-                }}
-              >
-                {assertionOptions.map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              {assertionLabel(assertionType)}
-              <input
-                value={assertionValue}
-                onChange={(event) => setAssertionValue(event.target.value)}
-              />
-            </label>
+          <div className="section-heading-row compact-heading">
+            <div>
+              <h3>Assertions</h3>
+              <p>Every configured assertion must pass.</p>
+            </div>
+            <button
+              className="copy-button"
+              disabled={assertionDrafts.length >= 20}
+              onClick={() =>
+                setAssertionDrafts((current) => [
+                  ...current,
+                  newAssertionDraft(targetStep?.id ?? ''),
+                ])
+              }
+              type="button"
+            >
+              Add assertion
+            </button>
           </div>
-          {assertionType.startsWith('element_') &&
-          targetStep?.locator === null ? (
-            <p className="recording-warning">
-              The selected step has no reusable element locator.
-            </p>
-          ) : null}
+          <div className="assertion-draft-list">
+            {assertionDrafts.map((draft, index) => {
+              const needsStep = assertionNeedsStep(draft.type);
+              const fieldOnly = draft.type === 'field_retained';
+              return (
+                <div className="assertion-draft" key={draft.key}>
+                  <div className="builder-grid">
+                    <label>
+                      Assertion {index + 1} type
+                      <select
+                        value={draft.type}
+                        onChange={(event) => {
+                          const type = event.target
+                            .value as ExternalAssertionType;
+                          setAssertionDrafts((current) =>
+                            current.map((item) =>
+                              item.key === draft.key
+                                ? {
+                                    ...item,
+                                    type,
+                                    value: defaultAssertionValue(type),
+                                  }
+                                : item,
+                            ),
+                          );
+                        }}
+                      >
+                        {assertionOptions.map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {assertionNeedsValue(draft.type) ? (
+                      <label>
+                        {assertionLabel(draft.type)}
+                        <input
+                          value={draft.value}
+                          onChange={(event) =>
+                            setAssertionDrafts((current) =>
+                              current.map((item) =>
+                                item.key === draft.key
+                                  ? { ...item, value: event.target.value }
+                                  : item,
+                              ),
+                            )
+                          }
+                        />
+                      </label>
+                    ) : null}
+                    {needsStep ? (
+                      <label>
+                        Assertion target step
+                        <select
+                          value={draft.stepId}
+                          onChange={(event) =>
+                            setAssertionDrafts((current) =>
+                              current.map((item) =>
+                                item.key === draft.key
+                                  ? { ...item, stepId: event.target.value }
+                                  : item,
+                              ),
+                            )
+                          }
+                        >
+                          <option value="">Use experiment target</option>
+                          {journey?.steps
+                            .filter(
+                              (step) =>
+                                step.locator !== null &&
+                                (!fieldOnly || step.value !== null),
+                            )
+                            .map((step, stepIndex) => (
+                              <option key={step.id} value={step.id}>
+                                {stepIndex + 1}. {step.name}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                    ) : null}
+                  </div>
+                  {assertionDrafts.length > 1 ? (
+                    <button
+                      className="copy-button"
+                      onClick={() =>
+                        setAssertionDrafts((current) =>
+                          current.filter((item) => item.key !== draft.key),
+                        )
+                      }
+                      type="button"
+                    >
+                      Remove assertion
+                    </button>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
         </div>
         <button
           className="button button-primary"
           disabled={
-            busy !== null || targetStep === null || experimentName.trim() === ''
+            busy !== null ||
+            targetStep === null ||
+            experimentName.trim() === '' ||
+            networkMatcherMissing ||
+            assertionDrafts.length === 0 ||
+            assertionDrafts.some(
+              (draft) =>
+                assertionNeedsValue(draft.type) && draft.value.trim() === '',
+            )
           }
           onClick={() => void saveExperiment()}
           type="button"
@@ -665,14 +930,30 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
                   assertion(s)
                 </span>
               </div>
-              <button
-                className="button button-secondary button-compact"
-                disabled={busy !== null}
-                onClick={() => void run(version)}
-                type="button"
-              >
-                {busy === `run-${version.id}` ? 'Running Chromium…' : 'Run'}
-              </button>
+              <div className="journey-card-actions">
+                <button
+                  className="button button-secondary button-compact"
+                  disabled={
+                    busy !== null ||
+                    (project.environment === 'production' &&
+                      !productionConfirmed)
+                  }
+                  onClick={() => void run(version)}
+                  type="button"
+                >
+                  {busy === `run-${version.id}` ? 'Running Chromium…' : 'Run'}
+                </button>
+                <button
+                  className="copy-button"
+                  disabled={busy !== null}
+                  onClick={() => void removeExperimentVersion(version)}
+                  type="button"
+                >
+                  {busy === `delete-version-${version.id}`
+                    ? 'Deleting…'
+                    : 'Delete'}
+                </button>
+              </div>
             </article>
           ))}
           {experiments.length === 0 ? (
@@ -682,6 +963,66 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
           ) : null}
         </div>
         {result !== null ? <RunResult result={result} /> : null}
+        <div className="external-run-history">
+          <div className="section-heading-row compact-heading">
+            <div>
+              <h3>Persisted run history</h3>
+              <p>Results remain available after refreshing the dashboard.</p>
+            </div>
+          </div>
+          {runHistory.length === 0 ? (
+            <p className="empty-state">No external experiment runs yet.</p>
+          ) : (
+            <div className="experiment-version-list">
+              {runHistory.map((runSummary) => (
+                <article className="journey-card" key={runSummary.runId}>
+                  <div>
+                    <strong>
+                      {runSummary.experimentName} — {runSummary.status}
+                    </strong>
+                    <span>
+                      {runSummary.matchedRequestCount} matched request(s) ·{' '}
+                      {runSummary.passedAssertionCount}/
+                      {runSummary.assertionCount} assertions ·{' '}
+                      {runSummary.screenshotCount} screenshots
+                    </span>
+                  </div>
+                  <div className="journey-card-actions">
+                    <button
+                      className="button button-secondary button-compact"
+                      disabled={busy !== null}
+                      onClick={() => {
+                        setBusy(`history-${runSummary.runId}`);
+                        setError(null);
+                        void getExternalRun(runSummary.runId)
+                          .then(setResult)
+                          .catch((reason: unknown) =>
+                            setError(messageOf(reason)),
+                          )
+                          .finally(() => setBusy(null));
+                      }}
+                      type="button"
+                    >
+                      {busy === `history-${runSummary.runId}`
+                        ? 'Loading…'
+                        : 'View result'}
+                    </button>
+                    <button
+                      className="copy-button"
+                      disabled={busy !== null}
+                      onClick={() => void removeRun(runSummary.runId)}
+                      type="button"
+                    >
+                      {busy === `delete-run-${runSummary.runId}`
+                        ? 'Deleting…'
+                        : 'Delete'}
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </section>
   );
@@ -799,6 +1140,61 @@ function RunResult({ result }: { readonly result: ExternalRunDetail }) {
         matched network request(s) · {result.artifacts.length} screenshot
         artifact(s)
       </p>
+      {result.networkObservations.some((item) => item.matched) ? (
+        <div className="network-evidence-table-wrap">
+          <table className="network-evidence-table">
+            <thead>
+              <tr>
+                <th>Attempt</th>
+                <th>Request</th>
+                <th>Status</th>
+                <th>Duration</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.networkObservations
+                .filter((item) => item.matched)
+                .map((observation, index) => (
+                  <tr key={observation.requestId}>
+                    <td>{index + 1}</td>
+                    <td>
+                      <code>
+                        {observation.method} {observation.pathname}
+                      </code>
+                    </td>
+                    <td>
+                      {observation.failed
+                        ? 'request failed'
+                        : (observation.status ?? 'pending')}
+                    </td>
+                    <td>
+                      {observation.completedAtMs === null
+                        ? 'pending'
+                        : `${Math.max(
+                            0,
+                            observation.completedAtMs - observation.startedAtMs,
+                          )} ms`}
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+      {result.artifacts.length > 0 ? (
+        <div className="external-screenshot-grid">
+          {result.artifacts.map((artifact) => (
+            <figure key={artifact.artifactId}>
+              {/* The server validates artifact ownership before reading it. */}
+              <img
+                alt={`${artifact.label} screenshot`}
+                src={getExternalArtifactUrl(result.runId, artifact.artifactId)}
+              />
+              <figcaption>{artifact.label.replaceAll('-', ' ')}</figcaption>
+            </figure>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -814,8 +1210,21 @@ function buildAssertion(
   };
   if (type === 'network_request_max' || type === 'network_success_max')
     return { ...base, type, maximum: Number(value) };
+  if (type === 'network_request_exact' || type === 'network_success_exact')
+    return { ...base, type, expected: Number(value) };
   if (type === 'network_expected_status')
     return { ...base, type, expectedStatus: Number(value) };
+  if (type === 'network_all_status') {
+    return {
+      ...base,
+      type,
+      allowedStatuses: value
+        .split(',')
+        .map((item) => Number(item.trim()))
+        .filter((item) => Number.isInteger(item)),
+    };
+  }
+  if (type === 'network_no_server_errors') return { ...base, type };
   if (type === 'text_appeared') return { ...base, type, text: value };
   if (type === 'final_url_contains' || type === 'final_url_not_contains')
     return { ...base, type, value };
@@ -833,20 +1242,34 @@ function buildAssertion(
       targetDescription: targetStep.name,
     };
   }
-  throw new Error(
-    'Field-retained assertions must be configured through the API in this release.',
-  );
+  if (targetStep.locator === null || targetStep.value === null) {
+    throw new Error(
+      'Field-retained assertions require a recorded field step with a locator and value.',
+    );
+  }
+  return {
+    ...base,
+    type: 'field_retained',
+    locator: targetStep.locator,
+    targetDescription: targetStep.name,
+    expectedValue: targetStep.value,
+  };
 }
 
 const assertionOptions: readonly (readonly [ExternalAssertionType, string])[] =
   [
     ['network_request_max', 'Network requests do not exceed'],
+    ['network_request_exact', 'Network request count equals'],
     ['network_success_max', 'Successful network requests do not exceed'],
-    ['network_expected_status', 'Matched request has expected status'],
+    ['network_success_exact', 'Successful response count equals'],
+    ['network_expected_status', 'At least one response has status'],
+    ['network_all_status', 'Every response has an allowed status'],
+    ['network_no_server_errors', 'No response returns HTTP 5xx'],
     ['element_visible', 'Target element is visible'],
     ['element_not_visible', 'Target element is not visible'],
     ['element_disabled', 'Target element is disabled'],
     ['text_appeared', 'Text appeared'],
+    ['field_retained', 'Recorded field retained its value'],
     ['final_url_contains', 'Final URL contains'],
     ['final_url_not_contains', 'Final URL does not contain'],
   ];
@@ -854,20 +1277,46 @@ const assertionOptions: readonly (readonly [ExternalAssertionType, string])[] =
 function assertionLabel(type: ExternalAssertionType): string {
   return type.includes('max')
     ? 'Maximum'
-    : type === 'network_expected_status'
-      ? 'HTTP status'
-      : type.startsWith('element_')
-        ? 'Uses selected target locator'
-        : 'Expected text/value';
+    : type.includes('exact')
+      ? 'Exact count'
+      : type === 'network_all_status'
+        ? 'Allowed HTTP statuses (comma-separated)'
+        : type === 'network_expected_status'
+          ? 'HTTP status'
+          : type.startsWith('element_')
+            ? 'Uses selected target locator'
+            : 'Expected text/value';
 }
 function defaultAssertionValue(type: ExternalAssertionType): string {
-  return type.includes('max')
+  return type.includes('max') || type.includes('exact')
     ? '1'
-    : type === 'network_expected_status'
-      ? '200'
-      : type.startsWith('element_')
-        ? 'Selected target'
-        : '';
+    : type === 'network_all_status'
+      ? '200, 201, 204'
+      : type === 'network_expected_status'
+        ? '200'
+        : type.startsWith('element_')
+          ? 'Selected target'
+          : '';
+}
+function assertionNeedsValue(type: ExternalAssertionType): boolean {
+  return ![
+    'network_no_server_errors',
+    'element_visible',
+    'element_not_visible',
+    'element_disabled',
+    'field_retained',
+  ].includes(type);
+}
+function assertionNeedsStep(type: ExternalAssertionType): boolean {
+  return type.startsWith('element_') || type === 'field_retained';
+}
+function newAssertionDraft(stepId = ''): AssertionDraft {
+  return {
+    key: crypto.randomUUID(),
+    type: 'network_request_max',
+    value: '1',
+    stepId,
+  };
 }
 function emptyHook(): HttpHook {
   return { method: 'POST', url: '', headers: {}, body: null, timeoutMs: 5000 };

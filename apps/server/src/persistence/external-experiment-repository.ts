@@ -7,6 +7,8 @@ import {
   externalExperimentVersionSchema,
   externalNetworkObservationSchema,
   externalRunDetailSchema,
+  externalRunListSchema,
+  externalRunSummarySchema,
   externalRunnerErrorSchema,
   externalRunWarningSchema,
   persistedJourneySchema,
@@ -17,6 +19,9 @@ import {
   type ExternalExperimentVersion,
   type ExternalNetworkObservation,
   type ExternalRunDetail,
+  type ExternalRunList,
+  type ExternalRunListQuery,
+  type ExternalRunSummary,
   type ExternalRunnerError,
   type ExternalRunWarning,
   type PersistedJourney,
@@ -61,6 +66,26 @@ interface RunRow {
   readonly networkObservationsJson: string;
   readonly runnerErrorJson: string | null;
   readonly warningsJson: string;
+  readonly createdAt: string;
+}
+
+interface RunSummaryRow {
+  readonly id: string;
+  readonly experimentVersionId: string;
+  readonly projectId: string;
+  readonly journeyId: string;
+  readonly status: string;
+  readonly startedAt: string;
+  readonly completedAt: string | null;
+  readonly durationMs: number | null;
+  readonly projectName: string;
+  readonly journeyName: string;
+  readonly experimentName: string;
+  readonly triggerAttempts: number;
+  readonly networkObservationsJson: string;
+  readonly passedAssertionCount: number;
+  readonly assertionCount: number;
+  readonly screenshotCount: number;
   readonly createdAt: string;
 }
 
@@ -403,6 +428,144 @@ export class ExternalExperimentRepository {
     });
   }
 
+  listArtifactsForProject(projectId: string): readonly RunArtifact[] {
+    return this.protect('list project external artifacts', () =>
+      this.listArtifacts(
+        `WHERE run_id IN (
+          SELECT id FROM external_runs WHERE project_id = ?
+        )`,
+        projectId,
+      ),
+    );
+  }
+
+  listArtifactsForJourney(journeyId: string): readonly RunArtifact[] {
+    return this.protect('list journey external artifacts', () =>
+      this.listArtifacts(
+        `WHERE run_id IN (
+          SELECT id FROM external_runs WHERE journey_id = ?
+        )`,
+        journeyId,
+      ),
+    );
+  }
+
+  deleteRun(runId: string): readonly RunArtifact[] | null {
+    return this.protect('delete an external run', () => {
+      const existing = this.database
+        .prepare('SELECT 1 FROM external_runs WHERE id = ?')
+        .get(runId);
+      if (existing === undefined) return null;
+      const artifacts = this.listArtifacts('WHERE run_id = ?', runId);
+      this.database.transaction(() => {
+        this.database
+          .prepare('DELETE FROM external_assertion_results WHERE run_id = ?')
+          .run(runId);
+        this.database
+          .prepare('DELETE FROM external_run_events WHERE run_id = ?')
+          .run(runId);
+        this.database
+          .prepare('DELETE FROM external_artifacts WHERE run_id = ?')
+          .run(runId);
+        this.database
+          .prepare('DELETE FROM external_runs WHERE id = ?')
+          .run(runId);
+      })();
+      return artifacts;
+    });
+  }
+
+  deleteVersion(versionId: string): readonly RunArtifact[] | null {
+    return this.protect('delete an external experiment version', () => {
+      const version = this.getVersion(versionId);
+      if (version === null) return null;
+      const runIds = this.database
+        .prepare('SELECT id FROM external_runs WHERE experiment_version_id = ?')
+        .all(versionId) as Array<{ readonly id: string }>;
+      const artifacts = runIds.flatMap(({ id }) =>
+        this.listArtifacts('WHERE run_id = ?', id),
+      );
+      this.database.transaction(() => {
+        for (const { id } of runIds) {
+          this.database
+            .prepare('DELETE FROM external_assertion_results WHERE run_id = ?')
+            .run(id);
+          this.database
+            .prepare('DELETE FROM external_run_events WHERE run_id = ?')
+            .run(id);
+          this.database
+            .prepare('DELETE FROM external_artifacts WHERE run_id = ?')
+            .run(id);
+          this.database
+            .prepare('DELETE FROM external_runs WHERE id = ?')
+            .run(id);
+        }
+        this.database
+          .prepare('DELETE FROM external_experiment_versions WHERE id = ?')
+          .run(versionId);
+        const remaining = this.database
+          .prepare(
+            'SELECT 1 FROM external_experiment_versions WHERE experiment_id = ? LIMIT 1',
+          )
+          .get(version.experimentId);
+        if (remaining === undefined) {
+          this.database
+            .prepare('DELETE FROM external_experiments WHERE id = ?')
+            .run(version.experimentId);
+        }
+      })();
+      return artifacts;
+    });
+  }
+
+  listRuns(query: ExternalRunListQuery): ExternalRunList {
+    return this.protect('list external runs', () => {
+      const clauses: string[] = [];
+      const parameters: Array<string | number> = [];
+      if (query.projectId !== undefined) {
+        clauses.push('r.project_id = ?');
+        parameters.push(query.projectId);
+      }
+      if (query.journeyId !== undefined) {
+        clauses.push('r.journey_id = ?');
+        parameters.push(query.journeyId);
+      }
+      const where =
+        clauses.length === 0 ? '' : `WHERE ${clauses.join(' AND ')}`;
+      parameters.push(query.limit, query.offset);
+      const rows = this.database
+        .prepare(
+          `SELECT r.id,
+                  r.experiment_version_id AS experimentVersionId,
+                  r.project_id AS projectId, r.journey_id AS journeyId,
+                  r.status, r.started_at AS startedAt,
+                  r.completed_at AS completedAt, r.duration_ms AS durationMs,
+                  r.project_name AS projectName, r.journey_name AS journeyName,
+                  r.experiment_name AS experimentName,
+                  r.trigger_attempts AS triggerAttempts,
+                  r.network_observations_json AS networkObservationsJson,
+                  (SELECT COUNT(*) FROM external_assertion_results ar
+                    WHERE ar.run_id = r.id AND ar.status = 'passed')
+                    AS passedAssertionCount,
+                  (SELECT COUNT(*) FROM external_assertion_results ar
+                    WHERE ar.run_id = r.id) AS assertionCount,
+                  (SELECT COUNT(*) FROM external_artifacts ea
+                    WHERE ea.run_id = r.id) AS screenshotCount,
+                  r.created_at AS createdAt
+             FROM external_runs r
+             ${where}
+             ORDER BY r.created_at DESC, r.id DESC
+             LIMIT ? OFFSET ?`,
+        )
+        .all(...parameters) as RunSummaryRow[];
+      return externalRunListSchema.parse({
+        items: rows.map(mapRunSummary),
+        limit: query.limit,
+        offset: query.offset,
+      });
+    });
+  }
+
   getRun(runId: string): ExternalRunDetail | null {
     return this.protect('read an external run', () => {
       const row = this.database
@@ -491,6 +654,24 @@ export class ExternalExperimentRepository {
     });
   }
 
+  private listArtifacts(
+    where: string,
+    parameter: string,
+  ): readonly RunArtifact[] {
+    const rows = this.database
+      .prepare(
+        `SELECT id, run_id AS runId, artifact_type AS artifactType, label,
+                relative_path AS relativePath, mime_type AS mimeType,
+                size_bytes AS sizeBytes, checksum_sha256 AS checksumSha256,
+                capture_sequence AS captureSequence, created_at AS createdAt,
+                metadata_json AS metadataJson
+           FROM external_artifacts ${where}
+           ORDER BY created_at, capture_sequence`,
+      )
+      .all(parameter) as ArtifactRow[];
+    return rows.map(mapArtifact);
+  }
+
   private protect<T>(operation: string, action: () => T): T {
     try {
       return action();
@@ -499,6 +680,31 @@ export class ExternalExperimentRepository {
       throw new RunPersistenceError(operation, error);
     }
   }
+}
+
+function mapRunSummary(row: RunSummaryRow): ExternalRunSummary {
+  const observations = externalNetworkObservationSchema
+    .array()
+    .parse(parseJson(row.networkObservationsJson));
+  return externalRunSummarySchema.parse({
+    runId: row.id,
+    experimentVersionId: row.experimentVersionId,
+    projectId: row.projectId,
+    journeyId: row.journeyId,
+    status: row.status,
+    startedAt: row.startedAt,
+    completedAt: row.completedAt,
+    durationMs: row.durationMs,
+    projectName: row.projectName,
+    journeyName: row.journeyName,
+    experimentName: row.experimentName,
+    triggerAttempts: row.triggerAttempts,
+    matchedRequestCount: observations.filter((item) => item.matched).length,
+    passedAssertionCount: row.passedAssertionCount,
+    assertionCount: row.assertionCount,
+    screenshotCount: row.screenshotCount,
+    createdAt: row.createdAt,
+  });
 }
 
 function experimentSelect(suffix: string): string {

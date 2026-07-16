@@ -1,5 +1,7 @@
 import {
   createProjectRequestSchema,
+  deleteProjectResponseSchema,
+  deleteResourceResponseSchema,
   journeyListSchema,
   projectListSchema,
   runExternalExperimentRequestSchema,
@@ -8,17 +10,24 @@ import {
 import type { FastifyInstance, FastifyReply } from 'fastify';
 
 import type { ProjectJourneyRepository } from '../../persistence/project-journey-repository.js';
+import type { ExternalExperimentRepository } from '../../persistence/external-experiment-repository.js';
+import type { ScreenshotStore } from '../../artifacts/screenshot-store.js';
+import type { AuthStateStore } from '../../runner/external/auth-session.js';
 import { BrowserOwnershipConflictError } from '../../runner/infrastructure/browser-ownership.js';
 import {
   InvalidTemplateError,
   MissingRuntimeVariablesError,
 } from '../../runner/external/runtime-values.js';
 import type { JourneyReplayService } from '../../runner/recording/journey-replay.js';
+import { ProductionConfirmationRequiredError } from '../../runner/external/production-safety.js';
 import { RecordingNotActiveError } from '../../runner/recording/recording-manager.js';
 import type { RecordingManager } from '../../runner/recording/recording-manager.js';
 
 interface ProjectParams {
   readonly projectId: string;
+}
+interface DeleteProjectQuery {
+  readonly force?: string | boolean;
 }
 
 interface RecordingParams extends ProjectParams {
@@ -34,6 +43,11 @@ export function registerProjectRoutes(
   repository: ProjectJourneyRepository,
   recordings: RecordingManager,
   replay: JourneyReplayService,
+  cleanup: {
+    readonly authStore: AuthStateStore;
+    readonly experiments: ExternalExperimentRepository;
+    readonly screenshots: ScreenshotStore;
+  },
 ): void {
   app.get('/api/projects', async (_request, reply) =>
     reply.send(projectListSchema.parse({ items: repository.listProjects() })),
@@ -54,6 +68,51 @@ export function registerProjectRoutes(
       return project === null
         ? notFound(reply, 'Project')
         : reply.send(project);
+    },
+  );
+
+  app.delete<{ Params: ProjectParams; Querystring: DeleteProjectQuery }>(
+    '/api/projects/:projectId',
+    async (request, reply) => {
+      const force =
+        request.query.force === true || request.query.force === 'true';
+      if (force && request.params.projectId === 'project-sample-checkout') {
+        return reply.status(409).send({
+          error: {
+            code: 'PROTECTED_PROJECT',
+            message: 'The bundled Sample Checkout project cannot be deleted.',
+          },
+        });
+      }
+      const artifacts = force
+        ? cleanup.experiments.listArtifactsForProject(request.params.projectId)
+        : [];
+      if (force) cleanup.authStore.clear(request.params.projectId);
+      const result = repository.deleteProject(request.params.projectId, force);
+      if (result === 'not_found') return notFound(reply, 'Project');
+      if (result === 'protected') {
+        return reply.status(409).send({
+          error: {
+            code: 'PROTECTED_PROJECT',
+            message: 'The bundled Sample Checkout project cannot be deleted.',
+          },
+        });
+      }
+      if (result === 'has_activity') {
+        return reply.status(409).send({
+          error: {
+            code: 'PROJECT_HAS_ACTIVITY',
+            message:
+              'Projects with recordings, journeys, experiments, or runs cannot be deleted.',
+          },
+        });
+      }
+      cleanup.screenshots.remove(artifacts);
+      return reply.send(
+        deleteProjectResponseSchema.parse({
+          deletedProjectId: request.params.projectId,
+        }),
+      );
     },
   );
 
@@ -159,6 +218,23 @@ export function registerProjectRoutes(
     },
   );
 
+  app.delete<{ Params: JourneyParams }>(
+    '/api/journeys/:journeyId',
+    async (request, reply) => {
+      const artifacts = cleanup.experiments.listArtifactsForJourney(
+        request.params.journeyId,
+      );
+      const result = repository.deleteJourney(request.params.journeyId);
+      if (result === 'not_found') return notFound(reply, 'Journey');
+      cleanup.screenshots.remove(artifacts);
+      return reply.send(
+        deleteResourceResponseSchema.parse({
+          deletedId: request.params.journeyId,
+        }),
+      );
+    },
+  );
+
   app.post<{ Params: JourneyParams }>(
     '/api/journeys/:journeyId/replay',
     async (request, reply) => {
@@ -177,7 +253,11 @@ export function registerProjectRoutes(
       }
       try {
         return reply.send(
-          await replay.replay(request.params.journeyId, parsed.data.variables),
+          await replay.replay(
+            request.params.journeyId,
+            parsed.data.variables,
+            parsed.data.confirmProduction,
+          ),
         );
       } catch (error: unknown) {
         if (error instanceof BrowserOwnershipConflictError)
@@ -193,6 +273,14 @@ export function registerProjectRoutes(
         }
         if (error instanceof InvalidTemplateError) {
           return invalid(reply, 'INVALID_TEMPLATE', error.message);
+        }
+        if (error instanceof ProductionConfirmationRequiredError) {
+          return reply.status(409).send({
+            error: {
+              code: 'PRODUCTION_CONFIRMATION_REQUIRED',
+              message: error.message,
+            },
+          });
         }
         if (
           error instanceof Error &&

@@ -12,6 +12,10 @@ import { RunPersistenceError } from '../src/persistence/run-repository.js';
 import { AuthStateStore } from '../src/runner/external/auth-session.js';
 import { ProjectSettingsService } from '../src/runner/external/project-settings-service.js';
 import {
+  assertProductionConfirmed,
+  ProductionConfirmationRequiredError,
+} from '../src/runner/external/production-safety.js';
+import {
   BrowserOwnership,
   BrowserOwnershipConflictError,
   type BrowserWorkload,
@@ -139,6 +143,13 @@ describe('external experiment version persistence', () => {
         .run(click.id),
     ).toThrow(/immutable/u);
     expect(experiments.getVersion(click.id)?.version).toBe(1);
+
+    expect(projects.deleteProject(project.id)).toBe('has_activity');
+    expect(experiments.deleteVersion(click.id)).toEqual([]);
+    expect(experiments.getVersion(click.id)).toBeNull();
+    expect(projects.deleteProject(project.id, true)).toBe('deleted');
+    expect(projects.getProject(project.id)).toBeNull();
+    expect(experiments.getVersion(submit.id)).toBeNull();
   });
 });
 
@@ -160,6 +171,23 @@ describe('browser workload exclusion', () => {
       release();
       expect(ownership.activeWorkload).toBeNull();
     }
+  });
+});
+
+describe('production safety', () => {
+  it('requires explicit confirmation before a mutating production action', () => {
+    const project = projects.createProject({
+      name: 'Production target',
+      targetUrl: 'https://example.test',
+      environment: 'production',
+      description: '',
+    });
+    expect(() =>
+      assertProductionConfirmed(project, false, 'Request discovery'),
+    ).toThrow(ProductionConfirmationRequiredError);
+    expect(() =>
+      assertProductionConfirmed(project, true, 'Request discovery'),
+    ).not.toThrow();
   });
 });
 

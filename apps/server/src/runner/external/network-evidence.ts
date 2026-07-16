@@ -58,12 +58,16 @@ export class NetworkEvidenceCollector {
   }
 
   snapshot(): readonly ExternalNetworkObservation[] {
-    return [...this.observations.values()];
+    const observations = [...this.observations.values()];
+    return this.matcher === null
+      ? observations.slice(0, 500)
+      : observations.filter((item) => item.matched).slice(0, 500);
   }
 
   discoveryCandidates(): readonly DiscoveredRequest[] {
     const grouped = new Map<string, DiscoveredRequest>();
     for (const observation of this.observations.values()) {
+      if (isStaticAsset(observation.pathname)) continue;
       const key = [
         observation.method,
         observation.pathname,
@@ -87,10 +91,28 @@ export class NetworkEvidenceCollector {
         grouped.set(key, { ...current, occurrences: current.occurrences + 1 });
       }
     }
-    return [...grouped.values()].sort(
-      (left, right) => left.relativeTimestampMs - right.relativeTimestampMs,
-    );
+    return [...grouped.values()].sort((left, right) => {
+      const methodPriority =
+        mutationPriority(left.method) - mutationPriority(right.method);
+      return methodPriority !== 0
+        ? methodPriority
+        : left.relativeTimestampMs - right.relativeTimestampMs;
+    });
   }
+}
+
+function mutationPriority(method: string): number {
+  return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) ? 0 : 1;
+}
+
+function isStaticAsset(pathname: string): boolean {
+  return (
+    pathname.startsWith('/_next/') ||
+    pathname.startsWith('/assets/') ||
+    /\.(?:avif|css|gif|ico|jpe?g|js|map|png|svg|webp|woff2?|ttf)$/iu.test(
+      pathname,
+    )
+  );
 }
 
 export function matchesRequest(

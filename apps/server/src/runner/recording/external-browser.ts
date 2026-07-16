@@ -370,7 +370,9 @@ export class PlaywrightExternalBrowserOwner implements ExternalBrowserOwner {
           callbacks.onWarning(payload, isTopFrame(page, frame));
         },
       );
-      await context.addInitScript(installBrowserRecorder);
+      await context.addInitScript({
+        content: buildBrowserRecorderInitScript(),
+      });
       page.on('framenavigated', (frame) => {
         if (frame === page.mainFrame()) {
           callbacks.onNavigation(frame.url(), Date.now());
@@ -396,6 +398,12 @@ export class PlaywrightExternalBrowserOwner implements ExternalBrowserOwner {
         options.timeoutMs,
       );
       await session.navigate(options.targetUrl);
+      const recorderReady = await page.evaluate<boolean>(
+        'globalThis.__formcrashRecorderReady === true',
+      );
+      if (!recorderReady) {
+        throw new Error('Browser recorder initialization did not complete.');
+      }
       await this.afterRecordingPageReady?.(page);
       return session;
     } catch (error: unknown) {
@@ -463,11 +471,22 @@ function escapeCss(value: string): string {
   );
 }
 
+export function buildBrowserRecorderInitScript(
+  recorderSource: string = installBrowserRecorder.toString(),
+): string {
+  return `(() => {
+    const __name = (target, value) =>
+      Object.defineProperty(target, "name", { value, configurable: true });
+    (${recorderSource})();
+  })();`;
+}
+
 function installBrowserRecorder(): void {
   type Binding = (payload: unknown) => Promise<void>;
   const bindings = window as typeof window & {
     __formcrashRecord?: Binding;
     __formcrashWarn?: Binding;
+    __formcrashRecorderReady?: boolean;
   };
 
   const emit = (payload: unknown): void => {
@@ -731,8 +750,10 @@ function installBrowserRecorder(): void {
       }
       const button = target.closest('button, input[type="submit"]');
       if (
-        button instanceof HTMLButtonElement &&
-        (button.type === 'submit' || button.form !== null)
+        (button instanceof HTMLButtonElement ||
+          button instanceof HTMLInputElement) &&
+        button.type === 'submit' &&
+        button.form !== null
       ) {
         return;
       }
@@ -799,6 +820,7 @@ function installBrowserRecorder(): void {
       true,
     );
   }
+  bindings.__formcrashRecorderReady = true;
 }
 
 function normalizeError(error: unknown, fallback: string): Error {

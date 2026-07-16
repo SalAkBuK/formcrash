@@ -25,6 +25,7 @@ import {
 import { ProjectSettingsService } from '../runner/external/project-settings-service.js';
 import { RequestDiscoveryService } from '../runner/external/request-discovery.js';
 import { ExternalExperimentRunner } from '../runner/external/external-experiment-runner.js';
+import { AuthValidationService } from '../runner/external/auth-validation.js';
 
 export interface CreateAppOptions {
   readonly config: ServerConfig;
@@ -46,6 +47,10 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   );
   const externalExperimentRepository = new ExternalExperimentRepository(
     database.connection,
+  );
+  const externalScreenshotStore = new ScreenshotStore(
+    options.config.artifactRoot,
+    externalExperimentRepository,
   );
   const screenshotStore = new ScreenshotStore(
     options.config.artifactRoot,
@@ -69,10 +74,18 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     authStateStore,
     browserOwnership,
   );
+  const authValidation = new AuthValidationService(
+    options.config,
+    projectRepository,
+    authStateStore,
+    browserOwnership,
+  );
   const recordingManager = new RecordingManager(
     options.config,
     projectRepository,
     browserOwnership,
+    undefined,
+    authStateStore,
   );
   const journeyReplay = new JourneyReplayService(
     options.config,
@@ -163,6 +176,11 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     projectRepository,
     recordingManager,
     journeyReplay,
+    {
+      authStore: authStateStore,
+      experiments: externalExperimentRepository,
+      screenshots: externalScreenshotStore,
+    },
   );
   registerExternalExperimentRoutes(app, {
     artifactRoot: options.config.artifactRoot,
@@ -170,6 +188,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     settings: projectSettings,
     authStore: authStateStore,
     authCaptures,
+    authValidation,
     discovery: requestDiscovery,
     experiments: externalExperimentRepository,
     runner: externalRunner,

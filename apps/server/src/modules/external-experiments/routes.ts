@@ -1,9 +1,13 @@
 import {
   authCaptureSessionSchema,
+  authValidationResultSchema,
   createExternalExperimentRequestSchema,
+  deleteResourceResponseSchema,
   externalExperimentListSchema,
   externalExperimentVersionSchema,
   externalRunDetailSchema,
+  externalRunListQuerySchema,
+  externalRunListSchema,
   projectExecutionSettingsInputSchema,
   requestDiscoveryRequestSchema,
   runExternalExperimentRequestSchema,
@@ -18,9 +22,11 @@ import type {
   AuthCaptureManager,
   AuthStateStore,
 } from '../../runner/external/auth-session.js';
+import type { AuthValidationService } from '../../runner/external/auth-validation.js';
 import type { ExternalExperimentRunner } from '../../runner/external/external-experiment-runner.js';
 import type { ProjectSettingsService } from '../../runner/external/project-settings-service.js';
 import type { RequestDiscoveryService } from '../../runner/external/request-discovery.js';
+import { ProductionConfirmationRequiredError } from '../../runner/external/production-safety.js';
 import {
   InvalidTemplateError,
   MissingRuntimeVariablesError,
@@ -41,6 +47,12 @@ interface ExperimentParams {
 interface RunParams {
   readonly runId: string;
 }
+interface ExternalRunQuery {
+  readonly projectId?: string;
+  readonly journeyId?: string;
+  readonly limit?: string | number;
+  readonly offset?: string | number;
+}
 interface ArtifactParams extends RunParams {
   readonly artifactId: string;
 }
@@ -53,12 +65,13 @@ export function registerExternalExperimentRoutes(
     readonly settings: ProjectSettingsService;
     readonly authStore: AuthStateStore;
     readonly authCaptures: AuthCaptureManager;
+    readonly authValidation: AuthValidationService;
     readonly discovery: RequestDiscoveryService;
     readonly experiments: ExternalExperimentRepository;
     readonly runner: ExternalExperimentRunner;
   },
 ): void {
-  const artifacts = new ScreenshotStore(
+  const artifactStore = new ScreenshotStore(
     dependencies.artifactRoot,
     dependencies.experiments,
   );
@@ -155,6 +168,33 @@ export function registerExternalExperimentRoutes(
     },
   );
 
+  app.post<{ Params: ProjectParams }>(
+    '/api/projects/:projectId/authentication/test',
+    async (request, reply) => {
+      if (dependencies.projects.getProject(request.params.projectId) === null) {
+        return notFound(reply, 'Project');
+      }
+      try {
+        return reply.send(
+          authValidationResultSchema.parse(
+            await dependencies.authValidation.validate(
+              request.params.projectId,
+            ),
+          ),
+        );
+      } catch (error: unknown) {
+        if (error instanceof BrowserOwnershipConflictError) {
+          return conflict(reply, error.message);
+        }
+        return invalid(
+          reply,
+          'AUTHENTICATION_VALIDATION_FAILED',
+          publicMessage(error),
+        );
+      }
+    },
+  );
+
   app.post<{ Params: JourneyParams }>(
     '/api/journeys/:journeyId/request-discovery',
     async (request, reply) => {
@@ -246,6 +286,22 @@ export function registerExternalExperimentRoutes(
     },
   );
 
+  app.delete<{ Params: ExperimentParams }>(
+    '/api/external-experiments/:experimentVersionId',
+    async (request, reply) => {
+      const artifacts = dependencies.experiments.deleteVersion(
+        request.params.experimentVersionId,
+      );
+      if (artifacts === null) return notFound(reply, 'Experiment version');
+      artifactStore.remove(artifacts);
+      return reply.send(
+        deleteResourceResponseSchema.parse({
+          deletedId: request.params.experimentVersionId,
+        }),
+      );
+    },
+  );
+
   app.post<{ Params: ExperimentParams }>(
     '/api/external-experiments/:experimentVersionId/runs',
     async (request, reply) => {
@@ -264,6 +320,7 @@ export function registerExternalExperimentRoutes(
             await dependencies.runner.run(
               request.params.experimentVersionId,
               parsed.data.variables,
+              parsed.data.confirmProduction,
             ),
           ),
         );
@@ -281,6 +338,41 @@ export function registerExternalExperimentRoutes(
     },
   );
 
+  app.delete<{ Params: RunParams }>(
+    '/api/external-runs/:runId',
+    async (request, reply) => {
+      const artifacts = dependencies.experiments.deleteRun(
+        request.params.runId,
+      );
+      if (artifacts === null) return notFound(reply, 'External run');
+      artifactStore.remove(artifacts);
+      return reply.send(
+        deleteResourceResponseSchema.parse({
+          deletedId: request.params.runId,
+        }),
+      );
+    },
+  );
+
+  app.get<{ Querystring: ExternalRunQuery }>(
+    '/api/external-runs',
+    async (request, reply) => {
+      const parsed = externalRunListQuerySchema.safeParse(request.query);
+      if (!parsed.success) {
+        return invalid(
+          reply,
+          'INVALID_EXTERNAL_RUN_QUERY',
+          parsed.error.issues[0]?.message,
+        );
+      }
+      return reply.send(
+        externalRunListSchema.parse(
+          dependencies.experiments.listRuns(parsed.data),
+        ),
+      );
+    },
+  );
+
   app.get<{ Params: ArtifactParams }>(
     '/api/external-runs/:runId/artifacts/:artifactId',
     async (request, reply) => {
@@ -290,7 +382,7 @@ export function registerExternalExperimentRoutes(
       );
       if (artifact === null) return notFound(reply, 'Artifact');
       try {
-        return reply.type(artifact.mimeType).send(artifacts.read(artifact));
+        return reply.type(artifact.mimeType).send(artifactStore.read(artifact));
       } catch {
         return notFound(reply, 'Artifact');
       }
@@ -313,6 +405,14 @@ function handleExecutionError(reply: FastifyReply, error: unknown) {
   }
   if (error instanceof BrowserOwnershipConflictError) {
     return conflict(reply, error.message);
+  }
+  if (error instanceof ProductionConfirmationRequiredError) {
+    return reply.status(409).send({
+      error: {
+        code: 'PRODUCTION_CONFIRMATION_REQUIRED',
+        message: error.message,
+      },
+    });
   }
   if (
     error instanceof Error &&

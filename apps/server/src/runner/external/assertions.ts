@@ -64,6 +64,17 @@ async function evaluateOne(
         },
       );
     }
+    case 'network_request_exact': {
+      const count = matched.length;
+      return createResult(
+        assertion,
+        count === assertion.expected ? 'passed' : 'failed',
+        {
+          expected: `Exactly ${assertion.expected} matching browser request${assertion.expected === 1 ? '' : 's'} should occur.`,
+          observed: `${count} matching browser request${count === 1 ? '' : 's'} occurred.`,
+        },
+      );
+    }
     case 'network_success_max': {
       const count = matched.filter(isSuccessful).length;
       return createResult(
@@ -71,6 +82,17 @@ async function evaluateOne(
         count <= assertion.maximum ? 'passed' : 'failed',
         {
           expected: `No more than ${assertion.maximum} successful matching response${assertion.maximum === 1 ? '' : 's'} should occur.`,
+          observed: `${count} successful matching response${count === 1 ? '' : 's'} occurred.`,
+        },
+      );
+    }
+    case 'network_success_exact': {
+      const count = matched.filter(isSuccessful).length;
+      return createResult(
+        assertion,
+        count === assertion.expected ? 'passed' : 'failed',
+        {
+          expected: `Exactly ${assertion.expected} successful matching response${assertion.expected === 1 ? '' : 's'} should occur.`,
           observed: `${count} successful matching response${count === 1 ? '' : 's'} occurred.`,
         },
       );
@@ -85,6 +107,44 @@ async function evaluateOne(
           ? `A matching HTTP ${assertion.expectedStatus} response was observed.`
           : `No matching HTTP ${assertion.expectedStatus} response was observed.`,
       });
+    }
+    case 'network_all_status': {
+      const unexpected = matched.filter(
+        (item) =>
+          item.status === null ||
+          !assertion.allowedStatuses.includes(item.status),
+      );
+      return createResult(
+        assertion,
+        matched.length > 0 && unexpected.length === 0 ? 'passed' : 'failed',
+        {
+          expected: `Every matching response should have one of these statuses: ${assertion.allowedStatuses.join(', ')}.`,
+          observed:
+            matched.length === 0
+              ? 'No matching responses were observed.'
+              : unexpected.length === 0
+                ? `All ${matched.length} matching responses had an allowed status.`
+                : `${unexpected.length} of ${matched.length} matching responses had a missing or unexpected status.`,
+        },
+      );
+    }
+    case 'network_no_server_errors': {
+      const errors = matched.filter(
+        (item) => item.status !== null && item.status >= 500,
+      );
+      return createResult(
+        assertion,
+        matched.length > 0 && errors.length === 0 ? 'passed' : 'failed',
+        {
+          expected: 'No matching response should return HTTP 5xx.',
+          observed:
+            matched.length === 0
+              ? 'No matching responses were observed.'
+              : errors.length === 0
+                ? `No server errors occurred across ${matched.length} matching responses.`
+                : `${errors.length} matching response${errors.length === 1 ? '' : 's'} returned HTTP 5xx.`,
+        },
+      );
     }
     case 'element_visible': {
       const visible = await input.session.isVisible(assertion.locator);

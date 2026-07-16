@@ -18,6 +18,7 @@ import {
   resolveRuntime,
   resolveStepValue,
 } from '../external/runtime-values.js';
+import { assertProductionConfirmed } from '../external/production-safety.js';
 import type { BrowserOwnership } from '../infrastructure/browser-ownership.js';
 import {
   PlaywrightExternalBrowserOwner,
@@ -42,11 +43,17 @@ export class JourneyReplayService {
   async replay(
     journeyId: string,
     ephemeral: EphemeralRuntimeValues = {},
+    confirmProduction = false,
   ): Promise<ReplayResult> {
     const journey = this.repository.getJourney(journeyId);
     if (journey === null) throw new Error('Journey was not found.');
     const project = this.repository.getProject(journey.projectId);
     if (project === null) throw new Error('Journey project was not found.');
+    assertProductionConfirmed(
+      project,
+      confirmProduction,
+      'Normal journey replay',
+    );
     const storedSettings = this.settings?.get(project.id) ?? {
       variables: [],
       beforeRunHook: null,
@@ -90,7 +97,7 @@ export class JourneyReplayService {
           await executeRecordedStep(session, step, (item) =>
             resolveStepValue(item, runtime),
           );
-        } catch {
+        } catch (error: unknown) {
           result = replayResultSchema.parse({
             replayId,
             journeyId,
@@ -100,7 +107,10 @@ export class JourneyReplayService {
               stepName: step.name,
               stepNumber: index + 1,
               actionType: step.type,
-              message: `Step ${index + 1} could not be replayed within the bounded wait.`,
+              message: `Step ${index + 1} could not be replayed.`,
+              technicalMessage: technicalReplayMessage(error, step.sensitive),
+              currentUrl: safeCurrentUrl(session),
+              locator: step.locator,
             },
             startedAt,
             completedAt: new Date().toISOString(),
@@ -155,5 +165,23 @@ export class JourneyReplayService {
     }
     if (result === null) throw new Error('Replay did not produce a result.');
     return result;
+  }
+}
+
+function technicalReplayMessage(error: unknown, sensitive: boolean): string {
+  if (sensitive) {
+    return 'The sensitive field action failed. Its value was omitted from diagnostics.';
+  }
+  if (!(error instanceof Error) || error.message.trim() === '') {
+    return 'The browser action failed without a diagnostic message.';
+  }
+  return error.message.trim().slice(0, 2_000);
+}
+
+function safeCurrentUrl(session: ReplayBrowserSession): string | null {
+  try {
+    return session.currentUrl();
+  } catch {
+    return null;
   }
 }

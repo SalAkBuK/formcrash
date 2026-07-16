@@ -68,7 +68,7 @@ describe('external runtime values and safe templates', () => {
     );
   });
 
-  it('rejects unknown templates and reports all missing variables', () => {
+  it('rejects unknown templates and reports only variables used by the execution', () => {
     expect(() =>
       resolveTemplate('{{random.uuid}}', new Map(), {
         runId: 'run',
@@ -90,9 +90,28 @@ describe('external runtime values and safe templates', () => {
       }),
     ).toThrowError(
       expect.objectContaining<Partial<MissingRuntimeVariablesError>>({
-        missingVariables: ['API_TOKEN', 'PASSWORD'],
+        missingVariables: ['PASSWORD'],
       }),
     );
+  });
+
+  it('does not require an unused declaration', () => {
+    expect(() =>
+      resolveRuntime({
+        runId: 'run-id',
+        journey: journey([step('name', 'Ada')]),
+        declarations: [
+          {
+            name: 'UNUSED_SECRET',
+            secret: true,
+            description: '',
+            template: null,
+          },
+        ],
+        ephemeral: {},
+        hooks: [],
+      }),
+    ).not.toThrow();
   });
 });
 
@@ -204,6 +223,40 @@ describe('external assertions', () => {
       'passed',
       'failed',
       'passed',
+    ]);
+  });
+
+  it('detects mixed success and server-error responses', async () => {
+    const results = await evaluate([
+      {
+        id: 'exact-two',
+        type: 'network_request_exact',
+        expected: 2,
+        description: 'two attempts',
+      },
+      {
+        id: 'exact-one-success',
+        type: 'network_success_exact',
+        expected: 1,
+        description: 'one success',
+      },
+      {
+        id: 'all-created',
+        type: 'network_all_status',
+        allowedStatuses: [201],
+        description: 'all created',
+      },
+      {
+        id: 'no-server-errors',
+        type: 'network_no_server_errors',
+        description: 'no 5xx',
+      },
+    ]);
+    expect(results.map((result) => result.status)).toEqual([
+      'passed',
+      'passed',
+      'failed',
+      'failed',
     ]);
   });
 

@@ -1,4 +1,6 @@
 import {
+  deleteProjectResponseSchema,
+  deleteResourceResponseSchema,
   journeyListSchema,
   persistedJourneySchema,
   projectListSchema,
@@ -6,6 +8,7 @@ import {
   recordingSessionSchema,
   replayResultSchema,
   type CreateProjectRequest,
+  type EphemeralRuntimeValues,
   type PersistedJourney,
   type Project,
   type RecordedJourneyStep,
@@ -29,12 +32,33 @@ export async function createProject(
   });
 }
 
+export async function deleteProject(
+  projectId: string,
+  force = false,
+): Promise<void> {
+  await requestJson(
+    `/api/projects/${projectId}${force ? '?force=true' : ''}`,
+    deleteProjectResponseSchema,
+    {
+      method: 'DELETE',
+    },
+  );
+}
+
 export async function listJourneys(
   projectId: string,
 ): Promise<readonly PersistedJourney[]> {
   return (
     await requestJson(`/api/projects/${projectId}/journeys`, journeyListSchema)
   ).items;
+}
+
+export async function deleteJourney(journeyId: string): Promise<void> {
+  await requestJson(
+    `/api/journeys/${journeyId}`,
+    deleteResourceResponseSchema,
+    { method: 'DELETE' },
+  );
 }
 
 export async function startRecording(
@@ -85,8 +109,14 @@ export async function saveJourney(
   );
 }
 
-export async function replayJourney(journeyId: string): Promise<ReplayResult> {
+export async function replayJourney(
+  journeyId: string,
+  variables: EphemeralRuntimeValues,
+  confirmProduction: boolean,
+): Promise<ReplayResult> {
   return requestJson(`/api/journeys/${journeyId}/replay`, replayResultSchema, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ variables, confirmProduction }),
   });
 }

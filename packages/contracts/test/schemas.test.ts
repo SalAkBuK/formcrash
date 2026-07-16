@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assertionResultStatusSchema,
   controlledTargetUrlSchema,
+  createExternalExperimentRequestSchema,
   createProjectRequestSchema,
   experimentTypeSchema,
   journeyActionTypeSchema,
@@ -135,5 +136,26 @@ describe('foundational contracts', () => {
     'https://user:secret@example.test',
   ])('rejects unsupported target URL %s', (targetUrl) => {
     expect(controlledTargetUrlSchema.safeParse(targetUrl).success).toBe(false);
+  });
+
+  it('requires a matcher when an experiment uses network assertions', () => {
+    const result = createExternalExperimentRequestSchema.safeParse({
+      name: 'Unmatched network assertion',
+      targetStepId: 'submit',
+      triggerCount: 2,
+      intervalMs: 0,
+      networkMatcher: null,
+      assertions: [
+        {
+          id: 'max-one',
+          type: 'network_request_max',
+          maximum: 1,
+          description: 'At most one matching request.',
+        },
+      ],
+      continueAfterTarget: false,
+    });
+
+    expect(result.success).toBe(false);
   });
 });

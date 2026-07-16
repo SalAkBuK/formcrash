@@ -25,6 +25,7 @@ import {
   resolveRuntime,
   resolveStepValue,
 } from './runtime-values.js';
+import { assertProductionConfirmed } from './production-safety.js';
 
 export class RequestDiscoveryService {
   private readonly browserOwner: ExternalBrowserOwner;
@@ -44,11 +45,17 @@ export class RequestDiscoveryService {
     readonly journeyId: string;
     readonly targetStepId: string;
     readonly variables: EphemeralRuntimeValues;
+    readonly confirmProduction?: boolean;
   }): Promise<RequestDiscoveryResult> {
     const journey = this.projects.getJourney(input.journeyId);
     if (journey === null) throw new Error('Journey was not found.');
     const project = this.projects.getProject(journey.projectId);
     if (project === null) throw new Error('Journey project was not found.');
+    assertProductionConfirmed(
+      project,
+      input.confirmProduction ?? false,
+      'Request discovery',
+    );
     const targetIndex = journey.steps.findIndex(
       (step) => step.id === input.targetStepId,
     );

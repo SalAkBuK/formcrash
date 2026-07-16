@@ -41,6 +41,7 @@ import {
   resolveStepValue,
   type ResolvedRuntime,
 } from './runtime-values.js';
+import { assertProductionConfirmed } from './production-safety.js';
 
 export class ExternalExperimentRunner {
   private readonly browserOwner: ExternalBrowserOwner;
@@ -62,12 +63,28 @@ export class ExternalExperimentRunner {
   async run(
     experimentVersionId: string,
     ephemeral: EphemeralRuntimeValues,
+    confirmProduction = false,
   ): Promise<ExternalRunDetail> {
     const experiment = this.repository.getVersion(experimentVersionId);
     if (experiment === null)
       throw new Error('Experiment version was not found.');
+    if (
+      experiment.networkMatcher === null &&
+      experiment.assertions.some((assertion) =>
+        assertion.type.startsWith('network_'),
+      )
+    ) {
+      throw new ConfigurationError(
+        'A network request matcher is required for network assertions.',
+      );
+    }
     const project = this.projects.getProject(experiment.projectId);
     if (project === null) throw new Error('Experiment project was not found.');
+    assertProductionConfirmed(
+      project,
+      confirmProduction,
+      'External experiment execution',
+    );
     const journey = experiment.journeySnapshot;
     const storedSettings = this.settings.get(project.id);
     const runId = randomUUID();
@@ -459,6 +476,12 @@ class ExternalJourneyStepError extends Error {
       actionType: step.type,
       message:
         'The recorded action could not complete within the bounded wait.',
+      technicalMessage:
+        step.sensitive || !(cause instanceof Error)
+          ? null
+          : cause.message.trim().slice(0, 2_000) || null,
+      currentUrl: null,
+      locator: step.locator,
     };
   }
 }

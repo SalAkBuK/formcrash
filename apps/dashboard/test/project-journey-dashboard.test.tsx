@@ -6,6 +6,11 @@ import { ProjectJourneyDashboard } from '../src/features/projects/components/pro
 
 const mocks = vi.hoisted(() => ({
   createProject: vi.fn(),
+  deleteJourney: vi.fn(),
+  deleteProject: vi.fn(),
+  getProjectSettings: vi.fn(),
+  listExternalExperiments: vi.fn(),
+  listExternalRuns: vi.fn(),
   getRecording: vi.fn(),
   listJourneys: vi.fn(),
   listProjects: vi.fn(),
@@ -16,11 +21,17 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../src/features/projects/api/projects', () => mocks);
+vi.mock('../src/features/projects/api/external-experiments', () => ({
+  getProjectSettings: mocks.getProjectSettings,
+  listExternalExperiments: mocks.listExternalExperiments,
+  listExternalRuns: mocks.listExternalRuns,
+}));
 
 const project = {
   id: 'project-external',
   name: 'Profile fixture',
   targetUrl: 'http://localhost:4300',
+  environment: 'local' as const,
   description: 'Controlled fixture',
   createdAt: '2026-07-16T00:00:00.000Z',
   updatedAt: '2026-07-16T00:00:00.000Z',
@@ -81,7 +92,27 @@ const journey = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.getProjectSettings.mockResolvedValue({
+    projectId: project.id,
+    variables: [],
+    beforeRunHook: null,
+    afterRunHook: null,
+    authentication: {
+      configured: false,
+      available: false,
+      capturedAt: null,
+      missingReason: null,
+    },
+    updatedAt: '2026-07-16T00:00:00.000Z',
+  });
+  mocks.listExternalExperiments.mockResolvedValue([]);
+  mocks.listExternalRuns.mockResolvedValue({
+    items: [],
+    limit: 20,
+    offset: 0,
+  });
   mocks.listProjects.mockResolvedValue([project]);
+  mocks.deleteProject.mockResolvedValue(undefined);
   mocks.listJourneys.mockResolvedValue([]);
   mocks.startRecording.mockResolvedValue(recording);
   mocks.stopRecording.mockResolvedValue(completed);
@@ -97,6 +128,112 @@ beforeEach(() => {
 });
 
 describe('external project journey workflow', () => {
+  it('selects and bulk deletes multiple projects', async () => {
+    const user = userEvent.setup();
+    const sample = {
+      ...project,
+      id: 'project-sample-checkout',
+      name: 'Sample Checkout',
+    };
+    const firstExtra = {
+      ...project,
+      id: 'extra-one',
+      name: 'Extra one',
+    };
+    const secondExtra = {
+      ...project,
+      id: 'extra-two',
+      name: 'Extra two',
+    };
+    mocks.listProjects
+      .mockResolvedValueOnce([sample, firstExtra, secondExtra])
+      .mockResolvedValueOnce([sample]);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<ProjectJourneyDashboard />);
+    await screen.findByText('Saved targets');
+    await user.click(screen.getByLabelText('Select all'));
+    await user.click(
+      screen.getByRole('button', { name: 'Delete selected (2)' }),
+    );
+
+    expect(mocks.deleteProject).toHaveBeenNthCalledWith(1, firstExtra.id, true);
+    expect(mocks.deleteProject).toHaveBeenNthCalledWith(
+      2,
+      secondExtra.id,
+      true,
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Delete selected (2)' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Sample Checkout/ }),
+    ).toBeVisible();
+  });
+
+  it('deletes an extra project after confirmation', async () => {
+    const user = userEvent.setup();
+    const extra = {
+      ...project,
+      id: 'extra-project',
+      name: 'Extra target',
+    };
+    mocks.listProjects
+      .mockResolvedValueOnce([project, extra])
+      .mockResolvedValueOnce([project]);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<ProjectJourneyDashboard />);
+    await screen.findByText('Saved targets');
+    await user.click(
+      screen.getByRole('button', { name: 'Delete Extra target extra-pr' }),
+    );
+
+    expect(mocks.deleteProject).toHaveBeenCalledWith(extra.id, true);
+    expect(
+      screen.queryByRole('button', {
+        name: 'Delete Extra target extra-pr',
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('creates a project and resets the form after the asynchronous request', async () => {
+    const user = userEvent.setup();
+    const created = {
+      ...project,
+      id: 'project-towerdesk',
+      name: 'Towerdesk',
+      targetUrl: 'https://towerdesk.netlify.app/',
+      environment: 'production' as const,
+      description: '',
+    };
+    mocks.createProject.mockResolvedValue(created);
+    mocks.listProjects
+      .mockResolvedValueOnce([project])
+      .mockResolvedValueOnce([project, created]);
+
+    render(<ProjectJourneyDashboard />);
+    await screen.findByText('Saved targets');
+
+    const nameInput = screen.getByLabelText('Project name');
+    const targetInput = screen.getByLabelText('Target URL');
+    await user.type(nameInput, created.name);
+    await user.type(targetInput, created.targetUrl);
+    await user.click(screen.getByRole('button', { name: 'Create project' }));
+
+    expect(
+      await screen.findByRole('heading', { name: created.name }),
+    ).toBeVisible();
+    expect(nameInput).toHaveValue('');
+    expect(targetInput).toHaveValue('');
+    expect(mocks.createProject).toHaveBeenCalledWith({
+      name: created.name,
+      targetUrl: created.targetUrl,
+      environment: 'production',
+      description: '',
+    });
+  });
+
   it('starts, stops, reviews, saves, and replays a captured journey', async () => {
     const user = userEvent.setup();
     render(<ProjectJourneyDashboard />);
@@ -125,6 +262,7 @@ describe('external project journey workflow', () => {
       'Profile journey',
       [step],
     );
+    expect(mocks.replayJourney).toHaveBeenCalledWith(journey.id, {}, true);
   });
 
   it('shows the controlled-environment warning and explicit unsupported list', async () => {

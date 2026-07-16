@@ -3,6 +3,7 @@ export type BrowserWorkload =
   | 'recording'
   | 'replay'
   | 'auth_capture'
+  | 'auth_validation'
   | 'request_discovery'
   | 'external_experiment';
 

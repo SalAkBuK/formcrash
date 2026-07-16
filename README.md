@@ -86,8 +86,10 @@ Runner configuration:
 Project runtime variables use `FORMCRASH_VAR_<NAME>` environment keys. For
 example, a declaration named `API_TOKEN` reads `FORMCRASH_VAR_API_TOKEN`.
 Values may instead be supplied ephemerally when replaying or running an external
-experiment. Secret values are resolved in memory only and are excluded from API
-responses, events, persisted snapshots, errors, and masked screenshots.
+experiment. Only variables referenced by the selected journey, hooks, or
+assertions are required; unused declarations do not block execution. Secret
+values are resolved in memory only and are excluded from API responses, events,
+persisted snapshots, errors, and masked screenshots.
 
 Startup creates the configured directories, applies ordered migrations, and
 idempotently seeds the bundled Sample Checkout project, journey, Impatient User
@@ -188,7 +190,11 @@ Persisted inspection endpoints:
 External target and journey endpoints:
 
 - `POST /api/projects`, `GET /api/projects`, and `GET /api/projects/:projectId`
-  — create and inspect controlled HTTP/HTTPS targets, including localhost.
+  — create and inspect controlled HTTP/HTTPS targets with an explicit `local`,
+  `staging`, or `production` environment classification.
+- `DELETE /api/projects/:projectId?force=true` — remove a project and all of its
+  recordings, journeys, experiments, runs, screenshots, settings, and saved
+  authentication. The bundled sample remains protected.
 - `POST /api/projects/:projectId/recordings` — acquire exclusive Chromium
   ownership, open a fresh visible context, and start a server-owned recording.
 - `GET /api/projects/:projectId/recordings/:sessionId` and
@@ -197,24 +203,34 @@ External target and journey endpoints:
   reviewed recording as a new immutable journey version.
 - `GET /api/projects/:projectId/journeys` and `GET /api/journeys/:journeyId`
   — list and read saved generic journeys.
+- `DELETE /api/journeys/:journeyId` — remove a journey and its associated
+  experiment versions, runs, and screenshots.
 - `POST /api/journeys/:journeyId/replay` — replay persisted steps in a fresh
-  context and return the exact failed step when an action cannot complete. An
-  optional `{ "variables": { ... } }` body supplies ephemeral runtime values.
+  context and return the failed step, locator, browser URL, and bounded browser
+  diagnostic. The request body accepts ephemeral `variables` and
+  `confirmProduction`.
 - `GET` and `PUT /api/projects/:projectId/settings` — read public execution
   metadata and configure variable declarations plus bounded before/after hooks.
 - `POST /api/projects/:projectId/auth-captures` and `POST
 .../:captureId/confirm` — open visible Chromium for a developer-managed login
   and persist its browser storage state. `DELETE
 /api/projects/:projectId/authentication` clears it.
+- `POST /api/projects/:projectId/authentication/test` — load saved state and
+  report an obvious login redirect or target-loading failure.
 - `POST /api/journeys/:journeyId/request-discovery` — replay through one saved
   click or submit and return sanitized method/path/status candidates caused by
-  that target.
+  that target. Discovery executes the real action once and requires production
+  confirmation for production projects.
 - `POST` and `GET /api/journeys/:journeyId/experiments` — create immutable
   Impatient User versions and list them.
-- `GET /api/external-experiments/:experimentVersionId`, `POST
-.../:experimentVersionId/runs`, and `GET /api/external-runs/:runId` — inspect
-  a version, execute it, and reload its persisted assertions, network evidence,
-  ordered events, warnings, and artifact metadata.
+- `GET` or `DELETE /api/external-experiments/:experimentVersionId` — inspect or
+  remove a version and its associated run evidence.
+- `POST /api/external-experiments/:experimentVersionId/runs` — execute a
+  version; production projects require explicit confirmation.
+- `GET /api/external-runs?projectId=...&limit=20&offset=0`,
+  `GET /api/external-runs/:runId`, and `DELETE /api/external-runs/:runId` —
+  list, reload, or remove persisted assertions, request/status evidence, events,
+  warnings, and screenshot metadata.
 
 Recording intentionally supports only top-frame navigation, click, text input,
 checkbox/radio change, dropdown selection, and form submission. New tabs,
@@ -230,7 +246,10 @@ does not blindly replay the original target afterward. Later steps run only when
 the immutable experiment version explicitly enables continuation; otherwise the
 runner settles and evaluates final-state assertions immediately after injection.
 The optional request matcher compares method and pathname (query parameters are
-ignored) and may also constrain the host.
+ignored) and may also constrain the host. Discovery filters obvious static
+assets and ranks mutating requests first. Network assertions support maximum and
+exact request/success counts, allowed-status checks, and explicit HTTP 5xx
+rejection; multiple assertions may be combined in one version.
 
 Before-run and cleanup hooks accept only bounded `POST` or `DELETE` requests and
 should exist only in controlled test environments. A failed before-run hook is a
@@ -292,11 +311,15 @@ records supported manual same-tab journeys in visible Chromium, reviews safe or
 masked steps and their ranked locators, saves immutable journey versions, and
 replays them with exact failed-step reporting. Project settings now capture and
 restore authenticated browser state, declare safe runtime inputs and repeatable
-data hooks, and reject unresolved variables before browser launch. Saved click
+data hooks, test saved state for obvious login redirects, and reject only
+unresolved variables used by the execution before browser launch. Saved click
 or submit steps accept immutable external Impatient User versions with request
-discovery plus network, UI, field, and final-URL assertions. External runs
-persist ordered sanitized events, assertion outcomes, matched network evidence,
-warnings, and screenshots. The recorder and runner are verified against both the
+discovery plus multiple network, UI, field-retention, and final-URL assertions.
+Production targets require explicit confirmation before replay, discovery, or
+repeated triggers. External runs persist ordered sanitized events, assertion
+outcomes, matched network evidence, warnings, and screenshots; the dashboard
+lists prior runs, displays request statuses and screenshot previews, and exposes
+deliberate cleanup controls. The recorder and runner are verified against both the
 separate `fixtures/external-target` application and the bundled sample checkout.
 It does **not** implement failed-versus-fixed comparison, reports, exports, other
 failure injectors, CI orchestration, or cloud execution.

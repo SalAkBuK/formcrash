@@ -116,6 +116,26 @@ export class ScreenshotStore {
     return readFileSync(this.resolve(artifact.relativePath));
   }
 
+  remove(artifacts: readonly RunArtifact[]): void {
+    const directories = new Set<string>();
+    for (const artifact of artifacts) {
+      const resolved = this.resolve(artifact.relativePath);
+      rmSync(resolved, { force: true });
+      directories.add(path.dirname(resolved));
+    }
+    for (const directory of directories) {
+      const relation = path.relative(this.root, directory);
+      if (
+        relation === '' ||
+        relation.startsWith('..') ||
+        path.isAbsolute(relation)
+      ) {
+        continue;
+      }
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+
   resolve(relativePath: string): string {
     if (path.isAbsolute(relativePath)) {
       throw new Error('Artifact paths must be relative.');

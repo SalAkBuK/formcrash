@@ -7,8 +7,9 @@ export class FormCrashApiError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    readonly details: Readonly<Record<string, unknown>> = {},
   ) {
-    super(message);
+    super(withErrorDetails(message, details));
     this.name = 'FormCrashApiError';
   }
 }
@@ -50,7 +51,12 @@ export async function requestJson<T>(
 
   if (!response.ok) {
     const error = await readApiError(response);
-    throw new FormCrashApiError(response.status, error.code, error.message);
+    throw new FormCrashApiError(
+      response.status,
+      error.code,
+      error.message,
+      error.details,
+    );
   }
   try {
     return schema.parse(await response.json());
@@ -80,9 +86,11 @@ export async function getServerHealth(
   return (await response.json()) as HealthResponse;
 }
 
-async function readApiError(
-  response: Response,
-): Promise<{ readonly code: string; readonly message: string }> {
+async function readApiError(response: Response): Promise<{
+  readonly code: string;
+  readonly message: string;
+  readonly details: Readonly<Record<string, unknown>>;
+}> {
   try {
     const body = (await response.json()) as unknown;
     if (typeof body === 'object' && body !== null && 'error' in body) {
@@ -91,7 +99,15 @@ async function readApiError(
         const code = 'code' in value ? value.code : undefined;
         const message = 'message' in value ? value.message : undefined;
         if (typeof code === 'string' && typeof message === 'string') {
-          return { code, message };
+          return {
+            code,
+            message,
+            details: Object.fromEntries(
+              Object.entries(value).filter(
+                ([key]) => key !== 'code' && key !== 'message',
+              ),
+            ),
+          };
         }
       }
     }
@@ -101,5 +117,21 @@ async function readApiError(
   return {
     code: 'FORMCRASH_API_ERROR',
     message: `The FormCrash server returned HTTP ${response.status}.`,
+    details: {},
   };
+}
+
+function withErrorDetails(
+  message: string,
+  details: Readonly<Record<string, unknown>>,
+): string {
+  const missing = details.missingVariables;
+  if (
+    Array.isArray(missing) &&
+    missing.length > 0 &&
+    missing.every((item) => typeof item === 'string')
+  ) {
+    return `${message} Missing: ${missing.join(', ')}.`;
+  }
+  return message;
 }
