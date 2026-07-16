@@ -857,6 +857,7 @@ export const externalRunnerErrorSchema = z.object({
   code: z.enum([
     'configuration_failed',
     'authentication_state_missing',
+    'authentication_required',
     'before_hook_failed',
     'browser_launch_failed',
     'journey_step_failed',

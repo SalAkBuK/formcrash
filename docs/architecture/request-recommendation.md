@@ -6,6 +6,20 @@ pathname without query parameters, response status or failure, relative start
 time, and grouped occurrence count. It does not capture request bodies, response
 bodies, cookies, authorization headers, or arbitrary headers.
 
+## Traffic boundary
+
+Preparation and cleanup hooks execute through server-side `fetch`, outside the
+Playwright page observer, so hook requests cannot become discovery candidates.
+Initial navigation and replay steps before the selected target execute while
+discovery capture is disabled.
+
+Capture begins immediately before the selected click or submit and ends after
+the bounded post-action settle window. The selected mutation is eligible for
+automatic recommendation. Consequential read-only refresh traffic may remain
+visible as evidence, but known refresh/background traffic is classified as
+`background_refresh` and excluded from automatic recommendation. Advanced mode
+can still inspect and manually override candidates.
+
 ## Deterministic scoring
 
 Candidates are grouped by method, origin, pathname, and response status. The

@@ -3,8 +3,10 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ProjectJourneyDashboard } from '../src/features/projects/components/project-journey-dashboard';
+import { FormCrashApiError } from '../src/lib/api-client';
 
 const mocks = vi.hoisted(() => ({
+  confirmAuthenticationCapture: vi.fn(),
   createProject: vi.fn(),
   deleteJourney: vi.fn(),
   deleteProject: vi.fn(),
@@ -17,14 +19,17 @@ const mocks = vi.hoisted(() => ({
   replayJourney: vi.fn(),
   saveJourney: vi.fn(),
   startRecording: vi.fn(),
+  startAuthenticationCapture: vi.fn(),
   stopRecording: vi.fn(),
 }));
 
 vi.mock('../src/features/projects/api/projects', () => mocks);
 vi.mock('../src/features/projects/api/external-experiments', () => ({
+  confirmAuthenticationCapture: mocks.confirmAuthenticationCapture,
   getProjectSettings: mocks.getProjectSettings,
   listExternalExperiments: mocks.listExternalExperiments,
   listExternalRuns: mocks.listExternalRuns,
+  startAuthenticationCapture: mocks.startAuthenticationCapture,
 }));
 
 const project = {
@@ -89,6 +94,14 @@ const journey = {
   },
   createdAt: '2026-07-16T00:03:00.000Z',
 };
+const awaitingAuthenticationCapture = {
+  id: 'capture-1',
+  projectId: project.id,
+  status: 'awaiting_confirmation' as const,
+  errorMessage: null,
+  startedAt: '2026-07-16T00:05:00.000Z',
+  completedAt: null,
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -115,6 +128,14 @@ beforeEach(() => {
   mocks.deleteProject.mockResolvedValue(undefined);
   mocks.listJourneys.mockResolvedValue([]);
   mocks.startRecording.mockResolvedValue(recording);
+  mocks.startAuthenticationCapture.mockResolvedValue(
+    awaitingAuthenticationCapture,
+  );
+  mocks.confirmAuthenticationCapture.mockResolvedValue({
+    ...awaitingAuthenticationCapture,
+    status: 'completed',
+    completedAt: '2026-07-16T00:06:00.000Z',
+  });
   mocks.stopRecording.mockResolvedValue(completed);
   mocks.saveJourney.mockResolvedValue(journey);
   mocks.replayJourney.mockResolvedValue({
@@ -271,5 +292,38 @@ describe('external project journey workflow', () => {
       await screen.findByText(/Controlled environments only/),
     ).toBeVisible();
     expect(screen.getByText('Unsupported actions')).toBeVisible();
+  });
+
+  it('offers direct authentication recapture when replay detects an expired session', async () => {
+    const user = userEvent.setup();
+    mocks.listJourneys.mockResolvedValue([journey]);
+    mocks.replayJourney.mockRejectedValueOnce(
+      new FormCrashApiError(
+        409,
+        'AUTHENTICATION_REQUIRED',
+        'The saved authentication session appears to have expired.',
+      ),
+    );
+
+    render(<ProjectJourneyDashboard />);
+
+    await user.click(await screen.findByRole('button', { name: 'Replay' }));
+    expect(await screen.findByText('Saved session expired')).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: 'Sign in again' }));
+    expect(mocks.startAuthenticationCapture).toHaveBeenCalledWith(project.id);
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'I am signed in — save session',
+      }),
+    );
+
+    expect(mocks.confirmAuthenticationCapture).toHaveBeenCalledWith(
+      project.id,
+      awaitingAuthenticationCapture.id,
+    );
+    expect(
+      await screen.findByText(/Authentication was recaptured/),
+    ).toBeVisible();
   });
 });

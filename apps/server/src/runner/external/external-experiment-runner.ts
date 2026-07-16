@@ -30,6 +30,10 @@ import {
 } from '../recording/external-browser.js';
 import { evaluateExternalAssertions } from './assertions.js';
 import type { AuthStateStore } from './auth-session.js';
+import {
+  assertSavedAuthenticationActive,
+  SavedAuthenticationExpiredError,
+} from './authentication-redirect.js';
 import { executeHttpHook, HttpHookError } from './http-hooks.js';
 import {
   executeRecordedStep,
@@ -177,6 +181,12 @@ export class ExternalExperimentRunner {
       });
       events.append('run.running', {});
       await session.navigate(project.targetUrl);
+      if (storageStatePath !== null) {
+        assertSavedAuthenticationActive(
+          project.targetUrl,
+          session.currentUrl(),
+        );
+      }
 
       const targetIndex = journey.steps.findIndex(
         (step) => step.id === experiment.targetStepId,
@@ -454,6 +464,14 @@ function createSafeSnapshot(
 }
 
 function mapRunnerError(error: unknown): ExternalRunnerError {
+  if (error instanceof SavedAuthenticationExpiredError) {
+    return {
+      code: 'authentication_required',
+      message: error.message,
+      failedStep: null,
+      missingVariables: [],
+    };
+  }
   if (error instanceof ExternalJourneyStepError) {
     return {
       code: 'journey_step_failed',

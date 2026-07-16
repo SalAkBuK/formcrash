@@ -116,6 +116,34 @@ describe('external runner terminal paths', () => {
     expect(owner.launchCount).toBe(0);
   });
 
+  it('classifies a restored session redirect to login as authentication required', async () => {
+    const configured = configure({});
+    const store = new AuthStateStore(temporary.config.artifactRoot, settings);
+    await store.save(configured.projectId, {
+      saveStorageState: (destination) => {
+        writeFileSync(destination, '{"cookies":[]}');
+        return Promise.resolve();
+      },
+      close: () => Promise.resolve(),
+    });
+    const owner = new FakeOwner({
+      currentUrl: 'http://127.0.0.1:49999/login',
+    });
+
+    const result = await runner(owner, new BrowserOwnership()).run(
+      configured.versionId,
+      {},
+    );
+
+    expect(result.status).toBe('runner_error');
+    expect(result.runnerError).toMatchObject({
+      code: 'authentication_required',
+      failedStep: null,
+    });
+    expect(result.triggerAttempts).toBe(0);
+    expect(owner.lastOptions?.storageStatePath).toBeDefined();
+  });
+
   it('keeps cleanup-hook failure as a warning and never logs hook secrets', async () => {
     const configured = configure({
       requiredVariable: true,
@@ -461,7 +489,10 @@ class FakeOwner implements ExternalBrowserOwner {
   lastSession: FakeSession | null = null;
 
   constructor(
-    private readonly options: { readonly failFillWithValue?: boolean } = {},
+    private readonly options: {
+      readonly failFillWithValue?: boolean;
+      readonly currentUrl?: string;
+    } = {},
   ) {}
 
   launchRecording(): Promise<RecordingBrowserSession> {
@@ -482,7 +513,10 @@ class FakeSession implements ReplayBrowserSession {
   screenshotMasks: readonly ReplayLocator[] = [];
 
   constructor(
-    private readonly options: { readonly failFillWithValue?: boolean } = {},
+    private readonly options: {
+      readonly failFillWithValue?: boolean;
+      readonly currentUrl?: string;
+    } = {},
   ) {}
   navigate(): Promise<void> {
     return Promise.resolve();
@@ -538,7 +572,7 @@ class FakeSession implements ReplayBrowserSession {
     return Promise.resolve('value');
   }
   currentUrl(): string {
-    return 'http://127.0.0.1:49999/complete';
+    return this.options.currentUrl ?? 'http://127.0.0.1:49999/complete';
   }
   settle(milliseconds: number): Promise<void> {
     this.settleDurations.push(milliseconds);

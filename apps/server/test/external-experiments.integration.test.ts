@@ -165,6 +165,11 @@ describe.sequential('external impatient-user experiments in Chromium', () => {
         }),
       ]),
     );
+    expect(
+      discovery.candidates.some(
+        (candidate) => candidate.pathname === '/api/reset',
+      ),
+    ).toBe(false);
     expect(discovery.recommendation.outcome).toBe('recommended');
     expect(discovery.recommendation.recommendedCandidateId).toBe(
       discovery.candidates[0]?.candidateId,

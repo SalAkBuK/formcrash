@@ -11,6 +11,10 @@ import type { ProjectJourneyRepository } from '../../persistence/project-journey
 import type { ProjectSettingsRepository } from '../../persistence/project-settings-repository.js';
 import { RunEventLog } from '../engine/event-log.js';
 import type { AuthStateStore } from '../external/auth-session.js';
+import {
+  assertSavedAuthenticationActive,
+  SavedAuthenticationExpiredError,
+} from '../external/authentication-redirect.js';
 import { executeHttpHook } from '../external/http-hooks.js';
 import { executeRecordedStep } from '../external/journey-actions.js';
 import {
@@ -95,6 +99,12 @@ export class JourneyReplayService {
         ...(storageStatePath === null ? {} : { storageStatePath }),
       });
       await session.navigate(project.targetUrl);
+      if (storageStatePath !== null) {
+        assertSavedAuthenticationActive(
+          project.targetUrl,
+          session.currentUrl(),
+        );
+      }
       for (const [index, step] of journey.steps.entries()) {
         try {
           await executeRecordedStep(session, step, (item) =>
@@ -133,7 +143,8 @@ export class JourneyReplayService {
         startedAt,
         completedAt: new Date().toISOString(),
       });
-    } catch {
+    } catch (error: unknown) {
+      if (error instanceof SavedAuthenticationExpiredError) throw error;
       result = replayResultSchema.parse({
         replayId,
         journeyId,

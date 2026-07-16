@@ -12,6 +12,7 @@ import {
   type ReplayBrowserSession,
 } from '../recording/external-browser.js';
 import type { AuthStateStore } from './auth-session.js';
+import { isAuthenticationRedirect } from './authentication-redirect.js';
 
 export class AuthValidationService {
   private readonly browserOwner: ExternalBrowserOwner;
@@ -65,12 +66,10 @@ export class AuthValidationService {
       });
       await session.navigate(project.targetUrl);
       const currentUrl = session.currentUrl();
-      const target = new URL(project.targetUrl);
-      const current = new URL(currentUrl);
-      const redirectedToAuthentication =
-        current.origin !== target.origin ||
-        (!looksLikeAuthenticationPath(target.pathname) &&
-          looksLikeAuthenticationPath(current.pathname));
+      const redirectedToAuthentication = isAuthenticationRedirect(
+        project.targetUrl,
+        currentUrl,
+      );
       return result(
         projectId,
         redirectedToAuthentication ? 'invalid' : 'valid',
@@ -109,12 +108,6 @@ function result(
     message,
     checkedAt,
   });
-}
-
-function looksLikeAuthenticationPath(pathname: string): boolean {
-  return /(?:^|\/)(?:login|log-in|signin|sign-in|auth|authenticate)(?:\/|$)/iu.test(
-    pathname,
-  );
 }
 
 function safeCurrentUrl(session: ReplayBrowserSession | null): string | null {

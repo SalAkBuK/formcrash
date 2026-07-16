@@ -6,7 +6,12 @@ orchestration, Playwright, SQLite, and screenshot files.
 During development, the server process builds shared contracts before startup,
 keeps their compiled runtime exports in watch mode, and restarts when either
 server code or compiled contract code changes. This prevents the server from
-loading stale `@formcrash/contracts` exports after a contract edit.
+loading stale `@formcrash/contracts` exports after a contract edit. A
+per-repository/host/port development lock rejects duplicate watcher stacks.
+Initial contract build failures prevent server startup; later watch errors stay
+visible while the server retains the last successful contract build. Normal
+shutdown terminates both watchers and removes the lock. Production `build` and
+`start` commands are unchanged.
 
 ## Sample run lifecycle
 

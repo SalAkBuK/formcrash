@@ -219,7 +219,10 @@ External target and journey endpoints:
 - `POST /api/journeys/:journeyId/replay` — replay persisted steps in a fresh
   context and return the failed step, locator, browser URL, and bounded browser
   diagnostic. The request body accepts ephemeral `variables` and
-  `confirmProduction`.
+  `confirmProduction`. When restored authentication redirects to an obvious
+  login path or another origin, replay stops before journey steps and returns
+  `AUTHENTICATION_REQUIRED`; the dashboard can launch a fresh sign-in capture
+  directly from that result.
 - `GET` and `PUT /api/projects/:projectId/settings` — read public execution
   metadata and configure variable declarations plus bounded before/after hooks.
 - `POST /api/projects/:projectId/auth-captures` and `POST
@@ -339,8 +342,10 @@ records supported manual same-tab journeys in visible Chromium, reviews safe or
 masked steps and their ranked locators, saves immutable journey versions, and
 replays them with exact failed-step reporting. Project settings now capture and
 restore authenticated browser state, declare safe runtime inputs and repeatable
-data hooks, test saved state for obvious login redirects, and reject only
-unresolved variables used by the execution before browser launch. Saved click
+data hooks, test saved state for obvious login redirects, automatically stop
+replay, discovery, and external execution when restored state lands on an
+obvious authentication route, and reject only unresolved variables used by the
+execution before browser launch. Saved click
 or submit steps accept immutable external Impatient User versions with request
 discovery plus multiple network, UI, field-retention, and final-URL assertions.
 Guided Test is the default external-testing workflow: it recommends the last

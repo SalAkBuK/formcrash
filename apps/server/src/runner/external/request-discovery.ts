@@ -22,6 +22,7 @@ import {
   type SemanticElementSnapshot,
 } from '../recording/external-browser.js';
 import type { AuthStateStore } from './auth-session.js';
+import { assertSavedAuthenticationActive } from './authentication-redirect.js';
 import { executeHttpHook } from './http-hooks.js';
 import { recommendAssertions } from './assertion-recommendation.js';
 import { createGuidedJourneySnapshot } from './guided-journey.js';
@@ -127,6 +128,12 @@ export class RequestDiscoveryService {
         if (capture) collector.observe(observation);
       });
       await session.navigate(project.targetUrl);
+      if (storageStatePath !== null) {
+        assertSavedAuthenticationActive(
+          project.targetUrl,
+          session.currentUrl(),
+        );
+      }
       for (const step of journey.steps.slice(0, targetIndex)) {
         await executeDiscoveryStep(session, step, runtime);
       }

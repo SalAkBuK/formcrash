@@ -85,7 +85,7 @@ export class FormCrashDatabase {
 }
 
 function migrationChecksums(sql: string): readonly string[] {
-  const lineFeedSql = sql.replace(/\r\n?/gu, '\n');
+  const lineFeedSql = sql.replace(/\r\n/gu, '\n').replace(/\r/gu, '\n');
   const carriageReturnLineFeedSql = lineFeedSql.replace(/\n/gu, '\r\n');
 
   return [checksum(lineFeedSql), checksum(carriageReturnLineFeedSql)] as const;

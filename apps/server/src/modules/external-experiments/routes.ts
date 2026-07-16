@@ -23,6 +23,7 @@ import type {
   AuthStateStore,
 } from '../../runner/external/auth-session.js';
 import type { AuthValidationService } from '../../runner/external/auth-validation.js';
+import { SavedAuthenticationExpiredError } from '../../runner/external/authentication-redirect.js';
 import type { ExternalExperimentRunner } from '../../runner/external/external-experiment-runner.js';
 import type { ProjectSettingsService } from '../../runner/external/project-settings-service.js';
 import type { RequestDiscoveryService } from '../../runner/external/request-discovery.js';
@@ -410,6 +411,14 @@ function handleExecutionError(reply: FastifyReply, error: unknown) {
     return reply.status(409).send({
       error: {
         code: 'PRODUCTION_CONFIRMATION_REQUIRED',
+        message: error.message,
+      },
+    });
+  }
+  if (error instanceof SavedAuthenticationExpiredError) {
+    return reply.status(409).send({
+      error: {
+        code: 'AUTHENTICATION_REQUIRED',
         message: error.message,
       },
     });

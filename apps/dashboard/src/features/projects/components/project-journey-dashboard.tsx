@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState, type FormEvent } from 'react';
 import type {
+  AuthCaptureSession,
   PersistedJourney,
   Project,
   ProjectExecutionSettings,
@@ -12,7 +13,12 @@ import type {
   ReplayResult,
 } from '@formcrash/contracts';
 
-import { getProjectSettings } from '../api/external-experiments';
+import { FormCrashApiError } from '../../../lib/api-client';
+import {
+  confirmAuthenticationCapture,
+  getProjectSettings,
+  startAuthenticationCapture,
+} from '../api/external-experiments';
 import {
   createProject,
   deleteJourney,
@@ -45,6 +51,13 @@ export function ProjectJourneyDashboard() {
   >({});
   const [productionReplayConfirmed, setProductionReplayConfirmed] =
     useState(false);
+  const [replayAuthenticationRequired, setReplayAuthenticationRequired] =
+    useState(false);
+  const [replayAuthCapture, setReplayAuthCapture] =
+    useState<AuthCaptureSession | null>(null);
+  const [replayAuthMessage, setReplayAuthMessage] = useState<string | null>(
+    null,
+  );
   const [selectedProjectIds, setSelectedProjectIds] = useState<
     ReadonlySet<string>
   >(new Set());
@@ -58,6 +71,9 @@ export function ProjectJourneyDashboard() {
   useEffect(() => {
     if (selected === null) return;
     setProductionReplayConfirmed(false);
+    setReplayAuthenticationRequired(false);
+    setReplayAuthCapture(null);
+    setReplayAuthMessage(null);
     void Promise.all([
       listJourneys(selected.id),
       getProjectSettings(selected.id),
@@ -284,6 +300,8 @@ export function ProjectJourneyDashboard() {
     setBusy(`replay-${journey.id}`);
     setError(null);
     setReplayResult(null);
+    setReplayAuthenticationRequired(false);
+    setReplayAuthMessage(null);
     try {
       setReplayResult(
         await replayJourney(
@@ -291,6 +309,50 @@ export function ProjectJourneyDashboard() {
           nonEmptyValues(replayValues[journey.id] ?? {}),
           selected?.environment !== 'production' || productionReplayConfirmed,
         ),
+      );
+    } catch (reason: unknown) {
+      if (
+        reason instanceof FormCrashApiError &&
+        reason.code === 'AUTHENTICATION_REQUIRED'
+      ) {
+        setReplayAuthenticationRequired(true);
+        setReplayAuthCapture(null);
+      } else {
+        setError(messageOf(reason));
+      }
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function beginReplayAuthenticationCapture(): Promise<void> {
+    if (selected === null) return;
+    setBusy('replay-auth-start');
+    setError(null);
+    setReplayAuthMessage(null);
+    try {
+      setReplayAuthCapture(await startAuthenticationCapture(selected.id));
+    } catch (reason: unknown) {
+      setError(messageOf(reason));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function confirmReplayAuthenticationCapture(): Promise<void> {
+    if (selected === null || replayAuthCapture === null) return;
+    setBusy('replay-auth-confirm');
+    setError(null);
+    try {
+      const completed = await confirmAuthenticationCapture(
+        selected.id,
+        replayAuthCapture.id,
+      );
+      setReplayAuthCapture(completed);
+      setExecutionSettings(await getProjectSettings(selected.id));
+      setReplayAuthenticationRequired(false);
+      setReplayAuthMessage(
+        'Authentication was recaptured. Replay the journey again when you are ready.',
       );
     } catch (reason: unknown) {
       setError(messageOf(reason));
@@ -499,6 +561,9 @@ export function ProjectJourneyDashboard() {
                       setRecording(null);
                       setReviewSteps([]);
                       setReplayResult(null);
+                      setReplayAuthenticationRequired(false);
+                      setReplayAuthCapture(null);
+                      setReplayAuthMessage(null);
                     }}
                     type="button"
                   >
@@ -780,6 +845,48 @@ export function ProjectJourneyDashboard() {
                 I understand that replay can submit forms and change real
                 production data.
               </label>
+            ) : null}
+            {replayAuthenticationRequired ? (
+              <div className="state-message state-message-error" role="alert">
+                <strong>Saved session expired</strong>
+                <p>
+                  The browser was redirected to a login page before FormCrash
+                  replayed any journey steps. Sign in again in the browser
+                  FormCrash opens, then save the new session.
+                </p>
+                <div className="recording-actions">
+                  <button
+                    className="button button-secondary button-compact"
+                    disabled={busy !== null}
+                    onClick={() => void beginReplayAuthenticationCapture()}
+                    type="button"
+                  >
+                    {busy === 'replay-auth-start'
+                      ? 'Launching sign-in…'
+                      : 'Sign in again'}
+                  </button>
+                  {replayAuthCapture?.status === 'awaiting_confirmation' ? (
+                    <button
+                      className="button button-primary button-compact"
+                      disabled={busy !== null}
+                      onClick={() => void confirmReplayAuthenticationCapture()}
+                      type="button"
+                    >
+                      {busy === 'replay-auth-confirm'
+                        ? 'Saving session…'
+                        : 'I am signed in — save session'}
+                    </button>
+                  ) : null}
+                </div>
+                {replayAuthCapture !== null ? (
+                  <p>Capture: {replayAuthCapture.status}</p>
+                ) : null}
+              </div>
+            ) : null}
+            {replayAuthMessage !== null ? (
+              <div className="state-message" role="status">
+                {replayAuthMessage}
+              </div>
             ) : null}
             {replayResult !== null ? (
               <div

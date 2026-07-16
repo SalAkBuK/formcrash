@@ -20,6 +20,7 @@ import {
 } from '../../runner/external/runtime-values.js';
 import type { JourneyReplayService } from '../../runner/recording/journey-replay.js';
 import { ProductionConfirmationRequiredError } from '../../runner/external/production-safety.js';
+import { SavedAuthenticationExpiredError } from '../../runner/external/authentication-redirect.js';
 import { RecordingNotActiveError } from '../../runner/recording/recording-manager.js';
 import type { RecordingManager } from '../../runner/recording/recording-manager.js';
 
@@ -278,6 +279,14 @@ export function registerProjectRoutes(
           return reply.status(409).send({
             error: {
               code: 'PRODUCTION_CONFIRMATION_REQUIRED',
+              message: error.message,
+            },
+          });
+        }
+        if (error instanceof SavedAuthenticationExpiredError) {
+          return reply.status(409).send({
+            error: {
+              code: 'AUTHENTICATION_REQUIRED',
               message: error.message,
             },
           });

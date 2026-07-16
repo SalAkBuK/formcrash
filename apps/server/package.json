@@ -5,7 +5,6 @@
   "type": "module",
   "scripts": {
     "db:migrate": "tsx src/persistence/migrate-cli.ts",
-    "predev": "corepack pnpm --filter @formcrash/contracts build",
     "dev": "node scripts/dev.mjs",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",

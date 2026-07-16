@@ -13,7 +13,9 @@ import { createApp } from '../src/app/create-app.js';
 import { initializePersistence } from '../src/persistence/initialize.js';
 import { ExternalExperimentRepository } from '../src/persistence/external-experiment-repository.js';
 import { ProjectJourneyRepository } from '../src/persistence/project-journey-repository.js';
+import { SavedAuthenticationExpiredError } from '../src/runner/external/authentication-redirect.js';
 import { RequestDiscoveryService } from '../src/runner/external/request-discovery.js';
+import { JourneyReplayService } from '../src/runner/recording/journey-replay.js';
 import { createTemporaryTestConfig } from './fixtures.js';
 
 const apps: ReturnType<typeof createApp>[] = [];
@@ -147,6 +149,41 @@ describe('external lifecycle and safety routes', () => {
     expect(response.statusCode).toBe(409);
     expect(response.json()).toMatchObject({
       error: { code: 'PRODUCTION_CONFIRMATION_REQUIRED' },
+    });
+  });
+
+  it('returns a recoverable authentication error when replay detects an expired session', async () => {
+    const temporary = createTemporaryTestConfig();
+    cleanups.push(temporary.cleanup);
+    const database = initializePersistence(temporary.config);
+    const projects = new ProjectJourneyRepository(database.connection);
+    const project = projects.createProject({
+      name: 'Expired session target',
+      targetUrl: 'http://localhost:4300/portal',
+      environment: 'local',
+      description: '',
+    });
+    const journey = createJourney(projects, project.id);
+    database.close();
+    vi.spyOn(JourneyReplayService.prototype, 'replay').mockRejectedValue(
+      new SavedAuthenticationExpiredError(),
+    );
+    const app = createApp({ config: temporary.config, logger: false });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/journeys/${journey.id}/replay`,
+      payload: { variables: {}, confirmProduction: true },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: 'AUTHENTICATION_REQUIRED',
+        message:
+          'The saved authentication session appears to have expired. Sign in again and recapture authentication before retrying.',
+      },
     });
   });
 

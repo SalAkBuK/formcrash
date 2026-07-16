@@ -9,7 +9,9 @@ import { ProjectJourneyRepository } from '../src/persistence/project-journey-rep
 import { ProjectSettingsRepository } from '../src/persistence/project-settings-repository.js';
 import { AuthStateStore } from '../src/runner/external/auth-session.js';
 import { AuthValidationService } from '../src/runner/external/auth-validation.js';
+import { SavedAuthenticationExpiredError } from '../src/runner/external/authentication-redirect.js';
 import { BrowserOwnership } from '../src/runner/infrastructure/browser-ownership.js';
+import { JourneyReplayService } from '../src/runner/recording/journey-replay.js';
 import type {
   ExternalBrowserOwner,
   RecordingBrowserSession,
@@ -70,24 +72,80 @@ describe('authentication validation', () => {
     expect(validation.currentUrl).toBe(currentUrl);
     expect(ownership.activeWorkload).toBeNull();
   });
+
+  it('stops replay before journey steps when saved authentication redirects to login', async () => {
+    const project = projects.createProject({
+      name: 'Expired authentication target',
+      targetUrl: 'http://localhost:4300/portal',
+      environment: 'local',
+      description: '',
+    });
+    const journey = projects.saveJourney({
+      projectId: project.id,
+      name: 'Authenticated journey',
+      steps: [
+        {
+          id: 'open-profile',
+          name: 'Open profile',
+          type: 'click',
+          timestamp: 0,
+          url: project.targetUrl,
+          locator: { strategy: 'id', value: 'profile' },
+          fingerprint: null,
+          value: null,
+          sensitive: false,
+        },
+      ],
+      metadata: {
+        recordingSessionId: null,
+        recordedAt: new Date(0).toISOString(),
+        warningCount: 0,
+        normalizationRule: 'test',
+      },
+    });
+    const store = new AuthStateStore(temporary.config.artifactRoot, settings);
+    await saveAuthentication(store, project.id);
+    const owner = new FakeOwner('http://localhost:4300/login');
+    const ownership = new BrowserOwnership();
+
+    await expect(
+      new JourneyReplayService(
+        temporary.config,
+        projects,
+        ownership,
+        owner,
+        settings,
+        store,
+      ).replay(journey.id),
+    ).rejects.toBeInstanceOf(SavedAuthenticationExpiredError);
+
+    expect(owner.lastSession?.clickCount).toBe(0);
+    expect(ownership.activeWorkload).toBeNull();
+  });
 });
 
 class FakeOwner implements ExternalBrowserOwner {
+  lastSession: FakeSession | null = null;
+
   constructor(private readonly current: string) {}
   launchRecording(): Promise<RecordingBrowserSession> {
     throw new Error('Recording is not used.');
   }
   launchReplay(): Promise<ReplayBrowserSession> {
-    return Promise.resolve(new FakeSession(this.current));
+    this.lastSession = new FakeSession(this.current);
+    return Promise.resolve(this.lastSession);
   }
 }
 
 class FakeSession implements ReplayBrowserSession {
+  clickCount = 0;
+
   constructor(private readonly current: string) {}
   navigate(): Promise<void> {
     return Promise.resolve();
   }
   click(): Promise<void> {
+    this.clickCount += 1;
     return Promise.resolve();
   }
   fill(): Promise<void> {
@@ -131,4 +189,18 @@ class FakeSession implements ReplayBrowserSession {
   close(): Promise<void> {
     return Promise.resolve();
   }
+}
+
+async function saveAuthentication(
+  store: AuthStateStore,
+  projectId: string,
+): Promise<void> {
+  await store.save(projectId, {
+    saveStorageState: (destination) => {
+      mkdirSync(path.dirname(destination), { recursive: true });
+      writeFileSync(destination, '{"cookies":[]}');
+      return Promise.resolve();
+    },
+    close: () => Promise.resolve(),
+  });
 }

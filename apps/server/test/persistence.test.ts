@@ -132,6 +132,50 @@ describe('SQLite migrations and seeded definitions', () => {
     );
 
     expect(database.migrate(directory)).toEqual(first);
+    expect(
+      database.connection
+        .prepare(
+          `SELECT checksum_sha256 AS checksumSha256,
+                  applied_at AS appliedAt
+             FROM schema_migrations
+            WHERE version = ?`,
+        )
+        .get('0001_line_endings.sql'),
+    ).toEqual({
+      checksumSha256: first[0]?.checksumSha256,
+      appliedAt: first[0]?.appliedAt,
+    });
+    database.close();
+  });
+
+  it('does not normalize meaningful whitespace or trailing newlines', () => {
+    const temporary = createTemporaryTestConfig();
+    cleanups.push(temporary.cleanup);
+    const directory = path.join(temporary.root, 'strict-content-migrations');
+    const migrationPath = path.join(directory, '0001_strict_content.sql');
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(
+      migrationPath,
+      'CREATE TABLE strict_content (id TEXT PRIMARY KEY) STRICT;\n',
+    );
+    const database = new FormCrashDatabase(temporary.config.databasePath);
+    database.migrate(directory);
+
+    writeFileSync(
+      migrationPath,
+      'CREATE TABLE strict_content (id  TEXT PRIMARY KEY) STRICT;\n',
+    );
+    expect(() => database.migrate(directory)).toThrow(
+      'changed after it was applied',
+    );
+
+    writeFileSync(
+      migrationPath,
+      'CREATE TABLE strict_content (id TEXT PRIMARY KEY) STRICT;\n\n',
+    );
+    expect(() => database.migrate(directory)).toThrow(
+      'changed after it was applied',
+    );
     database.close();
   });
 });
