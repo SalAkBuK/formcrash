@@ -158,4 +158,34 @@ describe('foundational contracts', () => {
 
     expect(result.success).toBe(false);
   });
+
+  it('accepts guided snapshot automation options', () => {
+    const result = createExternalExperimentRequestSchema.safeParse({
+      name: 'Guided submit',
+      targetStepId: 'submit',
+      triggerCount: 2,
+      intervalMs: 0,
+      networkMatcher: {
+        method: 'POST',
+        pathname: '/api/profile',
+        host: 'example.test',
+      },
+      assertions: [
+        {
+          id: 'one-request',
+          type: 'network_request_exact',
+          expected: 1,
+          description: 'Only one matching request is sent.',
+        },
+      ],
+      continueAfterTarget: false,
+      guided: true,
+      normalizeJourney: true,
+      stepValueOverrides: {
+        'fill-name': '{{unique.name}}',
+      },
+    });
+
+    expect(result.success).toBe(true);
+  });
 });

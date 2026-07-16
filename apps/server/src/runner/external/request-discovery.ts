@@ -18,6 +18,7 @@ import {
 } from '../recording/external-browser.js';
 import type { AuthStateStore } from './auth-session.js';
 import { executeHttpHook } from './http-hooks.js';
+import { createGuidedJourneySnapshot } from './guided-journey.js';
 import { executeRecordedStep } from './journey-actions.js';
 import { NetworkEvidenceCollector } from './network-evidence.js';
 import {
@@ -46,9 +47,16 @@ export class RequestDiscoveryService {
     readonly targetStepId: string;
     readonly variables: EphemeralRuntimeValues;
     readonly confirmProduction?: boolean;
+    readonly normalizeJourney?: boolean;
+    readonly stepValueOverrides?: Readonly<Record<string, string>>;
   }): Promise<RequestDiscoveryResult> {
-    const journey = this.projects.getJourney(input.journeyId);
-    if (journey === null) throw new Error('Journey was not found.');
+    const storedJourney = this.projects.getJourney(input.journeyId);
+    if (storedJourney === null) throw new Error('Journey was not found.');
+    const journey = createGuidedJourneySnapshot(
+      storedJourney,
+      input.stepValueOverrides ?? {},
+      input.normalizeJourney ?? false,
+    );
     const project = this.projects.getProject(journey.projectId);
     if (project === null) throw new Error('Journey project was not found.');
     assertProductionConfirmed(

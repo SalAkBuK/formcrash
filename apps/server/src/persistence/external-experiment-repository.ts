@@ -32,6 +32,7 @@ import type Database from 'better-sqlite3';
 
 import type { CreateArtifactInput } from './run-repository.js';
 import { RunPersistenceError } from './run-repository.js';
+import { createGuidedJourneySnapshot } from '../runner/external/guided-journey.js';
 
 interface ExperimentRow {
   readonly id: string;
@@ -147,6 +148,11 @@ export class ExternalExperimentRepository {
           'Impatient User can target only click or submit steps.',
         );
       }
+      const journeySnapshot = createGuidedJourneySnapshot(
+        input.journey,
+        request.stepValueOverrides ?? {},
+        request.normalizeJourney ?? false,
+      );
       const create = this.database.transaction(() => {
         const existing = this.database
           .prepare(
@@ -186,6 +192,7 @@ export class ExternalExperimentRepository {
           intervalMs: request.intervalMs,
           networkMatcher: request.networkMatcher,
           continueAfterTarget: request.continueAfterTarget,
+          guided: request.guided ?? false,
         };
         this.database
           .prepare(
@@ -199,7 +206,7 @@ export class ExternalExperimentRepository {
             experimentId,
             version,
             JSON.stringify(configuration),
-            JSON.stringify(input.journey),
+            JSON.stringify(journeySnapshot),
             JSON.stringify(request.assertions),
             now,
           );

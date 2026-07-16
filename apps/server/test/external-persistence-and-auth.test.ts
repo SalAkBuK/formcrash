@@ -151,6 +151,60 @@ describe('external experiment version persistence', () => {
     expect(projects.getProject(project.id)).toBeNull();
     expect(experiments.getVersion(submit.id)).toBeNull();
   });
+
+  it('stores a guided snapshot with generated values and normalized adjacent fills', () => {
+    const project = projects.createProject({
+      name: 'Guided version project',
+      targetUrl: 'https://example.test',
+      description: '',
+    });
+    const firstFill = step('fill-name-first', 'fill');
+    const journey = projects.saveJourney({
+      projectId: project.id,
+      name: 'Guided journey',
+      steps: [
+        firstFill,
+        {
+          ...step('fill-name-final', 'fill'),
+          locator: firstFill.locator,
+          value: { kind: 'safe' as const, value: 'Ada Lovelace' },
+        },
+        step('submit-step', 'submit'),
+      ],
+      metadata: {
+        recordingSessionId: null,
+        recordedAt: new Date(0).toISOString(),
+        warningCount: 0,
+        normalizationRule: 'test',
+      },
+    });
+
+    const version = experiments.createVersion({
+      projectId: project.id,
+      journey,
+      request: {
+        ...request('submit-step', 'Guided submit'),
+        guided: true,
+        normalizeJourney: true,
+        stepValueOverrides: {
+          'fill-name-final': '{{unique.name}}',
+        },
+      },
+    });
+
+    expect(version.guided).toBe(true);
+    expect(version.journeySnapshot.steps.map((item) => item.id)).toEqual([
+      'fill-name-final',
+      'submit-step',
+    ]);
+    expect(version.journeySnapshot.steps[0]?.value).toEqual({
+      kind: 'safe',
+      value: '{{unique.name}}',
+    });
+    expect(
+      version.journeySnapshot.recordingMetadata.normalizationRule,
+    ).toContain('Guided Test');
+  });
 });
 
 describe('browser workload exclusion', () => {

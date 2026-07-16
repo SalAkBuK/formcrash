@@ -17,6 +17,7 @@ import {
   type ExternalRunList,
   type ProjectExecutionSettings,
   type ProjectExecutionSettingsInput,
+  type RequestDiscoveryRequest,
   type RequestDiscoveryResult,
 } from '@formcrash/contracts';
 
@@ -92,6 +93,13 @@ export function discoverRequests(
   targetStepId: string,
   variables: EphemeralRuntimeValues,
   confirmProduction: boolean,
+  options: Pick<
+    RequestDiscoveryRequest,
+    'normalizeJourney' | 'stepValueOverrides'
+  > = {
+    normalizeJourney: false,
+    stepValueOverrides: {},
+  },
 ): Promise<RequestDiscoveryResult> {
   return requestJson(
     `/api/journeys/${journeyId}/request-discovery`,
@@ -99,7 +107,12 @@ export function discoverRequests(
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ targetStepId, variables, confirmProduction }),
+      body: JSON.stringify({
+        targetStepId,
+        variables,
+        confirmProduction,
+        ...options,
+      }),
     },
   );
 }

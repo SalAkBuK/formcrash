@@ -17,6 +17,9 @@ export interface RunTemplateContext {
   readonly shortId: string;
   readonly timestamp: string;
   readonly uniqueEmail: string;
+  readonly uniqueName: string;
+  readonly uniquePhone: string;
+  readonly uniqueText: string;
 }
 
 export interface ResolvedRuntime {
@@ -64,11 +67,19 @@ export function resolveRuntime(input: {
 }): ResolvedRuntime {
   const timestamp = new Date().toISOString();
   const shortId = input.runId.replaceAll('-', '').slice(0, 12);
+  const phoneDigits = [...shortId]
+    .map((character) => String(Number.parseInt(character, 16) % 10))
+    .join('')
+    .slice(0, 7)
+    .padEnd(7, '0');
   const context: RunTemplateContext = {
     runId: input.runId,
     shortId,
     timestamp,
     uniqueEmail: `formcrash+${shortId}@example.test`,
+    uniqueName: `FormCrash Test ${shortId.slice(0, 6)}`,
+    uniquePhone: `+1555${phoneDigits}`,
+    uniqueText: `FC-${shortId}`,
   };
   const values = new Map<string, ResolvedRuntimeValue>();
   const declarations = new Map(
@@ -225,6 +236,9 @@ export function resolveTemplate(
     if (expression === 'run.shortId') return context.shortId;
     if (expression === 'timestamp') return context.timestamp;
     if (expression === 'unique.email') return context.uniqueEmail;
+    if (expression === 'unique.name') return context.uniqueName;
+    if (expression === 'unique.phone') return context.uniquePhone;
+    if (expression === 'unique.text') return context.uniqueText;
     if (expression.startsWith('var.')) {
       const value = values.get(expression.slice(4));
       if (value !== undefined) return value.value;

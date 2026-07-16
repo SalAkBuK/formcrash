@@ -25,6 +25,7 @@ import {
   stopRecording,
 } from '../api/projects';
 import { ExternalExperimentPanel } from './external-experiment-panel';
+import { journeyRuntimeRequirements } from '../models/journey-runtime';
 
 export function ProjectJourneyDashboard() {
   const [projects, setProjects] = useState<readonly Project[]>([]);
@@ -523,7 +524,7 @@ export function ProjectJourneyDashboard() {
 
       {selected !== null ? (
         <>
-          <section className="panel recording-panel">
+          <section className="panel recording-panel" id="recording-workspace">
             <div className="section-heading-row">
               <div>
                 <p className="eyebrow">Recording</p>
@@ -816,7 +817,7 @@ export function ProjectJourneyDashboard() {
             ) : (
               <div className="journey-list">
                 {journeys.map((journey) => {
-                  const requirements = replayRequirements(
+                  const requirements = journeyRuntimeRequirements(
                     journey,
                     executionSettings,
                   );
@@ -934,76 +935,6 @@ function messageOf(reason: unknown): string {
 function formValue(form: FormData, name: string): string {
   const value = form.get(name);
   return typeof value === 'string' ? value : '';
-}
-
-interface ReplayRequirement {
-  readonly name: string;
-  readonly label: string;
-  readonly secret: boolean;
-}
-
-function replayRequirements(
-  journey: PersistedJourney,
-  settings: ProjectExecutionSettings | null,
-): readonly ReplayRequirement[] {
-  if (settings === null) return [];
-  const declarations = new Map(
-    settings.variables.map((variable) => [variable.name, variable]),
-  );
-  const names = new Set<string>();
-  const labels = new Map<string, string>();
-  for (const step of journey.steps) {
-    if (step.value?.kind === 'sensitive') {
-      names.add(step.value.variableName);
-      labels.set(
-        step.value.variableName,
-        `${step.name} (${step.value.variableName})`,
-      );
-    } else if (step.value?.kind === 'safe') {
-      collectVariableNames(step.value.value, names);
-    }
-  }
-  collectVariableNames(JSON.stringify(settings.beforeRunHook), names);
-  collectVariableNames(JSON.stringify(settings.afterRunHook), names);
-
-  const pending = [...names];
-  for (let index = 0; index < pending.length; index += 1) {
-    const name = pending[index];
-    if (name === undefined) continue;
-    const template = declarations.get(name)?.template;
-    if (template === null || template === undefined) continue;
-    const dependencies = new Set<string>();
-    collectVariableNames(template, dependencies);
-    for (const dependency of dependencies) {
-      if (names.has(dependency)) continue;
-      names.add(dependency);
-      pending.push(dependency);
-    }
-  }
-
-  return [...names]
-    .filter((name) => declarations.get(name)?.configured !== true)
-    .sort()
-    .map((name) => {
-      const declaration = declarations.get(name);
-      const description = declaration?.description.trim();
-      return {
-        name,
-        label:
-          labels.get(name) ??
-          (description !== undefined && description !== ''
-            ? description
-            : name),
-        secret: declaration?.secret ?? true,
-      };
-    });
-}
-
-function collectVariableNames(value: string, names: Set<string>): void {
-  for (const match of value.matchAll(/\{\{var\.([A-Z][A-Z0-9_]*)\}\}/gu)) {
-    const name = match[1];
-    if (name !== undefined) names.add(name);
-  }
 }
 
 function nonEmptyValues(

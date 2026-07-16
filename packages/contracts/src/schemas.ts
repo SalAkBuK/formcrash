@@ -325,6 +325,11 @@ export const requestDiscoveryRequestSchema = z.object({
   targetStepId: z.string().min(1),
   variables: ephemeralRuntimeValuesSchema.optional().default({}),
   confirmProduction: z.boolean().optional().default(false),
+  normalizeJourney: z.boolean().optional().default(false),
+  stepValueOverrides: z
+    .record(z.string().min(1), z.string().max(10_000))
+    .optional()
+    .default({}),
 });
 
 export const requestDiscoveryResultSchema = z.object({
@@ -427,6 +432,11 @@ export const createExternalExperimentRequestSchema = z
     networkMatcher: networkMatcherSchema.nullable().default(null),
     assertions: z.array(externalAssertionSchema).min(1).max(20),
     continueAfterTarget: z.boolean().default(false),
+    guided: z.boolean().optional(),
+    normalizeJourney: z.boolean().optional(),
+    stepValueOverrides: z
+      .record(z.string().min(1), z.string().max(10_000))
+      .optional(),
   })
   .superRefine((value, context) => {
     if (
@@ -458,6 +468,7 @@ export const externalExperimentVersionSchema = z.object({
   networkMatcher: networkMatcherSchema.nullable(),
   assertions: z.array(externalAssertionSchema).min(1),
   continueAfterTarget: z.boolean(),
+  guided: z.boolean().default(false),
   journeySnapshot: persistedJourneySchema,
   createdAt: z.iso.datetime({ offset: true }),
 });

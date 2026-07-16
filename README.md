@@ -315,6 +315,19 @@ data hooks, test saved state for obvious login redirects, and reject only
 unresolved variables used by the execution before browser launch. Saved click
 or submit steps accept immutable external Impatient User versions with request
 discovery plus multiple network, UI, field-retention, and final-URL assertions.
+Guided Test is the default external-testing workflow: it recommends the last
+recorded submit or click, replays it once to rank the resulting browser
+requests, prefers a related state-changing request, generates unique common
+field values, normalizes adjacent recorded fills, creates four duplicate-safety
+network assertions, saves an immutable experiment version, runs it, and explains
+the outcome in plain language. Before opening a browser it now scores journey
+readiness, blocks unresolved runtime values or missing replay targets, and warns
+about brittle locators, authentication, cleanup, recorder warnings, and
+production side effects. Users can choose an accidental double-click, impatient
+triple-click, or server duplicate-handling recipe without configuring trigger
+counts or assertion types. Failed results include concrete client, server,
+authentication, locator, or request-discovery actions. The full settings,
+matcher, and assertion builder remains available in Advanced mode.
 Production targets require explicit confirmation before replay, discovery, or
 repeated triggers. External runs persist ordered sanitized events, assertion
 outcomes, matched network evidence, warnings, and screenshots; the dashboard

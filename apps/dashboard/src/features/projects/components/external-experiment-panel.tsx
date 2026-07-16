@@ -33,7 +33,6 @@ import {
   deleteExternalExperimentVersion,
   deleteExternalRun,
   discoverRequests,
-  getExternalArtifactUrl,
   getExternalRun,
   getProjectSettings,
   listExternalExperiments,
@@ -43,6 +42,8 @@ import {
   startAuthenticationCapture,
   testAuthentication,
 } from '../api/external-experiments';
+import { ExternalRunResult } from './external-run-result';
+import { GuidedTestPanel } from './guided-test-panel';
 
 interface Props {
   readonly project: Project;
@@ -63,6 +64,9 @@ interface AssertionDraft {
 }
 
 export function ExternalExperimentPanel({ project, journeys }: Props) {
+  const [workspaceMode, setWorkspaceMode] = useState<'guided' | 'advanced'>(
+    'guided',
+  );
   const [settings, setSettings] =
     useState<ProjectExecutionSettingsInput>(emptySettings);
   const [settingsState, setSettingsState] =
@@ -118,6 +122,7 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
     networkAssertionSelected && selectedNetworkCandidate === null;
 
   useEffect(() => {
+    setWorkspaceMode('guided');
     setBusy('load-settings');
     setError(null);
     setProductionConfirmed(false);
@@ -372,658 +377,747 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
     }
   }
 
+  function handleGuidedCompleted(completed: ExternalRunDetail): void {
+    setResult(completed);
+    void listExternalRuns(project.id)
+      .then((history) => setRunHistory(history.items))
+      .catch((reason: unknown) => setError(messageOf(reason)));
+  }
+
   return (
     <section
       className="external-workbench"
       aria-label="External experiment configuration"
     >
-      <div className="panel settings-panel">
-        <div className="section-heading-row">
-          <div>
-            <p className="eyebrow">Project execution settings</p>
-            <h2>Authentication and runtime inputs</h2>
-          </div>
-          <span className="status-badge">
-            Auth{' '}
-            {settingsState?.authentication.available === true
-              ? 'ready'
-              : 'not captured'}
-          </span>
-        </div>
-        {error !== null ? (
-          <div className="state-message state-message-error" role="alert">
-            {error}
-          </div>
-        ) : null}
-        {project.environment === 'production' ? (
-          <label className="production-confirmation">
-            <input
-              checked={productionConfirmed}
-              onChange={(event) => setProductionConfirmed(event.target.checked)}
-              type="checkbox"
-            />{' '}
-            I understand that discovery, replay, and repeated triggers can
-            create, modify, or delete real production data.
-          </label>
-        ) : (
-          <p className="technical-note">
-            Environment: {project.environment}. Use disposable data and a
-            cleanup hook whenever the target action changes state.
+      <div className="panel test-mode-switcher">
+        <div>
+          <p className="eyebrow">Testing workspace</p>
+          <h2>How do you want to test this project?</h2>
+          <p>
+            Guided Test finds the request and creates sensible checks for you.
+            Advanced mode exposes every authentication, runtime, matcher, and
+            assertion control.
           </p>
-        )}
-        <div className="settings-grid">
-          <div className="settings-column">
-            <h3>Authentication state</h3>
-            <p className="technical-note">
-              Launch a visible browser, sign in yourself, then confirm.
-              FormCrash stores Playwright state on disk; credentials are never
-              entered in this dashboard. Saved authentication is restored
-              automatically for new recordings, replays, and experiment runs; it
-              does not appear as a runtime variable.
-            </p>
-            <div className="recording-actions">
-              <button
-                className="button button-secondary"
-                disabled={busy !== null}
-                onClick={() => void beginAuth()}
-                type="button"
-              >
-                {busy === 'auth-start'
-                  ? 'Launching…'
-                  : 'Capture authentication'}
-              </button>
-              <button
-                className="button button-primary"
-                disabled={
-                  busy !== null || capture?.status !== 'awaiting_confirmation'
-                }
-                onClick={() => void confirmAuth()}
-                type="button"
-              >
-                {busy === 'auth-confirm'
-                  ? 'Saving…'
-                  : 'I am signed in — save state'}
-              </button>
-              <button
-                className="copy-button"
-                disabled={
-                  busy !== null ||
-                  settingsState?.authentication.configured !== true
-                }
-                onClick={() => void removeAuth()}
-                type="button"
-              >
-                Clear
-              </button>
-              <button
-                className="button button-secondary button-compact"
-                disabled={
-                  busy !== null ||
-                  settingsState?.authentication.available !== true
-                }
-                onClick={() => void validateAuth()}
-                type="button"
-              >
-                {busy === 'auth-test' ? 'Testing…' : 'Test authentication'}
-              </button>
-            </div>
-            {capture !== null ? (
-              <p className="technical-note">Capture: {capture.status}</p>
-            ) : null}
-            {settingsState?.authentication.missingReason !== null &&
-            settingsState?.authentication.missingReason !== undefined ? (
-              <p className="recording-warning">
-                {settingsState.authentication.missingReason}
-              </p>
-            ) : null}
-            {authValidation !== null ? (
-              <div
-                className={`auth-validation auth-validation-${authValidation.status}`}
-                role="status"
-              >
-                <strong>{authValidation.status.replaceAll('_', ' ')}</strong>
-                <span>{authValidation.message}</span>
-                {authValidation.currentUrl !== null ? (
-                  <code>{authValidation.currentUrl}</code>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-          <div className="settings-column">
-            <div className="section-heading-row compact-heading">
-              <div>
-                <h3>Runtime variables</h3>
-                <p>
-                  Values come from this run or <code>FORMCRASH_VAR_NAME</code>.
-                </p>
-              </div>
-              <button
-                className="copy-button"
-                onClick={() =>
-                  setSettings((current) => ({
-                    ...current,
-                    variables: [
-                      ...current.variables,
-                      newVariable(current.variables.length),
-                    ],
-                  }))
-                }
-                type="button"
-              >
-                Add variable
-              </button>
-            </div>
-            {settings.variables.map((variable, index) => (
-              <div className="variable-row" key={`${variable.name}-${index}`}>
-                <input
-                  aria-label={`Variable ${index + 1} name`}
-                  placeholder="CUSTOMER_EMAIL"
-                  value={variable.name}
-                  onChange={(event) =>
-                    updateVariable(setSettings, index, {
-                      name: event.target.value.toUpperCase(),
-                    })
-                  }
-                />
-                <input
-                  aria-label={`${variable.name} template`}
-                  placeholder="Optional template, e.g. {{unique.email}}"
-                  value={variable.template ?? ''}
-                  onChange={(event) =>
-                    updateVariable(setSettings, index, {
-                      template:
-                        event.target.value === '' ? null : event.target.value,
-                    })
-                  }
-                />
-                <label className="inline-check">
-                  <input
-                    checked={variable.secret}
-                    onChange={(event) =>
-                      updateVariable(setSettings, index, {
-                        secret: event.target.checked,
-                      })
-                    }
-                    type="checkbox"
-                  />{' '}
-                  Secret
-                </label>
-                <button
-                  className="copy-button"
-                  onClick={() =>
-                    setSettings((current) => ({
-                      ...current,
-                      variables: current.variables.filter(
-                        (_, itemIndex) => itemIndex !== index,
-                      ),
-                    }))
-                  }
-                  type="button"
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
-            {settings.variables.length === 0 ? (
-              <p className="empty-state">No declared runtime variables.</p>
-            ) : null}
-          </div>
         </div>
-        <div className="settings-grid hook-grid">
-          <HookEditor
-            label="Before-run hook"
-            value={settings.beforeRunHook}
-            onChange={(value) =>
-              setSettings((current) => ({ ...current, beforeRunHook: value }))
-            }
-          />
-          <HookEditor
-            label="After-run cleanup hook"
-            value={settings.afterRunHook}
-            onChange={(value) =>
-              setSettings((current) => ({ ...current, afterRunHook: value }))
-            }
-          />
-        </div>
-        <button
-          className="button button-primary"
-          disabled={busy !== null}
-          onClick={() => void persistSettings()}
-          type="button"
+        <div
+          className="test-mode-options"
+          role="tablist"
+          aria-label="Test mode"
         >
-          {busy === 'settings' ? 'Saving…' : 'Save project settings'}
-        </button>
+          <button
+            aria-selected={workspaceMode === 'guided'}
+            className={`test-mode-option ${
+              workspaceMode === 'guided' ? 'test-mode-option-selected' : ''
+            }`}
+            onClick={() => setWorkspaceMode('guided')}
+            role="tab"
+            type="button"
+          >
+            <strong>Guided Test</strong>
+            <span>Recommended</span>
+          </button>
+          <button
+            aria-selected={workspaceMode === 'advanced'}
+            className={`test-mode-option ${
+              workspaceMode === 'advanced' ? 'test-mode-option-selected' : ''
+            }`}
+            onClick={() => setWorkspaceMode('advanced')}
+            role="tab"
+            type="button"
+          >
+            <strong>Advanced</strong>
+            <span>Full control</span>
+          </button>
+        </div>
       </div>
 
-      <div className="panel experiment-builder">
-        <p className="eyebrow">Create Failure Experiment</p>
-        <h2>Repeat one external click or submit</h2>
-        {journeys.length === 0 ? (
-          <p className="empty-state">
-            Save a recorded journey before configuring an experiment.
-          </p>
-        ) : (
-          <div className="builder-grid">
-            <label>
-              Journey
-              <select
-                value={journeyId}
-                onChange={(event) => setJourneyId(event.target.value)}
-              >
-                {journeys.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name} v{item.version}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Target step
-              <select
-                value={targetStepId}
-                onChange={(event) => setTargetStepId(event.target.value)}
-              >
-                {journey?.steps.map((step, index) => (
-                  <option
-                    disabled={step.type !== 'click' && step.type !== 'submit'}
-                    key={step.id}
-                    value={step.id}
-                  >
-                    {index + 1}. {step.name} ({step.type})
-                    {step.type !== 'click' && step.type !== 'submit'
-                      ? ' — incompatible'
-                      : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Experiment name
-              <input
-                value={experimentName}
-                onChange={(event) => setExperimentName(event.target.value)}
-              />
-            </label>
-            <label>
-              Triggers
-              <select
-                value={triggerCount}
-                onChange={(event) =>
-                  setTriggerCount(Number(event.target.value) as 2 | 3)
-                }
-              >
-                <option value={2}>2</option>
-                <option value={3}>3</option>
-              </select>
-            </label>
-            <label>
-              Interval
-              <select
-                value={intervalMs}
-                onChange={(event) =>
-                  setIntervalMs(Number(event.target.value) as 0 | 100 | 300)
-                }
-              >
-                <option value={0}>0 ms</option>
-                <option value={100}>100 ms</option>
-                <option value={300}>300 ms</option>
-              </select>
-            </label>
-            <label className="inline-check continue-check">
-              <input
-                checked={continueAfterTarget}
-                onChange={(event) =>
-                  setContinueAfterTarget(event.target.checked)
-                }
-                type="checkbox"
-              />{' '}
-              Continue later journey steps
-            </label>
-          </div>
-        )}
-        {journey !== null && compatibleSteps.length === 0 ? (
-          <p className="recording-warning">
-            This journey has no compatible click or submit step.
-          </p>
-        ) : null}
-
-        <div className="discovery-box">
-          <div className="section-heading-row compact-heading">
-            <div>
-              <h3>Request discovery</h3>
-              <p>
-                Replays through the target once and shows method/path evidence.
-                This executes the real action once and may create or modify
-                target data.
-              </p>
-            </div>
-            <button
-              className="button button-secondary button-compact"
-              disabled={
-                busy !== null ||
-                targetStep === null ||
-                (project.environment === 'production' && !productionConfirmed)
-              }
-              onClick={() => void discover()}
-              type="button"
-            >
-              {busy === 'discovery' ? 'Discovering…' : 'Discover requests'}
-            </button>
-          </div>
-          <label>
-            {networkAssertionSelected
-              ? 'Required network matcher'
-              : 'Optional network matcher'}
-            <select
-              value={candidateIndex}
-              onChange={(event) =>
-                setCandidateIndex(Number(event.target.value))
-              }
-            >
-              <option value={-1}>
-                {networkAssertionSelected
-                  ? 'Select a discovered request'
-                  : 'No matcher'}
-              </option>
-              {candidates.map((candidate, index) => (
-                <option
-                  key={`${candidate.method}-${candidate.origin}-${candidate.pathname}-${index}`}
-                  value={index}
-                >
-                  {candidate.method} {candidate.pathname} —{' '}
-                  {candidate.status ?? 'no status'} · {candidate.occurrences}x
-                </option>
-              ))}
-            </select>
-          </label>
-          {networkMatcherMissing ? (
-            <p className="recording-warning">
-              Network assertions cannot run without a matcher. Discover
-              requests, then select the POST or other request caused by the
-              target action.
-            </p>
-          ) : null}
+      {error !== null ? (
+        <div className="state-message state-message-error" role="alert">
+          {error}
         </div>
+      ) : null}
 
-        <div className="assertion-box">
-          <div className="section-heading-row compact-heading">
-            <div>
-              <h3>Assertions</h3>
-              <p>Every configured assertion must pass.</p>
+      {workspaceMode === 'guided' ? (
+        <GuidedTestPanel
+          journeys={journeys}
+          onCompleted={handleGuidedCompleted}
+          onOpenAdvanced={() => setWorkspaceMode('advanced')}
+          project={project}
+          settings={settingsState}
+        />
+      ) : (
+        <>
+          <div className="panel settings-panel">
+            <div className="section-heading-row">
+              <div>
+                <p className="eyebrow">Project execution settings</p>
+                <h2>Authentication and runtime inputs</h2>
+              </div>
+              <span className="status-badge">
+                Auth{' '}
+                {settingsState?.authentication.available === true
+                  ? 'ready'
+                  : 'not captured'}
+              </span>
             </div>
-            <button
-              className="copy-button"
-              disabled={assertionDrafts.length >= 20}
-              onClick={() =>
-                setAssertionDrafts((current) => [
-                  ...current,
-                  newAssertionDraft(targetStep?.id ?? ''),
-                ])
-              }
-              type="button"
-            >
-              Add assertion
-            </button>
-          </div>
-          <div className="assertion-draft-list">
-            {assertionDrafts.map((draft, index) => {
-              const needsStep = assertionNeedsStep(draft.type);
-              const fieldOnly = draft.type === 'field_retained';
-              return (
-                <div className="assertion-draft" key={draft.key}>
-                  <div className="builder-grid">
-                    <label>
-                      Assertion {index + 1} type
-                      <select
-                        value={draft.type}
-                        onChange={(event) => {
-                          const type = event.target
-                            .value as ExternalAssertionType;
-                          setAssertionDrafts((current) =>
-                            current.map((item) =>
-                              item.key === draft.key
-                                ? {
-                                    ...item,
-                                    type,
-                                    value: defaultAssertionValue(type),
-                                  }
-                                : item,
-                            ),
-                          );
-                        }}
-                      >
-                        {assertionOptions.map(([value, label]) => (
-                          <option key={value} value={value}>
-                            {label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    {assertionNeedsValue(draft.type) ? (
-                      <label>
-                        {assertionLabel(draft.type)}
-                        <input
-                          value={draft.value}
-                          onChange={(event) =>
-                            setAssertionDrafts((current) =>
-                              current.map((item) =>
-                                item.key === draft.key
-                                  ? { ...item, value: event.target.value }
-                                  : item,
-                              ),
-                            )
-                          }
-                        />
-                      </label>
-                    ) : null}
-                    {needsStep ? (
-                      <label>
-                        Assertion target step
-                        <select
-                          value={draft.stepId}
-                          onChange={(event) =>
-                            setAssertionDrafts((current) =>
-                              current.map((item) =>
-                                item.key === draft.key
-                                  ? { ...item, stepId: event.target.value }
-                                  : item,
-                              ),
-                            )
-                          }
-                        >
-                          <option value="">Use experiment target</option>
-                          {journey?.steps
-                            .filter(
-                              (step) =>
-                                step.locator !== null &&
-                                (!fieldOnly || step.value !== null),
-                            )
-                            .map((step, stepIndex) => (
-                              <option key={step.id} value={step.id}>
-                                {stepIndex + 1}. {step.name}
-                              </option>
-                            ))}
-                        </select>
-                      </label>
+            {project.environment === 'production' ? (
+              <label className="production-confirmation">
+                <input
+                  checked={productionConfirmed}
+                  onChange={(event) =>
+                    setProductionConfirmed(event.target.checked)
+                  }
+                  type="checkbox"
+                />{' '}
+                I understand that discovery, replay, and repeated triggers can
+                create, modify, or delete real production data.
+              </label>
+            ) : (
+              <p className="technical-note">
+                Environment: {project.environment}. Use disposable data and a
+                cleanup hook whenever the target action changes state.
+              </p>
+            )}
+            <div className="settings-grid">
+              <div className="settings-column">
+                <h3>Authentication state</h3>
+                <p className="technical-note">
+                  Launch a visible browser, sign in yourself, then confirm.
+                  FormCrash stores Playwright state on disk; credentials are
+                  never entered in this dashboard. Saved authentication is
+                  restored automatically for new recordings, replays, and
+                  experiment runs; it does not appear as a runtime variable.
+                </p>
+                <div className="recording-actions">
+                  <button
+                    className="button button-secondary"
+                    disabled={busy !== null}
+                    onClick={() => void beginAuth()}
+                    type="button"
+                  >
+                    {busy === 'auth-start'
+                      ? 'Launching…'
+                      : 'Capture authentication'}
+                  </button>
+                  <button
+                    className="button button-primary"
+                    disabled={
+                      busy !== null ||
+                      capture?.status !== 'awaiting_confirmation'
+                    }
+                    onClick={() => void confirmAuth()}
+                    type="button"
+                  >
+                    {busy === 'auth-confirm'
+                      ? 'Saving…'
+                      : 'I am signed in — save state'}
+                  </button>
+                  <button
+                    className="copy-button"
+                    disabled={
+                      busy !== null ||
+                      settingsState?.authentication.configured !== true
+                    }
+                    onClick={() => void removeAuth()}
+                    type="button"
+                  >
+                    Clear
+                  </button>
+                  <button
+                    className="button button-secondary button-compact"
+                    disabled={
+                      busy !== null ||
+                      settingsState?.authentication.available !== true
+                    }
+                    onClick={() => void validateAuth()}
+                    type="button"
+                  >
+                    {busy === 'auth-test' ? 'Testing…' : 'Test authentication'}
+                  </button>
+                </div>
+                {capture !== null ? (
+                  <p className="technical-note">Capture: {capture.status}</p>
+                ) : null}
+                {settingsState?.authentication.missingReason !== null &&
+                settingsState?.authentication.missingReason !== undefined ? (
+                  <p className="recording-warning">
+                    {settingsState.authentication.missingReason}
+                  </p>
+                ) : null}
+                {authValidation !== null ? (
+                  <div
+                    className={`auth-validation auth-validation-${authValidation.status}`}
+                    role="status"
+                  >
+                    <strong>
+                      {authValidation.status.replaceAll('_', ' ')}
+                    </strong>
+                    <span>{authValidation.message}</span>
+                    {authValidation.currentUrl !== null ? (
+                      <code>{authValidation.currentUrl}</code>
                     ) : null}
                   </div>
-                  {assertionDrafts.length > 1 ? (
+                ) : null}
+              </div>
+              <div className="settings-column">
+                <div className="section-heading-row compact-heading">
+                  <div>
+                    <h3>Runtime variables</h3>
+                    <p>
+                      Values come from this run or{' '}
+                      <code>FORMCRASH_VAR_NAME</code>.
+                    </p>
+                  </div>
+                  <button
+                    className="copy-button"
+                    onClick={() =>
+                      setSettings((current) => ({
+                        ...current,
+                        variables: [
+                          ...current.variables,
+                          newVariable(current.variables.length),
+                        ],
+                      }))
+                    }
+                    type="button"
+                  >
+                    Add variable
+                  </button>
+                </div>
+                {settings.variables.map((variable, index) => (
+                  <div
+                    className="variable-row"
+                    key={`${variable.name}-${index}`}
+                  >
+                    <input
+                      aria-label={`Variable ${index + 1} name`}
+                      placeholder="CUSTOMER_EMAIL"
+                      value={variable.name}
+                      onChange={(event) =>
+                        updateVariable(setSettings, index, {
+                          name: event.target.value.toUpperCase(),
+                        })
+                      }
+                    />
+                    <input
+                      aria-label={`${variable.name} template`}
+                      placeholder="Optional template, e.g. {{unique.email}}"
+                      value={variable.template ?? ''}
+                      onChange={(event) =>
+                        updateVariable(setSettings, index, {
+                          template:
+                            event.target.value === ''
+                              ? null
+                              : event.target.value,
+                        })
+                      }
+                    />
+                    <label className="inline-check">
+                      <input
+                        checked={variable.secret}
+                        onChange={(event) =>
+                          updateVariable(setSettings, index, {
+                            secret: event.target.checked,
+                          })
+                        }
+                        type="checkbox"
+                      />{' '}
+                      Secret
+                    </label>
                     <button
                       className="copy-button"
                       onClick={() =>
-                        setAssertionDrafts((current) =>
-                          current.filter((item) => item.key !== draft.key),
-                        )
+                        setSettings((current) => ({
+                          ...current,
+                          variables: current.variables.filter(
+                            (_, itemIndex) => itemIndex !== index,
+                          ),
+                        }))
                       }
                       type="button"
                     >
-                      Remove assertion
+                      Remove
                     </button>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-        <button
-          className="button button-primary"
-          disabled={
-            busy !== null ||
-            targetStep === null ||
-            experimentName.trim() === '' ||
-            networkMatcherMissing ||
-            assertionDrafts.length === 0 ||
-            assertionDrafts.some(
-              (draft) =>
-                assertionNeedsValue(draft.type) && draft.value.trim() === '',
-            )
-          }
-          onClick={() => void saveExperiment()}
-          type="button"
-        >
-          {busy === 'experiment'
-            ? 'Saving version…'
-            : 'Save immutable experiment version'}
-        </button>
-      </div>
-
-      <div className="panel">
-        <p className="eyebrow">Runtime values and versions</p>
-        <h2>Run the external experiment</h2>
-        {settings.variables.length > 0 ? (
-          <div className="runtime-value-grid">
-            {settings.variables.map((variable) => (
-              <label key={variable.name}>
-                {variable.name}
-                <input
-                  autoComplete="off"
-                  placeholder={
-                    variable.template === null
-                      ? `Optional if ${`FORMCRASH_VAR_${variable.name}`} is set`
-                      : 'Template configured'
-                  }
-                  type={variable.secret ? 'password' : 'text'}
-                  value={runtimeValues[variable.name] ?? ''}
-                  onChange={(event) =>
-                    setRuntimeValues((current) => ({
-                      ...current,
-                      [variable.name]: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-            ))}
-          </div>
-        ) : (
-          <p className="technical-note">
-            No runtime variables declared. Built-in templates remain available.
-          </p>
-        )}
-        <div className="experiment-version-list">
-          {experiments.map((version) => (
-            <article className="journey-card" key={version.id}>
-              <div>
-                <strong>{version.name}</strong>
-                <span>
-                  Version {version.version} · {version.triggerCount} triggers ·{' '}
-                  {version.intervalMs} ms · {version.assertions.length}{' '}
-                  assertion(s)
-                </span>
+                  </div>
+                ))}
+                {settings.variables.length === 0 ? (
+                  <p className="empty-state">No declared runtime variables.</p>
+                ) : null}
               </div>
-              <div className="journey-card-actions">
+            </div>
+            <div className="settings-grid hook-grid">
+              <HookEditor
+                label="Before-run hook"
+                value={settings.beforeRunHook}
+                onChange={(value) =>
+                  setSettings((current) => ({
+                    ...current,
+                    beforeRunHook: value,
+                  }))
+                }
+              />
+              <HookEditor
+                label="After-run cleanup hook"
+                value={settings.afterRunHook}
+                onChange={(value) =>
+                  setSettings((current) => ({
+                    ...current,
+                    afterRunHook: value,
+                  }))
+                }
+              />
+            </div>
+            <button
+              className="button button-primary"
+              disabled={busy !== null}
+              onClick={() => void persistSettings()}
+              type="button"
+            >
+              {busy === 'settings' ? 'Saving…' : 'Save project settings'}
+            </button>
+          </div>
+
+          <div className="panel experiment-builder">
+            <p className="eyebrow">Create Failure Experiment</p>
+            <h2>Repeat one external click or submit</h2>
+            {journeys.length === 0 ? (
+              <p className="empty-state">
+                Save a recorded journey before configuring an experiment.
+              </p>
+            ) : (
+              <div className="builder-grid">
+                <label>
+                  Journey
+                  <select
+                    value={journeyId}
+                    onChange={(event) => setJourneyId(event.target.value)}
+                  >
+                    {journeys.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name} v{item.version}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Target step
+                  <select
+                    value={targetStepId}
+                    onChange={(event) => setTargetStepId(event.target.value)}
+                  >
+                    {journey?.steps.map((step, index) => (
+                      <option
+                        disabled={
+                          step.type !== 'click' && step.type !== 'submit'
+                        }
+                        key={step.id}
+                        value={step.id}
+                      >
+                        {index + 1}. {step.name} ({step.type})
+                        {step.type !== 'click' && step.type !== 'submit'
+                          ? ' — incompatible'
+                          : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Experiment name
+                  <input
+                    value={experimentName}
+                    onChange={(event) => setExperimentName(event.target.value)}
+                  />
+                </label>
+                <label>
+                  Triggers
+                  <select
+                    value={triggerCount}
+                    onChange={(event) =>
+                      setTriggerCount(Number(event.target.value) as 2 | 3)
+                    }
+                  >
+                    <option value={2}>2</option>
+                    <option value={3}>3</option>
+                  </select>
+                </label>
+                <label>
+                  Interval
+                  <select
+                    value={intervalMs}
+                    onChange={(event) =>
+                      setIntervalMs(Number(event.target.value) as 0 | 100 | 300)
+                    }
+                  >
+                    <option value={0}>0 ms</option>
+                    <option value={100}>100 ms</option>
+                    <option value={300}>300 ms</option>
+                  </select>
+                </label>
+                <label className="inline-check continue-check">
+                  <input
+                    checked={continueAfterTarget}
+                    onChange={(event) =>
+                      setContinueAfterTarget(event.target.checked)
+                    }
+                    type="checkbox"
+                  />{' '}
+                  Continue later journey steps
+                </label>
+              </div>
+            )}
+            {journey !== null && compatibleSteps.length === 0 ? (
+              <p className="recording-warning">
+                This journey has no compatible click or submit step.
+              </p>
+            ) : null}
+
+            <div className="discovery-box">
+              <div className="section-heading-row compact-heading">
+                <div>
+                  <h3>Request discovery</h3>
+                  <p>
+                    Replays through the target once and shows method/path
+                    evidence. This executes the real action once and may create
+                    or modify target data.
+                  </p>
+                </div>
                 <button
                   className="button button-secondary button-compact"
                   disabled={
                     busy !== null ||
+                    targetStep === null ||
                     (project.environment === 'production' &&
                       !productionConfirmed)
                   }
-                  onClick={() => void run(version)}
+                  onClick={() => void discover()}
                   type="button"
                 >
-                  {busy === `run-${version.id}` ? 'Running Chromium…' : 'Run'}
-                </button>
-                <button
-                  className="copy-button"
-                  disabled={busy !== null}
-                  onClick={() => void removeExperimentVersion(version)}
-                  type="button"
-                >
-                  {busy === `delete-version-${version.id}`
-                    ? 'Deleting…'
-                    : 'Delete'}
+                  {busy === 'discovery' ? 'Discovering…' : 'Discover requests'}
                 </button>
               </div>
-            </article>
-          ))}
-          {experiments.length === 0 ? (
-            <p className="empty-state">
-              No experiment versions for the selected journey.
-            </p>
-          ) : null}
-        </div>
-        {result !== null ? <RunResult result={result} /> : null}
-        <div className="external-run-history">
-          <div className="section-heading-row compact-heading">
-            <div>
-              <h3>Persisted run history</h3>
-              <p>Results remain available after refreshing the dashboard.</p>
+              <label>
+                {networkAssertionSelected
+                  ? 'Required network matcher'
+                  : 'Optional network matcher'}
+                <select
+                  value={candidateIndex}
+                  onChange={(event) =>
+                    setCandidateIndex(Number(event.target.value))
+                  }
+                >
+                  <option value={-1}>
+                    {networkAssertionSelected
+                      ? 'Select a discovered request'
+                      : 'No matcher'}
+                  </option>
+                  {candidates.map((candidate, index) => (
+                    <option
+                      key={`${candidate.method}-${candidate.origin}-${candidate.pathname}-${index}`}
+                      value={index}
+                    >
+                      {candidate.method} {candidate.pathname} —{' '}
+                      {candidate.status ?? 'no status'} ·{' '}
+                      {candidate.occurrences}x
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {networkMatcherMissing ? (
+                <p className="recording-warning">
+                  Network assertions cannot run without a matcher. Discover
+                  requests, then select the POST or other request caused by the
+                  target action.
+                </p>
+              ) : null}
             </div>
+
+            <div className="assertion-box">
+              <div className="section-heading-row compact-heading">
+                <div>
+                  <h3>Assertions</h3>
+                  <p>Every configured assertion must pass.</p>
+                </div>
+                <button
+                  className="copy-button"
+                  disabled={assertionDrafts.length >= 20}
+                  onClick={() =>
+                    setAssertionDrafts((current) => [
+                      ...current,
+                      newAssertionDraft(targetStep?.id ?? ''),
+                    ])
+                  }
+                  type="button"
+                >
+                  Add assertion
+                </button>
+              </div>
+              <div className="assertion-draft-list">
+                {assertionDrafts.map((draft, index) => {
+                  const needsStep = assertionNeedsStep(draft.type);
+                  const fieldOnly = draft.type === 'field_retained';
+                  return (
+                    <div className="assertion-draft" key={draft.key}>
+                      <div className="builder-grid">
+                        <label>
+                          Assertion {index + 1} type
+                          <select
+                            value={draft.type}
+                            onChange={(event) => {
+                              const type = event.target
+                                .value as ExternalAssertionType;
+                              setAssertionDrafts((current) =>
+                                current.map((item) =>
+                                  item.key === draft.key
+                                    ? {
+                                        ...item,
+                                        type,
+                                        value: defaultAssertionValue(type),
+                                      }
+                                    : item,
+                                ),
+                              );
+                            }}
+                          >
+                            {assertionOptions.map(([value, label]) => (
+                              <option key={value} value={value}>
+                                {label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        {assertionNeedsValue(draft.type) ? (
+                          <label>
+                            {assertionLabel(draft.type)}
+                            <input
+                              value={draft.value}
+                              onChange={(event) =>
+                                setAssertionDrafts((current) =>
+                                  current.map((item) =>
+                                    item.key === draft.key
+                                      ? { ...item, value: event.target.value }
+                                      : item,
+                                  ),
+                                )
+                              }
+                            />
+                          </label>
+                        ) : null}
+                        {needsStep ? (
+                          <label>
+                            Assertion target step
+                            <select
+                              value={draft.stepId}
+                              onChange={(event) =>
+                                setAssertionDrafts((current) =>
+                                  current.map((item) =>
+                                    item.key === draft.key
+                                      ? { ...item, stepId: event.target.value }
+                                      : item,
+                                  ),
+                                )
+                              }
+                            >
+                              <option value="">Use experiment target</option>
+                              {journey?.steps
+                                .filter(
+                                  (step) =>
+                                    step.locator !== null &&
+                                    (!fieldOnly || step.value !== null),
+                                )
+                                .map((step, stepIndex) => (
+                                  <option key={step.id} value={step.id}>
+                                    {stepIndex + 1}. {step.name}
+                                  </option>
+                                ))}
+                            </select>
+                          </label>
+                        ) : null}
+                      </div>
+                      {assertionDrafts.length > 1 ? (
+                        <button
+                          className="copy-button"
+                          onClick={() =>
+                            setAssertionDrafts((current) =>
+                              current.filter((item) => item.key !== draft.key),
+                            )
+                          }
+                          type="button"
+                        >
+                          Remove assertion
+                        </button>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <button
+              className="button button-primary"
+              disabled={
+                busy !== null ||
+                targetStep === null ||
+                experimentName.trim() === '' ||
+                networkMatcherMissing ||
+                assertionDrafts.length === 0 ||
+                assertionDrafts.some(
+                  (draft) =>
+                    assertionNeedsValue(draft.type) &&
+                    draft.value.trim() === '',
+                )
+              }
+              onClick={() => void saveExperiment()}
+              type="button"
+            >
+              {busy === 'experiment'
+                ? 'Saving version…'
+                : 'Save immutable experiment version'}
+            </button>
           </div>
-          {runHistory.length === 0 ? (
-            <p className="empty-state">No external experiment runs yet.</p>
-          ) : (
+
+          <div className="panel">
+            <p className="eyebrow">Runtime values and versions</p>
+            <h2>Run the external experiment</h2>
+            {settings.variables.length > 0 ? (
+              <div className="runtime-value-grid">
+                {settings.variables.map((variable) => (
+                  <label key={variable.name}>
+                    {variable.name}
+                    <input
+                      autoComplete="off"
+                      placeholder={
+                        variable.template === null
+                          ? `Optional if ${`FORMCRASH_VAR_${variable.name}`} is set`
+                          : 'Template configured'
+                      }
+                      type={variable.secret ? 'password' : 'text'}
+                      value={runtimeValues[variable.name] ?? ''}
+                      onChange={(event) =>
+                        setRuntimeValues((current) => ({
+                          ...current,
+                          [variable.name]: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <p className="technical-note">
+                No runtime variables declared. Built-in templates remain
+                available.
+              </p>
+            )}
             <div className="experiment-version-list">
-              {runHistory.map((runSummary) => (
-                <article className="journey-card" key={runSummary.runId}>
+              {experiments.map((version) => (
+                <article className="journey-card" key={version.id}>
                   <div>
-                    <strong>
-                      {runSummary.experimentName} — {runSummary.status}
-                    </strong>
+                    <strong>{version.name}</strong>
                     <span>
-                      {runSummary.matchedRequestCount} matched request(s) ·{' '}
-                      {runSummary.passedAssertionCount}/
-                      {runSummary.assertionCount} assertions ·{' '}
-                      {runSummary.screenshotCount} screenshots
+                      Version {version.version} · {version.triggerCount}{' '}
+                      triggers · {version.intervalMs} ms ·{' '}
+                      {version.assertions.length} assertion(s)
                     </span>
                   </div>
                   <div className="journey-card-actions">
                     <button
                       className="button button-secondary button-compact"
-                      disabled={busy !== null}
-                      onClick={() => {
-                        setBusy(`history-${runSummary.runId}`);
-                        setError(null);
-                        void getExternalRun(runSummary.runId)
-                          .then(setResult)
-                          .catch((reason: unknown) =>
-                            setError(messageOf(reason)),
-                          )
-                          .finally(() => setBusy(null));
-                      }}
+                      disabled={
+                        busy !== null ||
+                        (project.environment === 'production' &&
+                          !productionConfirmed)
+                      }
+                      onClick={() => void run(version)}
                       type="button"
                     >
-                      {busy === `history-${runSummary.runId}`
-                        ? 'Loading…'
-                        : 'View result'}
+                      {busy === `run-${version.id}`
+                        ? 'Running Chromium…'
+                        : 'Run'}
                     </button>
                     <button
                       className="copy-button"
                       disabled={busy !== null}
-                      onClick={() => void removeRun(runSummary.runId)}
+                      onClick={() => void removeExperimentVersion(version)}
                       type="button"
                     >
-                      {busy === `delete-run-${runSummary.runId}`
+                      {busy === `delete-version-${version.id}`
                         ? 'Deleting…'
                         : 'Delete'}
                     </button>
                   </div>
                 </article>
               ))}
+              {experiments.length === 0 ? (
+                <p className="empty-state">
+                  No experiment versions for the selected journey.
+                </p>
+              ) : null}
             </div>
-          )}
-        </div>
-      </div>
+            {result !== null ? <ExternalRunResult result={result} /> : null}
+            <div className="external-run-history">
+              <div className="section-heading-row compact-heading">
+                <div>
+                  <h3>Persisted run history</h3>
+                  <p>
+                    Results remain available after refreshing the dashboard.
+                  </p>
+                </div>
+              </div>
+              {runHistory.length === 0 ? (
+                <p className="empty-state">No external experiment runs yet.</p>
+              ) : (
+                <div className="experiment-version-list">
+                  {runHistory.map((runSummary) => (
+                    <article className="journey-card" key={runSummary.runId}>
+                      <div>
+                        <strong>
+                          {runSummary.experimentName} — {runSummary.status}
+                        </strong>
+                        <span>
+                          {runSummary.matchedRequestCount} matched request(s) ·{' '}
+                          {runSummary.passedAssertionCount}/
+                          {runSummary.assertionCount} assertions ·{' '}
+                          {runSummary.screenshotCount} screenshots
+                        </span>
+                      </div>
+                      <div className="journey-card-actions">
+                        <button
+                          className="button button-secondary button-compact"
+                          disabled={busy !== null}
+                          onClick={() => {
+                            setBusy(`history-${runSummary.runId}`);
+                            setError(null);
+                            void getExternalRun(runSummary.runId)
+                              .then(setResult)
+                              .catch((reason: unknown) =>
+                                setError(messageOf(reason)),
+                              )
+                              .finally(() => setBusy(null));
+                          }}
+                          type="button"
+                        >
+                          {busy === `history-${runSummary.runId}`
+                            ? 'Loading…'
+                            : 'View result'}
+                        </button>
+                        <button
+                          className="copy-button"
+                          disabled={busy !== null}
+                          onClick={() => void removeRun(runSummary.runId)}
+                          type="button"
+                        >
+                          {busy === `delete-run-${runSummary.runId}`
+                            ? 'Deleting…'
+                            : 'Delete'}
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </section>
   );
 }
@@ -1104,96 +1198,6 @@ function HookEditor({
             }}
           />
         </>
-      ) : null}
-    </div>
-  );
-}
-
-function RunResult({ result }: { readonly result: ExternalRunDetail }) {
-  return (
-    <div className={`external-result replay-${result.status}`} role="status">
-      <div className="section-heading-row">
-        <div>
-          <p className="eyebrow">Latest result</p>
-          <h3>{result.status.replaceAll('_', ' ')}</h3>
-        </div>
-        <strong>
-          {result.assertions.filter((item) => item.status === 'passed').length}/
-          {result.assertions.length} assertions passed
-        </strong>
-      </div>
-      {result.runnerError !== null ? <p>{result.runnerError.message}</p> : null}
-      {result.warnings.map((warning) => (
-        <p key={warning.code}>{warning.message}</p>
-      ))}
-      <ul>
-        {result.assertions.map((assertion) => (
-          <li key={assertion.assertionResultId}>
-            <strong>{assertion.status}</strong> — {assertion.description}
-            <br />
-            <span>{assertion.observedDescription}</span>
-          </li>
-        ))}
-      </ul>
-      <p className="technical-note">
-        {result.networkObservations.filter((item) => item.matched).length}{' '}
-        matched network request(s) · {result.artifacts.length} screenshot
-        artifact(s)
-      </p>
-      {result.networkObservations.some((item) => item.matched) ? (
-        <div className="network-evidence-table-wrap">
-          <table className="network-evidence-table">
-            <thead>
-              <tr>
-                <th>Attempt</th>
-                <th>Request</th>
-                <th>Status</th>
-                <th>Duration</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.networkObservations
-                .filter((item) => item.matched)
-                .map((observation, index) => (
-                  <tr key={observation.requestId}>
-                    <td>{index + 1}</td>
-                    <td>
-                      <code>
-                        {observation.method} {observation.pathname}
-                      </code>
-                    </td>
-                    <td>
-                      {observation.failed
-                        ? 'request failed'
-                        : (observation.status ?? 'pending')}
-                    </td>
-                    <td>
-                      {observation.completedAtMs === null
-                        ? 'pending'
-                        : `${Math.max(
-                            0,
-                            observation.completedAtMs - observation.startedAtMs,
-                          )} ms`}
-                    </td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
-      {result.artifacts.length > 0 ? (
-        <div className="external-screenshot-grid">
-          {result.artifacts.map((artifact) => (
-            <figure key={artifact.artifactId}>
-              {/* The server validates artifact ownership before reading it. */}
-              <img
-                alt={`${artifact.label} screenshot`}
-                src={getExternalArtifactUrl(result.runId, artifact.artifactId)}
-              />
-              <figcaption>{artifact.label.replaceAll('-', ' ')}</figcaption>
-            </figure>
-          ))}
-        </div>
       ) : null}
     </div>
   );

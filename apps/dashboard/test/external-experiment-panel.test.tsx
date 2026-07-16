@@ -46,9 +46,35 @@ const journey = {
       timestamp: 0,
       url: project.targetUrl,
       locator: { strategy: 'id' as const, value: 'name' },
-      fingerprint: null,
-      value: { kind: 'safe' as const, value: '{{unique.email}}' },
+      fingerprint: {
+        tagName: 'input',
+        inputType: 'text',
+        dataFormcrash: null,
+        dataTestId: null,
+        id: 'name',
+        role: 'textbox',
+        accessibleName: 'Name',
+        name: 'name',
+        label: 'Name',
+        text: null,
+        cssPath: '#name',
+      },
+      value: { kind: 'safe' as const, value: 'Ada' },
       sensitive: false,
+    },
+    {
+      id: 'fill-token',
+      name: 'Fill token',
+      type: 'fill' as const,
+      timestamp: 0.5,
+      url: project.targetUrl,
+      locator: { strategy: 'id' as const, value: 'token' },
+      fingerprint: null,
+      value: {
+        kind: 'sensitive' as const,
+        variableName: 'SECRET_TOKEN',
+      },
+      sensitive: true,
     },
     {
       id: 'submit-profile',
@@ -117,6 +143,7 @@ const version = {
     },
   ],
   continueAfterTarget: false,
+  guided: false,
   journeySnapshot: journey,
   createdAt: '2026-07-16T00:00:00.000Z',
 };
@@ -137,6 +164,14 @@ beforeEach(() => {
     journeyId: journey.id,
     targetStepId: 'submit-profile',
     candidates: [
+      {
+        method: 'GET',
+        pathname: '/api/profile',
+        origin: 'http://localhost:4300',
+        status: 200,
+        relativeTimestampMs: 2,
+        occurrences: 1,
+      },
       {
         method: 'POST',
         pathname: '/api/profile',
@@ -214,10 +249,149 @@ beforeEach(() => {
 });
 
 describe('external experiment dashboard workflow', () => {
+  it('shows a concrete first-test tutorial when no journey exists', async () => {
+    render(<ExternalExperimentPanel project={project} journeys={[]} />);
+
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Set up your first guided test',
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('link', { name: 'Go to journey recording' }),
+    ).toHaveAttribute('href', '#recording-workspace');
+    expect(
+      screen.getByRole('button', { name: 'Set up authentication' }),
+    ).toBeVisible();
+  });
+
+  it('guides a user from a journey to a recommended test and explains the result', async () => {
+    const user = userEvent.setup();
+    render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
+
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Test a recorded action without configuring the technical details',
+      }),
+    ).toBeVisible();
+    expect(screen.getByLabelText('Guided target action')).toHaveValue(
+      'submit-profile',
+    );
+    expect(
+      screen.getByText('1 required runtime value(s) are missing'),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Analyze action' }),
+    ).toBeDisabled();
+    expect(screen.getByText('Accidental double-click')).toBeVisible();
+    expect(screen.getByText('Impatient triple-click')).toBeVisible();
+    expect(screen.getByText('Server duplicate handling')).toBeVisible();
+    await user.click(screen.getByText('Server duplicate handling'));
+
+    await user.type(
+      screen.getByLabelText('Guided SECRET_TOKEN'),
+      'runtime-only',
+    );
+    expect(screen.getByText('Required runtime values are ready')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Analyze action' }));
+
+    await waitFor(() =>
+      expect(mocks.discoverRequests).toHaveBeenCalledWith(
+        journey.id,
+        'submit-profile',
+        { SECRET_TOKEN: 'runtime-only' },
+        true,
+        {
+          normalizeJourney: true,
+          stepValueOverrides: {
+            'fill-name': '{{unique.name}}',
+          },
+        },
+      ),
+    );
+    expect(
+      await screen.findByText('Likely create or update request — Recommended'),
+    ).toBeVisible();
+    expect(screen.getByText('POST /api/profile')).toBeVisible();
+    expect(
+      screen.getByText('No more than two matching requests are sent.'),
+    ).toBeVisible();
+    expect(
+      screen.getByText('No matching response returns HTTP 5xx.'),
+    ).toBeVisible();
+    expect(
+      screen.getByText('No more than one matching request succeeds.'),
+    ).toBeVisible();
+    expect(
+      screen.getByText('Every matching response uses 201 or 409.'),
+    ).toBeVisible();
+
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Save and run recommended test',
+      }),
+    );
+
+    await waitFor(() =>
+      expect(mocks.createExternalExperiment).toHaveBeenCalledWith(
+        journey.id,
+        expect.objectContaining({
+          targetStepId: 'submit-profile',
+          triggerCount: 2,
+          intervalMs: 300,
+          continueAfterTarget: false,
+          guided: true,
+          normalizeJourney: true,
+          stepValueOverrides: {
+            'fill-name': '{{unique.name}}',
+          },
+          networkMatcher: {
+            method: 'POST',
+            pathname: '/api/profile',
+            host: 'localhost:4300',
+          },
+          assertions: [
+            expect.objectContaining({
+              type: 'network_request_max',
+              maximum: 2,
+            }),
+            expect.objectContaining({
+              type: 'network_success_max',
+              maximum: 1,
+            }),
+            expect.objectContaining({ type: 'network_no_server_errors' }),
+            expect.objectContaining({
+              type: 'network_all_status',
+              allowedStatuses: [201, 409],
+            }),
+          ],
+        }),
+      ),
+    );
+    expect(mocks.runExternalExperiment).toHaveBeenCalledWith(
+      'version-1',
+      {
+        SECRET_TOKEN: 'runtime-only',
+      },
+      true,
+    );
+    expect(
+      await screen.findByText(
+        'The action handled the repeated trigger safely.',
+      ),
+    ).toBeVisible();
+    expect(screen.getByText('1/1 assertions passed')).toBeVisible();
+  });
+
   it('configures discovery, an immutable version, runtime values and a prominent result', async () => {
     const user = userEvent.setup();
     render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
 
+    await user.click(
+      await screen.findByRole('tab', {
+        name: /Advanced/,
+      }),
+    );
     expect(
       await screen.findByRole('heading', {
         name: 'Authentication and runtime inputs',
@@ -248,7 +422,7 @@ describe('external experiment dashboard workflow', () => {
     ).toBeVisible();
     await user.selectOptions(
       screen.getByLabelText('Required network matcher'),
-      '0',
+      '1',
     );
     await user.click(screen.getByRole('button', { name: 'Add assertion' }));
     await user.selectOptions(
@@ -288,6 +462,20 @@ describe('external experiment dashboard workflow', () => {
     expect(
       screen.getByRole('img', { name: 'final-result screenshot' }),
     ).toBeVisible();
+    expect(screen.getByText('Final application state')).toBeVisible();
+    expect(
+      screen.getByText(
+        'The stable page state preserved when FormCrash evaluates and records the result.',
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('link', {
+        name: 'Open final application state screenshot',
+      }),
+    ).toHaveAttribute(
+      'href',
+      'http://localhost:4100/api/external-runs/run-1/artifacts/screen-1',
+    );
     expect(mocks.runExternalExperiment).toHaveBeenCalledWith(
       'version-1',
       {

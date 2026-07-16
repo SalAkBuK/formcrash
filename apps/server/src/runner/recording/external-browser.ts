@@ -1,4 +1,11 @@
-import type { Browser, BrowserContext, Frame, Page, Request } from 'playwright';
+import type {
+  Browser,
+  BrowserContext,
+  Frame,
+  Locator,
+  Page,
+  Request,
+} from 'playwright';
 import { chromium } from 'playwright';
 
 import type { ReplayLocator, TargetFingerprint } from '@formcrash/contracts';
@@ -354,8 +361,11 @@ export class PlaywrightExternalBrowserOwner implements ExternalBrowserOwner {
     try {
       const context = await browser.newContext(
         options.storageStatePath === undefined
-          ? {}
-          : { storageState: options.storageStatePath },
+          ? { viewport: { width: 1440, height: 900 } }
+          : {
+              storageState: options.storageStatePath,
+              viewport: { width: 1440, height: 900 },
+            },
       );
       const page = await context.newPage();
       await context.exposeBinding(
@@ -449,10 +459,12 @@ function resolveLocator(page: Page, locator: ReplayLocator) {
     case 'id':
       return page.locator(`#${escapeCss(locator.value)}`);
     case 'role':
-      return page.getByRole(locator.role as never, {
-        name: locator.name,
-        exact: true,
-      });
+      return page
+        .getByRole(locator.role as never, {
+          name: locator.name,
+          exact: true,
+        })
+        .or(resolveRoleTextFallback(page, locator.role, locator.name));
     case 'name':
       return page.locator(`[name=${JSON.stringify(locator.value)}]`);
     case 'label':
@@ -469,6 +481,32 @@ function escapeCss(value: string): string {
     /[^a-zA-Z0-9_-]/gu,
     (character) => `\\${character.codePointAt(0)?.toString(16) ?? ''} `,
   );
+}
+
+function escapeRegularExpression(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
+
+function resolveRoleTextFallback(
+  page: Page,
+  role: string,
+  name: string,
+): Locator {
+  const selector =
+    role === 'button'
+      ? `button:visible, input[type="button"]:visible, input[type="submit"]:visible, input[type="reset"]:visible, [role="button"]:visible`
+      : role === 'link'
+        ? `a[href]:visible, [role="link"]:visible`
+        : role === 'combobox'
+          ? `select:visible, [role="combobox"]:visible`
+          : role === 'checkbox'
+            ? `input[type="checkbox"]:visible, [role="checkbox"]:visible`
+            : role === 'radio'
+              ? `input[type="radio"]:visible, [role="radio"]:visible`
+              : `[role=${JSON.stringify(role)}]:visible`;
+  return page.locator(selector).filter({
+    hasText: new RegExp(`^\\s*${escapeRegularExpression(name)}\\s*$`, 'u'),
+  });
 }
 
 export function buildBrowserRecorderInitScript(
@@ -526,15 +564,35 @@ function installBrowserRecorder(): void {
     }
     return null;
   };
-  const nameFor = (element: Element): string | null =>
-    clean(element.getAttribute('aria-label')) ??
-    labelFor(element) ??
-    clean(element.getAttribute('title')) ??
-    clean(element.textContent);
+  const accessibleNameFor = (
+    element: Element,
+    role: string | null,
+  ): string | null => {
+    const labelledBy = clean(element.getAttribute('aria-labelledby'));
+    const labelledByText =
+      labelledBy === null
+        ? null
+        : clean(
+            labelledBy
+              .split(/\s+/u)
+              .map((id) => document.getElementById(id)?.textContent ?? '')
+              .join(' '),
+          );
+    const named =
+      clean(element.getAttribute('aria-label')) ??
+      labelledByText ??
+      labelFor(element) ??
+      clean(element.getAttribute('title'));
+    if (named !== null) return named;
+    return role !== null &&
+      ['button', 'link', 'menuitem', 'option', 'tab', 'treeitem'].includes(role)
+      ? clean(element.textContent)
+      : null;
+  };
   const stableId = (value: string): boolean =>
     value.length <= 100 &&
     !/\d{5,}/u.test(value) &&
-    !/^(react|radix|headlessui|:r)/iu.test(value);
+    !/^(react|radix|headlessui|:r|_r_)/iu.test(value);
   const cssPath = (element: Element): string => {
     const parts: string[] = [];
     let current: Element | null = element;
@@ -563,7 +621,7 @@ function installBrowserRecorder(): void {
     const dataTestId = clean(element.getAttribute('data-testid'));
     const id = stableId(element.id) ? clean(element.id) : null;
     const role = roleFor(element);
-    const accessibleName = nameFor(element);
+    const accessibleName = accessibleNameFor(element, role);
     const name = clean(element.getAttribute('name'));
     const label = labelFor(element);
     const text = ['BUTTON', 'A'].includes(element.tagName)

@@ -63,6 +63,7 @@ describe('external runner terminal paths', () => {
     ).toHaveLength(2);
     expect(owner.launchCount).toBe(1);
     expect(owner.lastOptions?.storageStatePath).toBeUndefined();
+    expect(owner.lastSession?.settleDurations).toEqual([700, 900]);
     expect(ownership.activeWorkload).toBeNull();
     expect(
       experiments.listRuns({
@@ -243,6 +244,7 @@ function runner(owner: ExternalBrowserOwner, ownership: BrowserOwnership) {
 class FakeOwner implements ExternalBrowserOwner {
   launchCount = 0;
   lastOptions: ExternalBrowserOptions | null = null;
+  lastSession: FakeSession | null = null;
 
   launchRecording(): Promise<RecordingBrowserSession> {
     throw new Error('Recording is not used by this test.');
@@ -251,12 +253,14 @@ class FakeOwner implements ExternalBrowserOwner {
   launchReplay(options: ExternalBrowserOptions): Promise<ReplayBrowserSession> {
     this.launchCount += 1;
     this.lastOptions = options;
-    return Promise.resolve(new FakeSession());
+    this.lastSession = new FakeSession();
+    return Promise.resolve(this.lastSession);
   }
 }
 
 class FakeSession implements ReplayBrowserSession {
   private observer: ((observation: NetworkObservation) => void) | null = null;
+  readonly settleDurations: number[] = [];
   navigate(): Promise<void> {
     return Promise.resolve();
   }
@@ -308,7 +312,8 @@ class FakeSession implements ReplayBrowserSession {
   currentUrl(): string {
     return 'http://127.0.0.1:49999/complete';
   }
-  settle(): Promise<void> {
+  settle(milliseconds: number): Promise<void> {
+    this.settleDurations.push(milliseconds);
     return Promise.resolve();
   }
   close(): Promise<void> {

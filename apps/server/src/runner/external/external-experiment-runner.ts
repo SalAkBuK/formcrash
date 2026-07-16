@@ -31,7 +31,10 @@ import {
 import { evaluateExternalAssertions } from './assertions.js';
 import type { AuthStateStore } from './auth-session.js';
 import { executeHttpHook, HttpHookError } from './http-hooks.js';
-import { executeRecordedStep } from './journey-actions.js';
+import {
+  executeRecordedStep,
+  preferredReplayLocator,
+} from './journey-actions.js';
 import { NetworkEvidenceCollector } from './network-evidence.js';
 import {
   InvalidTemplateError,
@@ -199,7 +202,7 @@ export class ExternalExperimentRunner {
       });
       try {
         await session.triggerRepeated(
-          target.locator,
+          preferredReplayLocator(target),
           target.type,
           experiment.triggerCount,
           experiment.intervalMs,
@@ -215,7 +218,11 @@ export class ExternalExperimentRunner {
       } catch (error: unknown) {
         throw new ExternalJourneyStepError(target, targetIndex, error);
       }
-      await session.settle(500);
+      await this.settleAfterDisruption(
+        session,
+        collector,
+        experiment.networkMatcher !== null,
+      );
       await this.capture(session, runId, 'after-disruption', events, warnings);
 
       if (experiment.continueAfterTarget) {
@@ -236,7 +243,7 @@ export class ExternalExperimentRunner {
             'Later steps were not configured to continue after the injected target.',
         });
       }
-      await session.settle(750);
+      await session.settle(900);
       observations = collector.snapshot();
       this.repository.updateStatus(runId, 'evaluating');
       events.append('run.evaluating', {});
@@ -346,6 +353,30 @@ export class ExternalExperimentRunner {
       warnings.push(warning);
       events.append('artifact.capture_failed', warning);
     }
+  }
+
+  private async settleAfterDisruption(
+    session: ReplayBrowserSession,
+    collector: NetworkEvidenceCollector,
+    hasNetworkMatcher: boolean,
+  ): Promise<void> {
+    if (hasNetworkMatcher) {
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const matched = collector
+          .snapshot()
+          .filter((observation) => observation.matched);
+        if (
+          matched.length > 0 &&
+          matched.every((observation) => observation.completedAtMs !== null)
+        ) {
+          break;
+        }
+        await session.settle(250);
+      }
+    }
+    // Allow dialogs, toasts, loading states, and list refreshes to finish their
+    // post-response transition before preserving visual evidence.
+    await session.settle(700);
   }
 }
 

@@ -62,6 +62,15 @@ describe('external runtime values and safe templates', () => {
     );
     expect(first).toBe(second);
     expect(first).toContain(runtime.context.shortId);
+    expect(
+      resolveTemplate('{{unique.name}}', runtime.values, runtime.context),
+    ).toBe(runtime.context.uniqueName);
+    expect(
+      resolveTemplate('{{unique.phone}}', runtime.values, runtime.context),
+    ).toBe(runtime.context.uniquePhone);
+    expect(
+      resolveTemplate('{{unique.text}}', runtime.values, runtime.context),
+    ).toBe(runtime.context.uniqueText);
     expect(runtime.safeSnapshot).toEqual({ EMAIL: first });
     expect(JSON.stringify(runtime.safeSnapshot)).not.toContain(
       'never-persist-this',
@@ -75,6 +84,9 @@ describe('external runtime values and safe templates', () => {
         shortId: 'short',
         timestamp: new Date(0).toISOString(),
         uniqueEmail: 'unique@example.test',
+        uniqueName: 'FormCrash Test',
+        uniquePhone: '+15550000000',
+        uniqueText: 'FC-test',
       }),
     ).toThrow(InvalidTemplateError);
 

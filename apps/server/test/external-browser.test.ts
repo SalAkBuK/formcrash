@@ -19,6 +19,9 @@ beforeAll(async () => {
       <html>
         <body>
           <button id="open">Open form</button>
+          <button class="unit-combobox" role="combobox">Search occupied unit...</button>
+          <label for="_r_1o_-form-item">Visitor Name</label>
+          <input id="_r_1o_-form-item" name="visitorName" />
           <form id="profile" hidden>
             <label for="name">Name</label>
             <input id="name" name="name" />
@@ -30,6 +33,9 @@ beforeAll(async () => {
             });
             document.querySelector('#profile').addEventListener('submit', (event) => {
               event.preventDefault();
+            });
+            document.querySelector('.unit-combobox').addEventListener('click', () => {
+              window.location.hash = 'unit-combobox-opened';
             });
           </script>
         </body>
@@ -92,5 +98,94 @@ describe('external browser recorder injection', () => {
           : null,
       ),
     ).toEqual(['click', 'fill', 'submit']);
+  });
+
+  it('does not record visible combobox text as a false accessible name', async () => {
+    const events: unknown[] = [];
+    const owner = new PlaywrightExternalBrowserOwner(async (page) => {
+      await page.locator('.unit-combobox').click();
+    });
+    const session = await owner.launchRecording(
+      { targetUrl, headless: true, timeoutMs: 10_000 },
+      {
+        onEvent: (event) => events.push(event),
+        onWarning: () => undefined,
+        onNavigation: () => undefined,
+      },
+    );
+    await session.close();
+
+    const clickEvent = events.find(
+      (event) =>
+        typeof event === 'object' &&
+        event !== null &&
+        'kind' in event &&
+        event.kind === 'click',
+    );
+    expect(clickEvent).toMatchObject({
+      kind: 'click',
+      locator: {
+        strategy: 'text',
+        value: 'Search occupied unit...',
+      },
+      fingerprint: {
+        role: 'combobox',
+        accessibleName: null,
+        text: 'Search occupied unit...',
+      },
+    });
+  });
+
+  it('replays legacy role locators through exact explicit-role text', async () => {
+    const owner = new PlaywrightExternalBrowserOwner();
+    const session = await owner.launchReplay({
+      targetUrl,
+      headless: true,
+      timeoutMs: 10_000,
+    });
+    await session.navigate(targetUrl);
+    await session.click({
+      strategy: 'role',
+      role: 'combobox',
+      name: 'Search occupied unit...',
+    });
+
+    expect(session.currentUrl()).toBe(`${targetUrl}/#unit-combobox-opened`);
+    await session.close();
+  });
+
+  it('does not record React-generated IDs as stable replay locators', async () => {
+    const events: unknown[] = [];
+    const owner = new PlaywrightExternalBrowserOwner(async (page) => {
+      await page.locator('[name="visitorName"]').fill('Ada');
+    });
+    const session = await owner.launchRecording(
+      { targetUrl, headless: true, timeoutMs: 10_000 },
+      {
+        onEvent: (event) => events.push(event),
+        onWarning: () => undefined,
+        onNavigation: () => undefined,
+      },
+    );
+    await session.close();
+
+    const fillEvent = events.find(
+      (event) =>
+        typeof event === 'object' &&
+        event !== null &&
+        'kind' in event &&
+        event.kind === 'fill',
+    );
+    expect(fillEvent).toMatchObject({
+      locator: {
+        strategy: 'role',
+        role: 'textbox',
+        name: 'Visitor Name',
+      },
+      fingerprint: {
+        id: null,
+        name: 'visitorName',
+      },
+    });
   });
 });
