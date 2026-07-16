@@ -7,6 +7,7 @@ import {
   createProjectRequestSchema,
   experimentTypeSchema,
   journeyActionTypeSchema,
+  requestDiscoveryResultSchema,
   runArtifactSchema,
   runEventEnvelopeSchema,
   runStatusSchema,
@@ -187,5 +188,109 @@ describe('foundational contracts', () => {
     });
 
     expect(result.success).toBe(true);
+  });
+
+  it('accepts ranked server-owned discovery evidence', () => {
+    const result = requestDiscoveryResultSchema.parse({
+      discoveryId: '11111111-2222-4333-8444-555555555555',
+      discoveredAt: '2026-07-16T00:00:00.000Z',
+      journeyId: 'journey-1',
+      targetStepId: 'submit',
+      candidates: [
+        {
+          candidateId: 'request-0123456789abcdef01234567',
+          rank: 1,
+          score: 105,
+          classification: 'likely_business_mutation',
+          confidence: 'high',
+          recommended: true,
+          reasons: [
+            {
+              code: 'mutation_method',
+              label: 'POST changes server state.',
+              scoreImpact: 50,
+            },
+          ],
+          method: 'POST',
+          pathname: '/api/profile',
+          origin: 'https://example.test',
+          status: 201,
+          failed: false,
+          relativeTimestampMs: 4,
+          occurrences: 1,
+        },
+      ],
+      recommendation: {
+        outcome: 'recommended',
+        recommendedCandidateId: 'request-0123456789abcdef01234567',
+        explanation: 'One high-confidence business mutation was identified.',
+      },
+    });
+
+    expect(result.candidates[0]?.rank).toBe(1);
+    expect(result.recommendation.outcome).toBe('recommended');
+  });
+
+  it('defaults legacy experiment requests to no selection provenance', () => {
+    const result = createExternalExperimentRequestSchema.parse({
+      name: 'Legacy experiment',
+      targetStepId: 'submit',
+      triggerCount: 2,
+      intervalMs: 0,
+      networkMatcher: null,
+      assertions: [
+        {
+          id: 'visible',
+          type: 'text_appeared',
+          text: 'Saved',
+          description: 'Saved text appears.',
+        },
+      ],
+      continueAfterTarget: false,
+    });
+
+    expect(result.requestSelectionProvenance).toBeNull();
+  });
+
+  it('rejects selection provenance that disagrees with the saved matcher', () => {
+    const result = createExternalExperimentRequestSchema.safeParse({
+      name: 'Mismatched provenance',
+      targetStepId: 'submit',
+      triggerCount: 2,
+      intervalMs: 0,
+      networkMatcher: {
+        method: 'POST',
+        pathname: '/api/profile',
+        host: 'example.test',
+      },
+      requestSelectionProvenance: {
+        selectionMode: 'manual_override',
+        discoveryId: '11111111-2222-4333-8444-555555555555',
+        discoveredAt: '2026-07-16T00:00:00.000Z',
+        discoveryOutcome: 'review',
+        selectedCandidateId: 'request-0123456789abcdef01234567',
+        selectedCandidateScore: 50,
+        selectedCandidateConfidence: 'review',
+        recommendationReasons: [],
+        recommendedMatcher: null,
+        selectedMatcher: {
+          method: 'POST',
+          pathname: '/api/other',
+          host: 'example.test',
+        },
+        userOverrodeRecommendation: true,
+      },
+      assertions: [
+        {
+          id: 'one-request',
+          type: 'network_request_exact',
+          expected: 1,
+          description: 'One request occurs.',
+        },
+      ],
+      continueAfterTarget: false,
+    });
+
+    expect(result.success).toBe(false);
   });
 });

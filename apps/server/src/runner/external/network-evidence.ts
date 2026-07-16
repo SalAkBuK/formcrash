@@ -11,6 +11,7 @@ import type { NetworkObservation } from '../recording/external-browser.js';
 export class NetworkEvidenceCollector {
   private readonly observations = new Map<string, ExternalNetworkObservation>();
   private readonly startedAt = Date.now();
+  private discoveryActionStartedAtMs: number | null = null;
 
   constructor(private readonly matcher: NetworkMatcher | null) {}
 
@@ -64,10 +65,13 @@ export class NetworkEvidenceCollector {
       : observations.filter((item) => item.matched).slice(0, 500);
   }
 
+  markDiscoveryActionStarted(timestampMs = Date.now()): void {
+    this.discoveryActionStartedAtMs = Math.max(0, timestampMs - this.startedAt);
+  }
+
   discoveryCandidates(): readonly DiscoveredRequest[] {
     const grouped = new Map<string, DiscoveredRequest>();
     for (const observation of this.observations.values()) {
-      if (isStaticAsset(observation.pathname)) continue;
       const key = [
         observation.method,
         observation.pathname,
@@ -83,12 +87,20 @@ export class NetworkEvidenceCollector {
             pathname: observation.pathname,
             origin: observation.origin,
             status: observation.status,
-            relativeTimestampMs: observation.startedAtMs,
+            failed: observation.failed,
+            relativeTimestampMs: Math.max(
+              0,
+              observation.startedAtMs - (this.discoveryActionStartedAtMs ?? 0),
+            ),
             occurrences: 1,
           }),
         );
       } else {
-        grouped.set(key, { ...current, occurrences: current.occurrences + 1 });
+        grouped.set(key, {
+          ...current,
+          failed: current.failed || observation.failed,
+          occurrences: current.occurrences + 1,
+        });
       }
     }
     return [...grouped.values()].sort((left, right) => {
@@ -96,23 +108,16 @@ export class NetworkEvidenceCollector {
         mutationPriority(left.method) - mutationPriority(right.method);
       return methodPriority !== 0
         ? methodPriority
-        : left.relativeTimestampMs - right.relativeTimestampMs;
+        : left.relativeTimestampMs - right.relativeTimestampMs ||
+            left.origin.localeCompare(right.origin) ||
+            left.pathname.localeCompare(right.pathname) ||
+            (left.status ?? 1_000) - (right.status ?? 1_000);
     });
   }
 }
 
 function mutationPriority(method: string): number {
   return ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) ? 0 : 1;
-}
-
-function isStaticAsset(pathname: string): boolean {
-  return (
-    pathname.startsWith('/_next/') ||
-    pathname.startsWith('/assets/') ||
-    /\.(?:avif|css|gif|ico|jpe?g|js|map|png|svg|webp|woff2?|ttf)$/iu.test(
-      pathname,
-    )
-  );
 }
 
 export function matchesRequest(

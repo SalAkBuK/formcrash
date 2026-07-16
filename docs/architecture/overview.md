@@ -48,6 +48,11 @@ ordered live run progress uses persisted replay plus process-local SSE publicati
 The dashboard renders server-owned state
 and never reads SQLite or artifacts by filesystem path.
 
+External request discovery also returns server-owned ranked candidates and an
+explicit recommendation outcome. The dashboard displays that evidence and may
+persist the user's selection, but it does not recompute scores or silently select
+ambiguous requests.
+
 The sample checkout is separate because it is the system under test. Depending
 on the control server would contaminate the experiment, hide real HTTP behavior,
 and make the guaranteed demo path less representative.
@@ -73,5 +78,6 @@ from the normal dashboard.
 Chunks 1 through 6 now include the independent checkout, the seeded demonstration,
 external project recording/replay, authenticated storage-state restoration,
 runtime variables and controlled data hooks, plus persisted external Impatient
-User experiments. Reports, failed-versus-fixed comparison, other injectors, CI,
+User experiments and server-owned request recommendation. Automatic assertion
+expansion, reports, failed-versus-fixed comparison, other injectors, CI,
 cross-browser execution, and cloud operation remain deferred.

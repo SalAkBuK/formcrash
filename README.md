@@ -229,9 +229,12 @@ External target and journey endpoints:
 - `POST /api/projects/:projectId/authentication/test` — load saved state and
   report an obvious login redirect or target-loading failure.
 - `POST /api/journeys/:journeyId/request-discovery` — replay through one saved
-  click or submit and return sanitized method/path/status candidates caused by
-  that target. Discovery executes the real action once and requires production
-  confirmation for production projects.
+  click or submit and return ranked sanitized candidates caused by that target.
+  Each candidate includes a stable ID, score, rank, classification, confidence,
+  recommendation flag, and plain-language score reasons. The result is
+  `recommended`, `review`, `ambiguous`, or `no_candidate`. Discovery executes
+  the real action once and requires production confirmation for production
+  projects.
 - `POST` and `GET /api/journeys/:journeyId/experiments` — create immutable
   Impatient User versions and list them.
 - `GET` or `DELETE /api/external-experiments/:experimentVersionId` — inspect or
@@ -257,10 +260,17 @@ does not blindly replay the original target afterward. Later steps run only when
 the immutable experiment version explicitly enables continuation; otherwise the
 runner settles and evaluates final-state assertions immediately after injection.
 The optional request matcher compares method and pathname (query parameters are
-ignored) and may also constrain the host. Discovery filters obvious static
-assets and ranks mutating requests first. Network assertions support maximum and
-exact request/success counts, allowed-status checks, and explicit HTTP 5xx
-rejection; multiple assertions may be combined in one version.
+ignored) and may also constrain the host. Discovery ranking is server-owned and
+deterministic. It weighs mutation method, target origin, response status,
+action-relative timing, bounded path similarity, occurrence count, and
+background/static/analytics penalties. High-confidence selection requires one
+same-origin successful mutation with a clear score lead; similar mutations are
+reported as ambiguous and no matcher is fabricated when evidence is unsuitable.
+Network assertions support maximum and exact request/success counts,
+allowed-status checks, and explicit HTTP 5xx rejection; multiple assertions may
+be combined in one version. The full scoring and confidence model is documented
+in
+[`docs/architecture/request-recommendation.md`](docs/architecture/request-recommendation.md).
 
 Before-run and cleanup hooks accept only bounded `POST` or `DELETE` requests and
 should exist only in controlled test environments. A failed before-run hook is a
@@ -327,11 +337,13 @@ unresolved variables used by the execution before browser launch. Saved click
 or submit steps accept immutable external Impatient User versions with request
 discovery plus multiple network, UI, field-retention, and final-URL assertions.
 Guided Test is the default external-testing workflow: it recommends the last
-recorded submit or click, replays it once to rank the resulting browser
-requests, prefers a related state-changing request, generates unique common
-field values, normalizes adjacent recorded fills, creates four duplicate-safety
-network assertions, saves an immutable experiment version, runs it, and explains
-the outcome in plain language. Before opening a browser it now scores journey
+recorded submit or click, replays it once, consumes the server-ranked browser
+requests, auto-selects only a high-confidence state-changing request, generates
+unique common field values, normalizes adjacent recorded fills, creates four
+duplicate-safety network assertions, saves an immutable experiment version,
+runs it, and explains the outcome in plain language. Ambiguous or review
+outcomes require explicit selection, while no-candidate results do not invent a
+matcher. Before opening a browser it now scores journey
 readiness, blocks unresolved runtime values or missing replay targets, and warns
 about brittle locators, authentication, cleanup, recorder warnings, and
 production side effects. Users can choose an accidental double-click, impatient
@@ -345,8 +357,10 @@ outcomes, matched network evidence, warnings, and screenshots; the dashboard
 lists prior runs, displays request statuses and screenshot previews, and exposes
 deliberate cleanup controls. The recorder and runner are verified against both the
 separate `fixtures/external-target` application and the bundled sample checkout.
-Request ranking and recommendation are currently dashboard-owned heuristics, not
-a server-owned recommendation contract with persisted confidence or provenance.
+Request recommendation is now a typed server contract with deterministic scores,
+plain reasons, explicit ambiguity handling, and immutable selection provenance
+for automatic, confirmed, or overridden choices. The dashboard does not
+recompute ranking.
 It does **not** implement failed-versus-fixed comparison, reports, exports, other
 failure injectors, CI orchestration, or cloud execution.
 

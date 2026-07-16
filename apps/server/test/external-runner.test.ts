@@ -319,6 +319,7 @@ function configure(options: {
         },
       ],
       continueAfterTarget: false,
+      requestSelectionProvenance: null,
     },
   });
   return { versionId: version.id, projectId: project.id };
@@ -436,6 +437,7 @@ function configureSecretScenario(
         },
       ],
       continueAfterTarget: false,
+      requestSelectionProvenance: null,
     },
   });
   return { versionId: version.id, projectId: project.id };

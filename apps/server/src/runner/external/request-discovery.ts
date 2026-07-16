@@ -22,6 +22,7 @@ import { executeHttpHook } from './http-hooks.js';
 import { createGuidedJourneySnapshot } from './guided-journey.js';
 import { executeRecordedStep } from './journey-actions.js';
 import { NetworkEvidenceCollector } from './network-evidence.js';
+import { rankRequestCandidates } from './request-recommendation.js';
 import {
   isStepValueSensitive,
   redactSensitiveText,
@@ -79,9 +80,11 @@ export class RequestDiscoveryService {
         'Request discovery target must be a click or submit step.',
       );
     }
+    const discoveryId = randomUUID();
+    const discoveredAt = new Date().toISOString();
     const storedSettings = this.settings.get(project.id);
     const runtime = resolveRuntime({
-      runId: randomUUID(),
+      runId: discoveryId,
       journey,
       declarations: storedSettings.variables,
       ephemeral: input.variables,
@@ -89,7 +92,7 @@ export class RequestDiscoveryService {
     });
     const storageStatePath = this.authStore.usablePath(project.id);
     const release = this.ownership.acquire('request_discovery');
-    const events = new RunEventLog(`discovery-${randomUUID()}`);
+    const events = new RunEventLog(`discovery-${discoveryId}`);
     let session: ReplayBrowserSession | null = null;
     try {
       if (storedSettings.beforeRunHook !== null) {
@@ -118,14 +121,24 @@ export class RequestDiscoveryService {
       for (const step of journey.steps.slice(0, targetIndex)) {
         await executeDiscoveryStep(session, step, runtime);
       }
+      collector.markDiscoveryActionStarted();
       capture = true;
       await executeDiscoveryStep(session, target, runtime);
       await session.settle(750);
       capture = false;
+      const ranked = rankRequestCandidates({
+        candidates: collector.discoveryCandidates(),
+        targetOrigin: new URL(project.targetUrl).origin,
+        journeyName: journey.name,
+        targetStepName: target.name,
+        targetPathname: new URL(target.url).pathname,
+      });
       return requestDiscoveryResultSchema.parse({
+        discoveryId,
+        discoveredAt,
         journeyId: journey.id,
         targetStepId: target.id,
-        candidates: collector.discoveryCandidates(),
+        ...ranked,
       });
     } finally {
       if (session !== null) await session.close().catch(() => undefined);

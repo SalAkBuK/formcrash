@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import type { PersistedJourney } from '@formcrash/contracts';
+import type {
+  PersistedJourney,
+  RequestDiscoveryResult,
+} from '@formcrash/contracts';
 
 import {
   guidedRecipe,
@@ -8,6 +11,10 @@ import {
 } from '../src/features/projects/models/guided-recipes';
 import { guidedStepValueOverrides } from '../src/features/projects/models/guided-values';
 import { assessJourneyReadiness } from '../src/features/projects/models/journey-readiness';
+import {
+  initialCandidateIndex,
+  selectionProvenance,
+} from '../src/features/projects/models/request-selection';
 
 const journey: PersistedJourney = {
   id: 'journey-1',
@@ -121,6 +128,7 @@ describe('guided test automation models', () => {
         pathname: '/api/residents',
         origin: 'https://example.test',
         status: 201,
+        failed: false,
         relativeTimestampMs: 10,
         occurrences: 1,
       },
@@ -146,4 +154,97 @@ describe('guided test automation models', () => {
       ]),
     );
   });
+
+  it('uses the server outcome and recommended flag without client-side reranking', () => {
+    const discovery = discoveryResult();
+
+    expect(initialCandidateIndex(discovery)).toBe(1);
+    expect(
+      initialCandidateIndex({
+        ...discovery,
+        recommendation: {
+          outcome: 'review',
+          recommendedCandidateId: null,
+          explanation: 'Review required.',
+        },
+      }),
+    ).toBe(-1);
+    expect(
+      selectionProvenance(discovery, discovery.candidates[0]!),
+    ).toMatchObject({
+      selectionMode: 'manual_override',
+      selectedCandidateId: 'request-aaaaaaaaaaaaaaaaaaaaaaaa',
+      recommendedMatcher: {
+        method: 'POST',
+        pathname: '/api/residents',
+        host: 'example.test',
+      },
+      selectedMatcher: {
+        method: 'GET',
+        pathname: '/api/residents',
+        host: 'example.test',
+      },
+      userOverrodeRecommendation: true,
+    });
+  });
 });
+
+function discoveryResult(): RequestDiscoveryResult {
+  return {
+    discoveryId: '11111111-2222-4333-8444-555555555555',
+    discoveredAt: '2026-07-16T00:00:00.000Z',
+    journeyId: journey.id,
+    targetStepId: 'submit',
+    candidates: [
+      {
+        candidateId: 'request-aaaaaaaaaaaaaaaaaaaaaaaa',
+        rank: 2,
+        score: 999,
+        classification: 'background_refresh',
+        confidence: 'review',
+        recommended: false,
+        reasons: [
+          {
+            code: 'background_refresh',
+            label: 'Background refresh.',
+            scoreImpact: -30,
+          },
+        ],
+        method: 'GET',
+        pathname: '/api/residents',
+        origin: 'https://example.test',
+        status: 200,
+        failed: false,
+        relativeTimestampMs: 12,
+        occurrences: 1,
+      },
+      {
+        candidateId: 'request-bbbbbbbbbbbbbbbbbbbbbbbb',
+        rank: 1,
+        score: 100,
+        classification: 'likely_business_mutation',
+        confidence: 'high',
+        recommended: true,
+        reasons: [
+          {
+            code: 'mutation_method',
+            label: 'POST can change server state.',
+            scoreImpact: 50,
+          },
+        ],
+        method: 'POST',
+        pathname: '/api/residents',
+        origin: 'https://example.test',
+        status: 201,
+        failed: false,
+        relativeTimestampMs: 10,
+        occurrences: 1,
+      },
+    ],
+    recommendation: {
+      outcome: 'recommended',
+      recommendedCandidateId: 'request-bbbbbbbbbbbbbbbbbbbbbbbb',
+      explanation: 'The server selected the business mutation.',
+    },
+  };
+}

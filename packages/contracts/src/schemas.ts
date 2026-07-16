@@ -317,8 +317,75 @@ export const discoveredRequestSchema = z.object({
   pathname: z.string().startsWith('/'),
   origin: z.string().url(),
   status: z.number().int().min(100).max(599).nullable(),
+  failed: z.boolean().default(false),
   relativeTimestampMs: z.number().int().nonnegative(),
   occurrences: z.number().int().positive(),
+});
+
+export const requestCandidateClassificationSchema = z.enum([
+  'likely_business_mutation',
+  'background_refresh',
+  'analytics',
+  'static_asset',
+  'other',
+]);
+
+export const requestRecommendationConfidenceSchema = z.enum([
+  'high',
+  'review',
+  'ambiguous',
+]);
+
+export const requestRecommendationReasonCodeSchema = z.enum([
+  'mutation_method',
+  'read_only_method',
+  'same_origin',
+  'cross_origin',
+  'successful_status',
+  'server_error_status',
+  'failed_request',
+  'missing_status',
+  'immediate_after_action',
+  'soon_after_action',
+  'delayed_after_action',
+  'api_like_path',
+  'action_path_similarity',
+  'journey_path_similarity',
+  'single_occurrence',
+  'repeated_occurrence',
+  'background_endpoint',
+  'background_refresh',
+  'analytics_endpoint',
+  'static_asset',
+]);
+
+export const requestRecommendationReasonSchema = z.object({
+  code: requestRecommendationReasonCodeSchema,
+  label: z.string().min(1).max(240),
+  scoreImpact: z.number().int().min(-1_000).max(1_000),
+});
+
+export const rankedRequestCandidateSchema = discoveredRequestSchema.extend({
+  candidateId: z.string().regex(/^request-[a-f0-9]{24}$/u),
+  rank: z.number().int().positive(),
+  score: z.number().int().min(-1_000).max(1_000),
+  classification: requestCandidateClassificationSchema,
+  confidence: requestRecommendationConfidenceSchema,
+  recommended: z.boolean(),
+  reasons: z.array(requestRecommendationReasonSchema).min(1).max(30),
+});
+
+export const requestDiscoveryOutcomeSchema = z.enum([
+  'recommended',
+  'review',
+  'ambiguous',
+  'no_candidate',
+]);
+
+export const requestDiscoveryRecommendationSchema = z.object({
+  outcome: requestDiscoveryOutcomeSchema,
+  recommendedCandidateId: z.string().min(1).nullable().default(null),
+  explanation: z.string().min(1).max(1_000),
 });
 
 export const requestDiscoveryRequestSchema = z.object({
@@ -332,11 +399,100 @@ export const requestDiscoveryRequestSchema = z.object({
     .default({}),
 });
 
-export const requestDiscoveryResultSchema = z.object({
-  journeyId: z.string().min(1),
-  targetStepId: z.string().min(1),
-  candidates: z.array(discoveredRequestSchema),
-});
+export const requestDiscoveryResultSchema = z
+  .object({
+    discoveryId: z.uuid(),
+    discoveredAt: z.iso.datetime({ offset: true }),
+    journeyId: z.string().min(1),
+    targetStepId: z.string().min(1),
+    candidates: z.array(rankedRequestCandidateSchema),
+    recommendation: requestDiscoveryRecommendationSchema,
+  })
+  .superRefine((value, context) => {
+    const recommended = value.candidates.filter(
+      (candidate) => candidate.recommended,
+    );
+    if (
+      value.recommendation.outcome === 'recommended' &&
+      (recommended.length !== 1 ||
+        recommended[0]?.candidateId !==
+          value.recommendation.recommendedCandidateId ||
+        recommended[0]?.confidence !== 'high')
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['recommendation'],
+        message:
+          'A recommended discovery must identify exactly one high-confidence recommended candidate.',
+      });
+    }
+    if (
+      value.recommendation.outcome !== 'recommended' &&
+      (value.recommendation.recommendedCandidateId !== null ||
+        recommended.length > 0)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['recommendation'],
+        message:
+          'Review, ambiguous, and no-candidate discoveries cannot silently recommend a candidate.',
+      });
+    }
+  });
+
+export const requestSelectionModeSchema = z.enum([
+  'automatic',
+  'confirmed_recommendation',
+  'manual_override',
+]);
+
+export const requestSelectionProvenanceSchema = z
+  .object({
+    selectionMode: requestSelectionModeSchema,
+    discoveryId: z.uuid(),
+    discoveredAt: z.iso.datetime({ offset: true }),
+    discoveryOutcome: requestDiscoveryOutcomeSchema,
+    selectedCandidateId: z.string().min(1),
+    selectedCandidateScore: z.number().int(),
+    selectedCandidateConfidence: requestRecommendationConfidenceSchema,
+    recommendationReasons: z
+      .array(requestRecommendationReasonSchema)
+      .min(1)
+      .max(30),
+    recommendedMatcher: networkMatcherSchema.nullable().default(null),
+    selectedMatcher: networkMatcherSchema,
+    userOverrodeRecommendation: z.boolean(),
+  })
+  .superRefine((value, context) => {
+    const selectedRecommendation =
+      value.recommendedMatcher !== null &&
+      sameNetworkMatcher(value.recommendedMatcher, value.selectedMatcher);
+    if (
+      ['automatic', 'confirmed_recommendation'].includes(value.selectionMode) &&
+      (value.discoveryOutcome !== 'recommended' ||
+        !selectedRecommendation ||
+        value.userOverrodeRecommendation)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['selectionMode'],
+        message:
+          'Automatic or confirmed selection must accept the server recommendation without an override.',
+      });
+    }
+    if (
+      value.selectionMode === 'manual_override' &&
+      value.userOverrodeRecommendation !==
+        (value.recommendedMatcher !== null && !selectedRecommendation)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['userOverrodeRecommendation'],
+        message:
+          'Manual override metadata must state whether a server recommendation was replaced.',
+      });
+    }
+  });
 
 export const externalAssertionTypeSchema = z.enum([
   'network_request_max',
@@ -434,6 +590,10 @@ export const createExternalExperimentRequestSchema = z
     continueAfterTarget: z.boolean().default(false),
     guided: z.boolean().optional(),
     normalizeJourney: z.boolean().optional(),
+    requestSelectionProvenance: requestSelectionProvenanceSchema
+      .nullable()
+      .optional()
+      .default(null),
     stepValueOverrides: z
       .record(z.string().min(1), z.string().max(10_000))
       .optional(),
@@ -450,6 +610,24 @@ export const createExternalExperimentRequestSchema = z
         path: ['networkMatcher'],
         message:
           'A discovered network request matcher is required for network assertions.',
+      });
+    }
+    if (
+      value.requestSelectionProvenance?.selectedMatcher !== null &&
+      value.requestSelectionProvenance?.selectedMatcher !== undefined &&
+      (value.networkMatcher === null ||
+        value.requestSelectionProvenance.selectedMatcher.method !==
+          value.networkMatcher.method ||
+        value.requestSelectionProvenance.selectedMatcher.pathname !==
+          value.networkMatcher.pathname ||
+        value.requestSelectionProvenance.selectedMatcher.host !==
+          value.networkMatcher.host)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['requestSelectionProvenance', 'selectedMatcher'],
+        message:
+          'The persisted selected matcher must match the experiment network matcher.',
       });
     }
   });
@@ -469,6 +647,9 @@ export const externalExperimentVersionSchema = z.object({
   assertions: z.array(externalAssertionSchema).min(1),
   continueAfterTarget: z.boolean(),
   guided: z.boolean().default(false),
+  requestSelectionProvenance: requestSelectionProvenanceSchema
+    .nullable()
+    .default(null),
   journeySnapshot: persistedJourneySchema,
   createdAt: z.iso.datetime({ offset: true }),
 });
@@ -476,6 +657,17 @@ export const externalExperimentVersionSchema = z.object({
 export const externalExperimentListSchema = z.object({
   items: z.array(externalExperimentVersionSchema),
 });
+
+function sameNetworkMatcher(
+  left: z.infer<typeof networkMatcherSchema>,
+  right: z.infer<typeof networkMatcherSchema>,
+): boolean {
+  return (
+    left.method === right.method &&
+    left.pathname === right.pathname &&
+    left.host === right.host
+  );
+}
 
 export const runExternalExperimentRequestSchema = z.object({
   variables: ephemeralRuntimeValuesSchema.optional().default({}),
@@ -901,11 +1093,36 @@ export type EphemeralRuntimeValues = z.infer<
 >;
 export type NetworkMatcher = z.infer<typeof networkMatcherSchema>;
 export type DiscoveredRequest = z.infer<typeof discoveredRequestSchema>;
+export type RequestCandidateClassification = z.infer<
+  typeof requestCandidateClassificationSchema
+>;
+export type RequestRecommendationConfidence = z.infer<
+  typeof requestRecommendationConfidenceSchema
+>;
+export type RequestRecommendationReasonCode = z.infer<
+  typeof requestRecommendationReasonCodeSchema
+>;
+export type RequestRecommendationReason = z.infer<
+  typeof requestRecommendationReasonSchema
+>;
+export type RankedRequestCandidate = z.infer<
+  typeof rankedRequestCandidateSchema
+>;
+export type RequestDiscoveryOutcome = z.infer<
+  typeof requestDiscoveryOutcomeSchema
+>;
+export type RequestDiscoveryRecommendation = z.infer<
+  typeof requestDiscoveryRecommendationSchema
+>;
 export type RequestDiscoveryRequest = z.infer<
   typeof requestDiscoveryRequestSchema
 >;
 export type RequestDiscoveryResult = z.infer<
   typeof requestDiscoveryResultSchema
+>;
+export type RequestSelectionMode = z.infer<typeof requestSelectionModeSchema>;
+export type RequestSelectionProvenance = z.infer<
+  typeof requestSelectionProvenanceSchema
 >;
 export type ExternalAssertionType = z.infer<typeof externalAssertionTypeSchema>;
 export type ExternalAssertion = z.infer<typeof externalAssertionSchema>;

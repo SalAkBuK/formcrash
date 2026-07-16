@@ -101,6 +101,14 @@ safe resolved values, trigger count, sanitized browser request observations,
 runner error, warnings, assertions, and relative artifact metadata. It never
 persists ephemeral secret values or raw HTTP hook headers/bodies.
 
+External experiment versions may also snapshot bounded request-selection
+provenance: discovery identity/time, recommendation outcome, selection mode,
+selected candidate ID/score/confidence/reasons, recommended and selected
+method/path/host matchers, and whether the user overrode a recommendation.
+Versions created before migration 0005 retain `null` provenance. Request bodies,
+response bodies, headers, cookies, authentication state, and runtime secrets are
+not part of this snapshot.
+
 ## Implemented database enforcement
 
 - Foreign keys are enabled on every connection.

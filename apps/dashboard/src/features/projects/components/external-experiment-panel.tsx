@@ -11,7 +11,6 @@ import type {
   AuthCaptureSession,
   AuthValidationResult,
   CreateExternalExperimentRequest,
-  DiscoveredRequest,
   EphemeralRuntimeValues,
   ExternalAssertion,
   ExternalAssertionType,
@@ -23,6 +22,8 @@ import type {
   Project,
   ProjectExecutionSettings,
   ProjectExecutionSettingsInput,
+  RankedRequestCandidate,
+  RequestDiscoveryResult,
   RuntimeVariableDeclarationInput,
 } from '@formcrash/contracts';
 
@@ -42,8 +43,15 @@ import {
   startAuthenticationCapture,
   testAuthentication,
 } from '../api/external-experiments';
+import {
+  initialCandidateIndex,
+  matcherForCandidate,
+  selectionProvenance,
+} from '../models/request-selection';
 import { ExternalRunResult } from './external-run-result';
 import { GuidedTestPanel } from './guided-test-panel';
+
+const noCandidates: readonly RankedRequestCandidate[] = [];
 
 interface Props {
   readonly project: Project;
@@ -83,8 +91,8 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
   const [triggerCount, setTriggerCount] = useState<2 | 3>(2);
   const [intervalMs, setIntervalMs] = useState<0 | 100 | 300>(0);
   const [continueAfterTarget, setContinueAfterTarget] = useState(false);
-  const [candidates, setCandidates] = useState<readonly DiscoveredRequest[]>(
-    [],
+  const [discovery, setDiscovery] = useState<RequestDiscoveryResult | null>(
+    null,
   );
   const [candidateIndex, setCandidateIndex] = useState(-1);
   const [assertionDrafts, setAssertionDrafts] = useState<
@@ -117,6 +125,7 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
   const networkAssertionSelected = assertionDrafts.some((draft) =>
     draft.type.startsWith('network_'),
   );
+  const candidates = discovery?.candidates ?? noCandidates;
   const selectedNetworkCandidate = candidates[candidateIndex] ?? null;
   const networkMatcherMissing =
     networkAssertionSelected && selectedNetworkCandidate === null;
@@ -163,7 +172,7 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
     if (!journey.steps.some((step) => step.id === targetStepId)) {
       setTargetStepId(first?.id ?? '');
     }
-    setCandidates([]);
+    setDiscovery(null);
     setCandidateIndex(-1);
     void refreshExperiments(journey.id);
   }, [journey, targetStepId]);
@@ -254,8 +263,8 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
         runtimeValues,
         project.environment !== 'production' || productionConfirmed,
       );
-      setCandidates(discovered.candidates);
-      setCandidateIndex(discovered.candidates.length === 0 ? -1 : 0);
+      setDiscovery(discovered);
+      setCandidateIndex(initialCandidateIndex(discovered));
     } catch (reason: unknown) {
       setError(messageOf(reason));
     } finally {
@@ -286,15 +295,13 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
         triggerCount,
         intervalMs,
         networkMatcher:
-          candidate === null
-            ? null
-            : {
-                method: candidate.method,
-                pathname: candidate.pathname,
-                host: new URL(candidate.origin).host,
-              },
+          candidate === null ? null : matcherForCandidate(candidate),
         assertions,
         continueAfterTarget,
+        requestSelectionProvenance:
+          candidate === null || discovery === null
+            ? null
+            : selectionProvenance(discovery, candidate),
       };
       await createExternalExperiment(journey.id, input);
       await refreshExperiments(journey.id);
@@ -811,17 +818,38 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
                       : 'No matcher'}
                   </option>
                   {candidates.map((candidate, index) => (
-                    <option
-                      key={`${candidate.method}-${candidate.origin}-${candidate.pathname}-${index}`}
-                      value={index}
-                    >
+                    <option key={candidate.candidateId} value={index}>
                       {candidate.method} {candidate.pathname} —{' '}
                       {candidate.status ?? 'no status'} ·{' '}
-                      {candidate.occurrences}x
+                      {candidate.occurrences}x · score {candidate.score}
                     </option>
                   ))}
                 </select>
               </label>
+              {discovery !== null ? (
+                <p className="technical-note">
+                  {discovery.recommendation.explanation}
+                </p>
+              ) : null}
+              {selectedNetworkCandidate !== null ? (
+                <div className="technical-note">
+                  <strong>
+                    Rank {selectedNetworkCandidate.rank} ·{' '}
+                    {selectedNetworkCandidate.classification.replaceAll(
+                      '_',
+                      ' ',
+                    )}{' '}
+                    · {selectedNetworkCandidate.confidence}
+                  </strong>
+                  <ul>
+                    {selectedNetworkCandidate.reasons.map((reason) => (
+                      <li key={reason.code}>
+                        {reason.label} ({formatScoreImpact(reason.scoreImpact)})
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
               {networkMatcherMissing ? (
                 <p className="recording-warning">
                   Network assertions cannot run without a matcher. Discover
@@ -1360,6 +1388,9 @@ function updateVariable(
       itemIndex === index ? { ...variable, ...patch } : variable,
     ),
   }));
+}
+function formatScoreImpact(value: number): string {
+  return value > 0 ? `+${value}` : String(value);
 }
 function messageOf(reason: unknown): string {
   return reason instanceof Error
