@@ -6,6 +6,8 @@ import {
   externalExperimentListSchema,
   externalExperimentVersionSchema,
   externalRunDetailSchema,
+  externalRunComparisonRequestSchema,
+  externalRunComparisonResponseSchema,
   externalRunListQuerySchema,
   externalRunListSchema,
   projectExecutionSettingsInputSchema,
@@ -32,6 +34,7 @@ import {
   InvalidTemplateError,
   MissingRuntimeVariablesError,
 } from '../../runner/external/runtime-values.js';
+import { compareExternalRuns } from '../../runner/outcomes/external-run-comparison.js';
 
 interface ProjectParams {
   readonly projectId: string;
@@ -338,6 +341,26 @@ export function registerExternalExperimentRoutes(
       return run === null ? notFound(reply, 'External run') : reply.send(run);
     },
   );
+
+  app.post('/api/external-run-comparisons', async (request, reply) => {
+    const parsed = externalRunComparisonRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return invalid(
+        reply,
+        'INVALID_EXTERNAL_RUN_COMPARISON',
+        parsed.error.issues[0]?.message,
+      );
+    }
+    const before = dependencies.experiments.getRun(parsed.data.beforeRunId);
+    if (before === null) return notFound(reply, 'Before external run');
+    const after = dependencies.experiments.getRun(parsed.data.afterRunId);
+    if (after === null) return notFound(reply, 'After external run');
+    return reply.send(
+      externalRunComparisonResponseSchema.parse(
+        compareExternalRuns(before, after),
+      ),
+    );
+  });
 
   app.delete<{ Params: RunParams }>(
     '/api/external-runs/:runId',

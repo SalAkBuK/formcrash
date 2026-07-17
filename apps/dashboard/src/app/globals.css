@@ -1564,6 +1564,294 @@ select {
   padding-top: 1.25rem;
 }
 
+.external-comparison-launch {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.external-comparison-launch > .button {
+  justify-self: start;
+}
+
+.external-comparison-picker,
+.external-comparison {
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: clamp(1rem, 2.5vw, 1.5rem);
+  background: rgb(8 12 14 / 45%);
+}
+
+.external-comparison-picker,
+.external-comparison-controls,
+.external-comparison,
+.external-comparison-section,
+.external-comparison-checks {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.external-comparison-picker h3,
+.external-comparison-picker p,
+.external-comparison-section h4,
+.external-comparison-primary h3,
+.external-comparison-primary p {
+  margin: 0;
+}
+
+.external-comparison-picker > div:first-child > p:last-child,
+.external-comparison-primary > p {
+  color: var(--muted);
+}
+
+.external-comparison-controls {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.external-comparison-controls label {
+  display: grid;
+  gap: 0.4rem;
+  color: #d9e0e2;
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.external-comparison-controls select {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  padding: 0.7rem;
+  background: #090d0f;
+  color: var(--text);
+}
+
+.external-comparison {
+  gap: 1.35rem;
+}
+
+.external-comparison-primary {
+  border-top: 3px solid var(--warning);
+  border-bottom: 1px solid var(--border);
+  padding: 1rem 0 1.2rem;
+}
+
+.comparison-protection_verified .external-comparison-primary {
+  border-top-color: var(--safe);
+}
+
+.comparison-still_failing .external-comparison-primary,
+.comparison-regressed .external-comparison-primary,
+.comparison-incompatible .external-comparison-primary {
+  border-top-color: var(--danger);
+}
+
+.external-comparison-primary h3 {
+  max-width: 48rem;
+  margin: 0.75rem 0 0.45rem;
+  font-size: clamp(1.4rem, 3vw, 2.2rem);
+  line-height: 1.12;
+}
+
+.external-comparison-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.external-comparison-status,
+.external-comparison-proof-status {
+  display: inline-block;
+  border: 1px solid currentcolor;
+  border-radius: 999px;
+  padding: 0.28rem 0.55rem;
+  color: var(--safe);
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.external-comparison-proof-status {
+  color: var(--muted);
+}
+
+.comparison-incompatible .external-comparison-status {
+  color: var(--danger);
+}
+
+.external-comparison-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.external-comparison table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.external-comparison th,
+.external-comparison td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.7rem;
+  text-align: left;
+}
+
+.external-comparison thead th {
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.external-comparison-checks > article,
+.evidence-boundaries article {
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  padding: 0.9rem;
+  background: #090d0f;
+}
+
+.external-comparison-checks > article > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.external-comparison-checks span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.external-comparison-checks dl,
+.external-comparison-configuration dl,
+.external-comparison-technical dl {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0.8rem 0 0;
+}
+
+.external-comparison-checks dl > div,
+.external-comparison-configuration dl > div,
+.external-comparison-technical dl > div {
+  display: grid;
+  grid-template-columns: 8rem minmax(0, 1fr);
+  gap: 0.7rem;
+}
+
+.external-comparison dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.external-comparison dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.external-comparison-screenshots,
+.external-comparison-screenshots > article,
+.external-comparison-screenshots > article > div {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.external-comparison-screenshots > article > div {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.external-comparison-screenshots h5,
+.external-comparison-screenshots figure {
+  margin: 0;
+}
+
+.external-comparison-screenshots figure {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+  padding: 0.55rem;
+  background: #090d0f;
+}
+
+.external-comparison-screenshots img {
+  display: block;
+  width: 100%;
+  border-radius: 0.45rem;
+}
+
+.external-comparison-screenshots figcaption {
+  padding-top: 0.45rem;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.external-comparison-screenshot-unavailable {
+  display: grid;
+  min-height: 8rem;
+  place-items: center;
+  border: 1px dashed var(--border);
+  border-radius: 0.45rem;
+  color: var(--muted);
+}
+
+.evidence-boundaries > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.evidence-boundaries h5,
+.evidence-boundaries p,
+.evidence-boundaries ul {
+  margin: 0;
+}
+
+.evidence-boundaries h5 {
+  margin-bottom: 0.55rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.evidence-boundaries ul,
+.comparison-incompatible ul {
+  display: grid;
+  gap: 0.45rem;
+  padding-left: 1.1rem;
+}
+
+.external-comparison-configuration,
+.external-comparison-technical {
+  border: 1px solid var(--border);
+  border-radius: 0.7rem;
+}
+
+.external-comparison-configuration > summary,
+.external-comparison-technical > summary {
+  cursor: pointer;
+  padding: 0.9rem;
+  font-weight: 800;
+}
+
+.external-comparison-configuration > :not(summary),
+.external-comparison-technical > :not(summary) {
+  margin-right: 0.9rem;
+  margin-left: 0.9rem;
+}
+
+.external-comparison-configuration > :last-child,
+.external-comparison-technical > :last-child {
+  margin-bottom: 0.9rem;
+}
+
+.external-comparison-configuration code {
+  overflow-wrap: anywhere;
+}
+
 .production-confirmation {
   display: flex;
   align-items: flex-start;
@@ -1740,7 +2028,10 @@ select {
 
   .external-condition-grid,
   .external-boundary-grid,
-  .external-outcome-check dl {
+  .external-outcome-check dl,
+  .external-comparison-controls,
+  .external-comparison-screenshots > article > div,
+  .evidence-boundaries > div {
     grid-template-columns: 1fr;
   }
 
@@ -1752,6 +2043,13 @@ select {
   }
 
   .external-technical-list > div {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+
+  .external-comparison-checks dl > div,
+  .external-comparison-configuration dl > div,
+  .external-comparison-technical dl > div {
     grid-template-columns: 1fr;
     gap: 0.2rem;
   }

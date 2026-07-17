@@ -109,6 +109,9 @@ interface RunSummaryRow {
   readonly projectId: string;
   readonly journeyId: string;
   readonly status: string;
+  readonly lifecycleStatus: string;
+  readonly outcomeAggregate: string;
+  readonly assertionAggregate: string;
   readonly startedAt: string;
   readonly completedAt: string | null;
   readonly durationMs: number | null;
@@ -715,7 +718,10 @@ export class ExternalExperimentRepository {
           `SELECT r.id,
                   r.experiment_version_id AS experimentVersionId,
                   r.project_id AS projectId, r.journey_id AS journeyId,
-                  r.status, r.started_at AS startedAt,
+                  r.status, r.lifecycle_status AS lifecycleStatus,
+                  r.outcome_aggregate AS outcomeAggregate,
+                  r.assertion_aggregate AS assertionAggregate,
+                  r.started_at AS startedAt,
                   r.completed_at AS completedAt, r.duration_ms AS durationMs,
                   r.project_name AS projectName, r.journey_name AS journeyName,
                   r.experiment_name AS experimentName,
@@ -920,6 +926,9 @@ function mapRunSummary(row: RunSummaryRow): ExternalRunSummary {
     projectId: row.projectId,
     journeyId: row.journeyId,
     status: row.status,
+    lifecycleStatus: row.lifecycleStatus,
+    outcomeAggregate: row.outcomeAggregate,
+    assertionAggregate: row.assertionAggregate,
     startedAt: row.startedAt,
     completedAt: row.completedAt,
     durationMs: row.durationMs,
