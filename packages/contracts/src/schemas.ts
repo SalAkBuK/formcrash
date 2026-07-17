@@ -244,6 +244,14 @@ export const generatedValueBindingSchema = z.object({
   label: z.string().min(1).max(120),
 });
 
+export const generatedBaselineInputSchema = z.object({
+  stepId: z.string().min(1),
+  stepName: z.string().min(1).max(160),
+  expression: generatedValueExpressionSchema,
+  template: generatedValueBindingSchema.shape.template,
+  label: generatedValueBindingSchema.shape.label,
+});
+
 export const outcomeElementFingerprintSchema = z.object({
   tagName: z.string().min(1).max(80),
   dataFormcrash: z.string().max(160).nullable(),
@@ -294,6 +302,7 @@ export const outcomeCaptureSessionSchema = z.object({
   id: z.string().min(1),
   journeyId: z.string().min(1),
   criticalActionId: z.string().min(1),
+  generatedInputs: z.array(generatedBaselineInputSchema).max(20),
   status: outcomeCaptureStatusSchema,
   selectedTarget: capturedOutcomeTargetSchema.nullable(),
   selectionWarnings: z.array(outcomeCaptureWarningSchema).max(10),
@@ -302,6 +311,10 @@ export const outcomeCaptureSessionSchema = z.object({
   startedAt: z.iso.datetime({ offset: true }),
   expiresAt: z.iso.datetime({ offset: true }),
   completedAt: z.iso.datetime({ offset: true }).nullable(),
+});
+
+export const outcomeCaptureResponseSchema = z.object({
+  capture: outcomeCaptureSessionSchema.nullable(),
 });
 
 export const startOutcomeCaptureRequestSchema = z.object({
@@ -1379,6 +1392,9 @@ export type GeneratedValueExpression = z.infer<
   typeof generatedValueExpressionSchema
 >;
 export type GeneratedValueBinding = z.infer<typeof generatedValueBindingSchema>;
+export type GeneratedBaselineInput = z.infer<
+  typeof generatedBaselineInputSchema
+>;
 export type OutcomeElementFingerprint = z.infer<
   typeof outcomeElementFingerprintSchema
 >;
@@ -1389,6 +1405,9 @@ export type OutcomeCaptureWarning = z.infer<typeof outcomeCaptureWarningSchema>;
 export type CapturedOutcomeTarget = z.infer<typeof capturedOutcomeTargetSchema>;
 export type OutcomeCaptureStatus = z.infer<typeof outcomeCaptureStatusSchema>;
 export type OutcomeCaptureSession = z.infer<typeof outcomeCaptureSessionSchema>;
+export type OutcomeCaptureResponse = z.infer<
+  typeof outcomeCaptureResponseSchema
+>;
 export type StartOutcomeCaptureRequest = z.infer<
   typeof startOutcomeCaptureRequestSchema
 >;

@@ -11,9 +11,11 @@ const mocks = vi.hoisted(() => ({
   closeOutcomeCapture: vi.fn(),
   confirmAuthenticationCapture: vi.fn(),
   createProject: vi.fn(),
+  deleteOutcomeCheck: vi.fn(),
   deleteJourney: vi.fn(),
   deleteProject: vi.fn(),
   getCriticalAction: vi.fn(),
+  getActiveOutcomeCapture: vi.fn(),
   getOutcomeCapture: vi.fn(),
   getProjectSettings: vi.fn(),
   listExternalExperiments: vi.fn(),
@@ -133,7 +135,9 @@ beforeEach(() => {
   });
   mocks.listProjects.mockResolvedValue([project]);
   mocks.getCriticalAction.mockResolvedValue(null);
+  mocks.getActiveOutcomeCapture.mockResolvedValue(null);
   mocks.listOutcomeChecks.mockResolvedValue([]);
+  mocks.deleteOutcomeCheck.mockResolvedValue(undefined);
   mocks.deleteProject.mockResolvedValue(undefined);
   mocks.listJourneys.mockResolvedValue([]);
   mocks.startRecording.mockResolvedValue(recording);
@@ -336,6 +340,62 @@ describe('external project journey workflow', () => {
     ).toBeVisible();
   });
 
+  it('recovers an open baseline capture after dashboard refresh', async () => {
+    const user = userEvent.setup();
+    const submitStep = {
+      ...step,
+      id: 'submit-profile',
+      name: 'Save profile',
+      type: 'submit' as const,
+      locator: { strategy: 'data-testid' as const, value: 'profile-form' },
+      value: null,
+    };
+    const outcomeJourney = { ...journey, steps: [step, submitStep] };
+    const action = {
+      id: 'critical-action-1',
+      journeyId: journey.id,
+      stepId: submitStep.id,
+      label: 'Save profile',
+      createdAt: '2026-07-17T00:00:00.000Z',
+      updatedAt: '2026-07-17T00:00:00.000Z',
+    };
+    mocks.listJourneys.mockResolvedValue([outcomeJourney]);
+    mocks.getCriticalAction.mockResolvedValue(action);
+    mocks.getActiveOutcomeCapture.mockResolvedValue({
+      id: 'outcome-capture-1',
+      journeyId: journey.id,
+      criticalActionId: action.id,
+      generatedInputs: [
+        {
+          stepId: step.id,
+          stepName: step.name,
+          expression: 'unique.name',
+          template: '{{unique.name}}',
+          label: 'Generated unique name',
+        },
+      ],
+      status: 'awaiting_selection',
+      selectedTarget: null,
+      selectionWarnings: [],
+      finalPathname: '/complete',
+      errorMessage: null,
+      startedAt: '2026-07-17T00:01:00.000Z',
+      expiresAt: '2026-07-17T00:11:00.000Z',
+      completedAt: null,
+    });
+
+    render(<ProjectJourneyDashboard />);
+    await user.click(
+      await screen.findByText('Define Critical Action and Outcome Checks'),
+    );
+
+    expect(await screen.findByText('awaiting_selection')).toBeVisible();
+    expect(screen.getByText(/Chromium is waiting/u)).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Start outcome baseline' }),
+    ).toBeDisabled();
+  });
+
   it('approves a Critical Action and saves a generated exactly-once Outcome Check', async () => {
     const user = userEvent.setup();
     const submitStep = {
@@ -402,6 +462,22 @@ describe('external project journey workflow', () => {
       id: 'outcome-capture-1',
       journeyId: journey.id,
       criticalActionId: action.id,
+      generatedInputs: [
+        {
+          stepId: step.id,
+          stepName: step.name,
+          expression: 'unique.name' as const,
+          template: '{{unique.name}}',
+          label: 'Generated unique name',
+        },
+        {
+          stepId: 'fill-email',
+          stepName: 'Fill unique email',
+          expression: 'unique.email' as const,
+          template: '{{unique.email}}',
+          label: 'Generated unique email',
+        },
+      ],
       status: 'selection_ready' as const,
       selectedTarget: target,
       selectionWarnings: [],
@@ -426,11 +502,22 @@ describe('external project journey workflow', () => {
     mocks.startOutcomeCapture.mockResolvedValue(capture);
     mocks.getOutcomeCapture.mockResolvedValue(capture);
     mocks.approveOutcomeCheck.mockResolvedValue(savedCheck);
+    mocks.closeOutcomeCapture.mockResolvedValue({
+      ...capture,
+      status: 'completed',
+      completedAt: '2026-07-17T00:03:00.000Z',
+    });
 
     render(<ProjectJourneyDashboard />);
     await user.click(
       await screen.findByText('Define Critical Action and Outcome Checks'),
     );
+    expect(
+      screen.getByText(/send state-changing requests and create test data/u),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/controlled non-production environment/u),
+    ).toBeVisible();
     await user.click(
       screen.getByRole('button', { name: 'Approve Critical Action' }),
     );
@@ -444,6 +531,10 @@ describe('external project journey workflow', () => {
       screen.getByRole('button', { name: 'Start outcome baseline' }),
     );
     expect(await screen.findByText('Profile {{unique.email}}')).toBeVisible();
+    expect(screen.getByText('Fill unique email')).toBeVisible();
+    expect(
+      screen.getByText(/resolved run-specific literal.*not persisted/u),
+    ).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Approve check' }));
 
     expect(mocks.approveOutcomeCheck).toHaveBeenCalledWith(capture.id, {
@@ -452,7 +543,20 @@ describe('external project journey workflow', () => {
       bindingExpression: 'unique.email',
     });
     expect(
-      await screen.findByText('matching item appears exactly once'),
+      await screen.findByText(
+        'Exactly one result matching {{unique.email}} should appear.',
+      ),
     ).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: 'Finish capture' }));
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await user.click(
+      screen.getByRole('button', { name: 'Remove and recapture' }),
+    );
+    expect(mocks.deleteOutcomeCheck).toHaveBeenCalledWith(
+      journey.id,
+      savedCheck.id,
+    );
+    expect(screen.getByText('No Outcome Checks saved yet.')).toBeVisible();
   });
 });

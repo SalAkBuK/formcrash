@@ -94,6 +94,7 @@ export interface ReplayBrowserSession {
   enterOutcomeSelection?(
     onSelection: (selection: OutcomeElementSelection) => void,
   ): Promise<void>;
+  onClosed?(callback: () => void): void;
   currentUrl(): string;
   settle(milliseconds: number): Promise<void>;
   close(): Promise<void>;
@@ -152,6 +153,8 @@ class PlaywrightExternalSession
   private requestSequence = 0;
   private screenshotMasks: readonly ReplayLocator[] = [];
   private outcomeSelectionActive = false;
+  private closeNotified = false;
+  private readonly closeListeners = new Set<() => void>();
 
   constructor(
     private readonly browser: Browser,
@@ -161,6 +164,9 @@ class PlaywrightExternalSession
   ) {
     page.setDefaultTimeout(timeoutMs);
     page.setDefaultNavigationTimeout(timeoutMs);
+    page.on('close', () => this.notifyClosed());
+    context.on('close', () => this.notifyClosed());
+    browser.on('disconnected', () => this.notifyClosed());
     page.on('request', (request) => {
       this.requestSequence += 1;
       const requestId = `request-${String(this.requestSequence).padStart(4, '0')}`;
@@ -433,6 +439,11 @@ class PlaywrightExternalSession
     );
   }
 
+  onClosed(callback: () => void): void {
+    this.closeListeners.add(callback);
+    if (this.closeNotified) callback();
+  }
+
   currentUrl(): string {
     return this.page.url();
   }
@@ -467,6 +478,12 @@ class PlaywrightExternalSession
         'The browser context could not be closed.',
       );
     }
+  }
+
+  private notifyClosed(): void {
+    if (this.closeNotified) return;
+    this.closeNotified = true;
+    for (const listener of this.closeListeners) listener();
   }
 
   private async handleOutcomeSelection(

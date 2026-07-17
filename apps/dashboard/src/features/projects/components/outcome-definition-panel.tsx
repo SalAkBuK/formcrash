@@ -9,6 +9,7 @@ import type {
   OutcomeCheck,
   OutcomeCheckType,
   PersistedJourney,
+  ProjectEnvironment,
   ReplayLocator,
 } from '@formcrash/contracts';
 
@@ -16,6 +17,8 @@ import {
   approveCriticalAction,
   approveOutcomeCheck,
   closeOutcomeCapture,
+  deleteOutcomeCheck,
+  getActiveOutcomeCapture,
   getCriticalAction,
   getOutcomeCapture,
   listOutcomeChecks,
@@ -26,11 +29,13 @@ export function OutcomeDefinitionPanel({
   journey,
   runtimeValues,
   confirmProduction,
+  environment,
   disabled,
 }: {
   readonly journey: PersistedJourney;
   readonly runtimeValues: EphemeralRuntimeValues;
   readonly confirmProduction: boolean;
+  readonly environment: ProjectEnvironment;
   readonly disabled: boolean;
 }) {
   const compatibleSteps = useMemo(
@@ -65,10 +70,15 @@ export function OutcomeDefinitionPanel({
     void Promise.all([
       getCriticalAction(journey.id),
       listOutcomeChecks(journey.id),
+      getActiveOutcomeCapture(journey.id),
     ])
-      .then(([action, savedChecks]) => {
+      .then(([action, savedChecks, activeCapture]) => {
         setCriticalAction(action);
         setChecks(savedChecks);
+        setCapture(activeCapture);
+        setBindingExpression(
+          activeCapture?.selectedTarget?.generatedBindings[0]?.expression ?? '',
+        );
         if (action !== null) {
           setStepId(action.stepId);
           setActionLabel(action.label);
@@ -170,7 +180,30 @@ export function OutcomeDefinitionPanel({
     }
   }
 
+  async function removeCheck(check: OutcomeCheck): Promise<void> {
+    if (
+      !window.confirm(
+        `Remove this saved Outcome Check? The saved definition will be deleted so you can recapture it. Historical immutable snapshots, when present, are not edited.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(`delete-check-${check.id}`);
+    setError(null);
+    try {
+      await deleteOutcomeCheck(journey.id, check.id);
+      setChecks((current) => current.filter((item) => item.id !== check.id));
+    } catch (reason: unknown) {
+      setError(messageOf(reason));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const target = capture?.selectedTarget ?? null;
+  const captureActive =
+    capture !== null &&
+    !['completed', 'expired', 'runner_error'].includes(capture.status);
   const requiresTarget = checkType !== 'final_pathname_matches';
   const requiresBinding = checkType === 'matching_item_appears_exactly_once';
 
@@ -241,18 +274,33 @@ export function OutcomeDefinitionPanel({
               Approved: {criticalAction.label}
             </p>
           )}
+          {checks.length > 0 ? (
+            <p className="technical-note">
+              To choose a different Critical Action, explicitly remove every
+              current Outcome Check below, approve the new action, then start a
+              fresh baseline capture.
+            </p>
+          ) : null}
         </div>
 
         <div className="outcome-definition-step">
           <p className="eyebrow">Successful baseline</p>
           <p>
-            FormCrash replays the journey once with generated safe identity
-            values, keeps Chromium open, and enters element-selection mode.
+            This executes the real saved journey against the {environment}{' '}
+            target. It can send state-changing requests and create test data.
+            Use a controlled non-production environment whenever possible.
+            Existing preparation, authentication, production confirmation, and
+            cleanup settings apply to this replay.
           </p>
           <div className="guided-action-row">
             <button
               className="button button-primary button-compact"
-              disabled={busy !== null || disabled || criticalAction === null}
+              disabled={
+                busy !== null ||
+                disabled ||
+                criticalAction === null ||
+                captureActive
+              }
               onClick={() => void beginCapture()}
               type="button"
             >
@@ -273,6 +321,10 @@ export function OutcomeDefinitionPanel({
               {warning.message}
             </p>
           ))}
+          {capture?.errorMessage === null ||
+          capture?.errorMessage === undefined ? null : (
+            <p className="recording-warning">{capture.errorMessage}</p>
+          )}
         </div>
 
         {capture === null ||
@@ -333,21 +385,48 @@ export function OutcomeDefinitionPanel({
             )}
 
             {requiresBinding && target !== null ? (
-              <label>
-                Generated identity binding
-                <select
-                  aria-label={`${journey.name} generated identity binding`}
-                  value={bindingExpression}
-                  onChange={(event) => setBindingExpression(event.target.value)}
-                >
-                  <option value="">Select a generated value</option>
-                  {target.generatedBindings.map((binding) => (
-                    <option key={binding.expression} value={binding.expression}>
-                      {binding.label} ({binding.template})
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div>
+                <label>
+                  Generated identity binding
+                  <select
+                    aria-label={`${journey.name} generated identity binding`}
+                    value={bindingExpression}
+                    onChange={(event) =>
+                      setBindingExpression(event.target.value)
+                    }
+                  >
+                    <option value="">Select a generated value</option>
+                    {target.generatedBindings.map((binding) => (
+                      <option
+                        key={binding.expression}
+                        value={binding.expression}
+                      >
+                        {binding.label} ({binding.template})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {capture.generatedInputs.map((input) => (
+                  <p className="technical-note" key={input.stepId}>
+                    Journey input <strong>{input.stepName}</strong> was replaced
+                    by <code>{input.template}</code> for this baseline.
+                  </p>
+                ))}
+                {bindingExpression === '' ? null : (
+                  <p className="guided-ready-note">
+                    The selected target is bound to{' '}
+                    <code>
+                      {
+                        target.generatedBindings.find(
+                          (item) => item.expression === bindingExpression,
+                        )?.template
+                      }
+                    </code>
+                    . The resolved run-specific literal is used only in memory
+                    and is not persisted.
+                  </p>
+                )}
+              </div>
             ) : null}
 
             <div className="guided-action-row">
@@ -386,8 +465,36 @@ export function OutcomeDefinitionPanel({
             <ul className="outcome-check-list">
               {checks.map((check) => (
                 <li key={check.id}>
-                  <strong>{check.description}</strong>
-                  <span>{check.type.replaceAll('_', ' ')}</span>
+                  <strong>{readableOutcome(check)}</strong>
+                  <span>{check.description}</span>
+                  <details>
+                    <summary>Technical details</summary>
+                    <p>
+                      {check.type.replaceAll('_', ' ')} - journey version{' '}
+                      {journey.version} - {journey.id}
+                    </p>
+                    {'binding' in check ? (
+                      <p>
+                        Binding: <code>{check.binding.template}</code>
+                      </p>
+                    ) : null}
+                    {'target' in check ? (
+                      <p>
+                        Locator:{' '}
+                        <code>{formatLocator(check.target.locator)}</code>
+                      </p>
+                    ) : null}
+                  </details>
+                  <button
+                    className="button button-secondary button-compact"
+                    disabled={busy !== null || captureActive}
+                    onClick={() => void removeCheck(check)}
+                    type="button"
+                  >
+                    {busy === `delete-check-${check.id}`
+                      ? 'Removing...'
+                      : 'Remove and recapture'}
+                  </button>
                 </li>
               ))}
             </ul>
@@ -396,6 +503,16 @@ export function OutcomeDefinitionPanel({
       </div>
     </details>
   );
+}
+
+function readableOutcome(check: OutcomeCheck): string {
+  if (check.type === 'matching_item_appears_exactly_once') {
+    return `Exactly one result matching ${check.binding.template} should appear.`;
+  }
+  if (check.type === 'final_pathname_matches') {
+    return `The journey should finish at ${check.expectedPathname}.`;
+  }
+  return `The selected result element should be visible.`;
 }
 
 function approvalInput(

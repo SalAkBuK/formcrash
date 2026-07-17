@@ -183,6 +183,16 @@ export class OutcomeCheckRepository {
       ),
     }).items;
   }
+
+  deleteOutcomeCheck(
+    journeyId: string,
+    outcomeCheckId: string,
+  ): 'deleted' | 'not_found' {
+    const result = this.database
+      .prepare('DELETE FROM outcome_checks WHERE id = ? AND journey_id = ?')
+      .run(outcomeCheckId, journeyId);
+    return result.changes === 0 ? 'not_found' : 'deleted';
+  }
 }
 
 function definitionOf(check: OutcomeCheck): object {

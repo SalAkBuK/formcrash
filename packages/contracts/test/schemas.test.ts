@@ -10,6 +10,7 @@ import {
   experimentTypeSchema,
   journeyActionTypeSchema,
   outcomeCheckSchema,
+  outcomeCaptureResponseSchema,
   requestDiscoveryResultSchema,
   runArtifactSchema,
   runEventEnvelopeSchema,
@@ -392,6 +393,37 @@ describe('foundational contracts', () => {
         expectedPathname: '/tenants',
       }).type,
     ).toBe('final_pathname_matches');
+  });
+
+  it('exposes server-owned generated input provenance on capture retrieval', () => {
+    const response = outcomeCaptureResponseSchema.parse({
+      capture: {
+        id: 'capture-1',
+        journeyId: 'journey-version-1',
+        criticalActionId: 'critical-action-1',
+        generatedInputs: [
+          {
+            stepId: 'fill-email',
+            stepName: 'Fill tenant email',
+            expression: 'unique.email',
+            template: '{{unique.email}}',
+            label: 'Generated unique email',
+          },
+        ],
+        status: 'awaiting_selection',
+        selectedTarget: null,
+        selectionWarnings: [],
+        finalPathname: '/tenants',
+        errorMessage: null,
+        startedAt: '2026-07-17T00:00:00.000Z',
+        expiresAt: '2026-07-17T00:10:00.000Z',
+        completedAt: null,
+      },
+    });
+
+    expect(response.capture?.generatedInputs[0]?.template).toBe(
+      '{{unique.email}}',
+    );
   });
 
   it('rejects an unsupported Outcome Check type and malformed binding', () => {

@@ -7,6 +7,7 @@ import {
   deleteResourceResponseSchema,
   journeyListSchema,
   outcomeCaptureSessionSchema,
+  outcomeCaptureResponseSchema,
   outcomeCheckListSchema,
   outcomeCheckSchema,
   projectListSchema,
@@ -57,6 +58,10 @@ interface JourneyParams {
 
 interface OutcomeCaptureParams {
   readonly captureId: string;
+}
+
+interface OutcomeCheckParams extends JourneyParams {
+  readonly outcomeCheckId: string;
 }
 
 export function registerProjectRoutes(
@@ -303,6 +308,41 @@ export function registerProjectRoutes(
       return reply.send(
         outcomeCheckListSchema.parse({
           items: outcome.repository.listOutcomeChecks(request.params.journeyId),
+        }),
+      );
+    },
+  );
+
+  app.delete<{ Params: OutcomeCheckParams }>(
+    '/api/journeys/:journeyId/outcome-checks/:outcomeCheckId',
+    async (request, reply) => {
+      if (repository.getJourney(request.params.journeyId) === null) {
+        return notFound(reply, 'Journey');
+      }
+      const result = outcome.repository.deleteOutcomeCheck(
+        request.params.journeyId,
+        request.params.outcomeCheckId,
+      );
+      if (result === 'not_found') return notFound(reply, 'Outcome Check');
+      return reply.send(
+        deleteResourceResponseSchema.parse({
+          deletedId: request.params.outcomeCheckId,
+        }),
+      );
+    },
+  );
+
+  app.get<{ Params: JourneyParams }>(
+    '/api/journeys/:journeyId/outcome-capture',
+    async (request, reply) => {
+      if (repository.getJourney(request.params.journeyId) === null) {
+        return notFound(reply, 'Journey');
+      }
+      return reply.send(
+        outcomeCaptureResponseSchema.parse({
+          capture: await outcome.captures.getForJourney(
+            request.params.journeyId,
+          ),
         }),
       );
     },

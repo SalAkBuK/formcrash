@@ -43,7 +43,7 @@ import {
   type OutcomeElementSelection,
   type ReplayBrowserSession,
 } from '../recording/external-browser.js';
-import { createBaselineJourney } from './baseline-journey.js';
+import { createOutcomeBaseline } from './baseline-journey.js';
 
 const DEFAULT_CAPTURE_TTL_MS = 10 * 60 * 1_000;
 
@@ -109,7 +109,8 @@ export class OutcomeCaptureManager {
       confirmProduction,
       'Outcome baseline replay',
     );
-    const baselineJourney = createBaselineJourney(journey);
+    const baseline = createOutcomeBaseline(journey);
+    const baselineJourney = baseline.journey;
     const storedSettings = this.settings.get(project.id);
     const id = randomUUID();
     const startedAtMs = this.now();
@@ -124,6 +125,7 @@ export class OutcomeCaptureManager {
       id,
       journeyId,
       criticalActionId: criticalAction.id,
+      generatedInputs: baseline.generatedInputs,
       status: 'launching',
       selectedTarget: null,
       selectionWarnings: [],
@@ -180,6 +182,9 @@ export class OutcomeCaptureManager {
                 runtime.context,
               ),
       };
+      browser.onClosed?.(() => {
+        void this.handleBrowserClosed(id);
+      });
       this.update(id, { status: 'replaying' });
       await browser.navigate(project.targetUrl);
       if (storageStatePath !== null) {
@@ -228,6 +233,15 @@ export class OutcomeCaptureManager {
       await this.expire(id);
     }
     return this.sessions.get(id) ?? null;
+  }
+
+  async getForJourney(
+    journeyId: string,
+  ): Promise<OutcomeCaptureSession | null> {
+    const id = this.active?.id;
+    if (id === undefined) return null;
+    const capture = await this.get(id);
+    return capture?.journeyId === journeyId ? capture : null;
   }
 
   async approve(
@@ -349,6 +363,7 @@ export class OutcomeCaptureManager {
     release: (() => void) | null = this.active?.release ?? null,
   ): Promise<void> {
     const active = this.active?.id === id ? this.active : null;
+    if (active !== null) this.active = null;
     await browser?.close().catch(() => undefined);
     if (active?.afterRunHook !== null && active?.afterRunHook !== undefined) {
       await executeHttpHook('after', active.afterRunHook, active.events).catch(
@@ -356,12 +371,19 @@ export class OutcomeCaptureManager {
       );
     }
     (active?.release ?? release)?.();
-    if (active !== null) this.active = null;
     this.update(id, {
       status: 'runner_error',
       errorMessage: message.slice(0, 1_000),
       completedAt: new Date(this.now()).toISOString(),
     });
+  }
+
+  private async handleBrowserClosed(id: string): Promise<void> {
+    if (this.active?.id !== id) return;
+    await this.failAndClose(
+      id,
+      'Chromium was closed before the Outcome Check capture finished. Start a new baseline replay.',
+    );
   }
 
   private async finish(
@@ -407,6 +429,7 @@ export class OutcomeCaptureManager {
       id: current.id,
       journeyId: current.journeyId,
       criticalActionId: current.criticalActionId,
+      generatedInputs: current.generatedInputs,
       startedAt: current.startedAt,
       expiresAt: current.expiresAt,
     });

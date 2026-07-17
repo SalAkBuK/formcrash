@@ -992,6 +992,7 @@ export function ProjectJourneyDashboard() {
                                 ).trim() === '',
                             )
                           }
+                          environment={selected.environment}
                           journey={journey}
                           runtimeValues={nonEmptyValues(
                             replayValues[journey.id] ?? {},

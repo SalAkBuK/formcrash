@@ -5,6 +5,7 @@ import {
   deleteResourceResponseSchema,
   journeyListSchema,
   outcomeCaptureSessionSchema,
+  outcomeCaptureResponseSchema,
   outcomeCheckListSchema,
   outcomeCheckSchema,
   persistedJourneySchema,
@@ -166,6 +167,28 @@ export async function listOutcomeChecks(
       outcomeCheckListSchema,
     )
   ).items;
+}
+
+export async function deleteOutcomeCheck(
+  journeyId: string,
+  outcomeCheckId: string,
+): Promise<void> {
+  await requestJson(
+    `/api/journeys/${journeyId}/outcome-checks/${outcomeCheckId}`,
+    deleteResourceResponseSchema,
+    { method: 'DELETE' },
+  );
+}
+
+export async function getActiveOutcomeCapture(
+  journeyId: string,
+): Promise<OutcomeCaptureSession | null> {
+  return (
+    await requestJson(
+      `/api/journeys/${journeyId}/outcome-capture`,
+      outcomeCaptureResponseSchema,
+    )
+  ).capture;
 }
 
 export async function startOutcomeCapture(

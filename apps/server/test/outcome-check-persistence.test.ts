@@ -54,6 +54,81 @@ describe('Critical Action and Outcome Check persistence', () => {
     ).toThrow(/owned by this journey version/u);
   });
 
+  it('does not inherit definitions into a newly saved version and rejects cross-version actions', () => {
+    const setup = createSetup();
+    const action = setup.outcomes.approveCriticalAction(setup.journey, {
+      stepId: 'submit-tenant',
+      label: 'Submit Tenant',
+    });
+    const target = capturedTarget();
+    setup.outcomes.saveOutcomeCheck({
+      journeyId: setup.journey.id,
+      criticalActionId: action.id,
+      type: 'visible_element_exists',
+      description: 'A tenant row appears.',
+      target,
+    });
+    const nextVersion = setup.projects.saveJourney({
+      projectId: setup.journey.projectId,
+      name: setup.journey.name,
+      steps: setup.journey.steps,
+      metadata: setup.journey.recordingMetadata,
+    });
+
+    expect(nextVersion.version).toBe(setup.journey.version + 1);
+    expect(setup.outcomes.getCriticalAction(nextVersion.id)).toBeNull();
+    expect(setup.outcomes.listOutcomeChecks(nextVersion.id)).toEqual([]);
+    expect(() =>
+      setup.outcomes.saveOutcomeCheck({
+        journeyId: nextVersion.id,
+        criticalActionId: action.id,
+        type: 'visible_element_exists',
+        description: 'Wrong version.',
+        target,
+      }),
+    ).toThrow(/this journey version/u);
+  });
+
+  it('enforces immutable journey versions and matching action ownership in SQLite', () => {
+    const setup = createSetup();
+    const action = setup.outcomes.approveCriticalAction(setup.journey, {
+      stepId: 'submit-tenant',
+      label: 'Submit Tenant',
+    });
+    const nextVersion = setup.projects.saveJourney({
+      projectId: setup.journey.projectId,
+      name: setup.journey.name,
+      steps: setup.journey.steps,
+      metadata: setup.journey.recordingMetadata,
+    });
+
+    expect(() =>
+      database!.connection
+        .prepare('UPDATE journeys SET name = ? WHERE id = ?')
+        .run('Changed later', setup.journey.id),
+    ).toThrow(/journey versions are immutable/u);
+    expect(() =>
+      database!.connection
+        .prepare(
+          `INSERT INTO outcome_checks
+            (id, journey_id, critical_action_id, outcome_type,
+             definition_json, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          'cross-version-check',
+          nextVersion.id,
+          action.id,
+          'final_pathname_matches',
+          JSON.stringify({
+            description: 'Wrong version.',
+            expectedPathname: '/tenants',
+          }),
+          new Date().toISOString(),
+        ),
+    ).toThrow(/belongs to another journey version/u);
+  });
+
   it('rejects non-click and non-submit Critical Actions', () => {
     const setup = createSetup();
     expect(() =>
@@ -134,6 +209,34 @@ describe('Critical Action and Outcome Check persistence', () => {
         label: 'Open tenants',
       }),
     ).toThrow(CriticalActionLockedError);
+  });
+
+  it('deletes a current check before allowing Critical Action replacement', () => {
+    const setup = createSetup();
+    const action = setup.outcomes.approveCriticalAction(setup.journey, {
+      stepId: 'submit-tenant',
+      label: 'Submit Tenant',
+    });
+    const check = setup.outcomes.saveOutcomeCheck({
+      journeyId: setup.journey.id,
+      criticalActionId: action.id,
+      type: 'final_pathname_matches',
+      description: 'The final pathname remains stable.',
+      expectedPathname: '/tenants',
+    });
+
+    expect(setup.outcomes.deleteOutcomeCheck(setup.journey.id, check.id)).toBe(
+      'deleted',
+    );
+    expect(
+      setup.outcomes.approveCriticalAction(setup.journey, {
+        stepId: 'open-tenants',
+        label: 'Open tenants',
+      }),
+    ).toMatchObject({ stepId: 'open-tenants', journeyId: setup.journey.id });
+    expect(setup.outcomes.deleteOutcomeCheck(setup.journey.id, check.id)).toBe(
+      'not_found',
+    );
   });
 });
 

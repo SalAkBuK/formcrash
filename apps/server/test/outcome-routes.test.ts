@@ -3,11 +3,13 @@ import {
   criticalActionSchema,
   criticalActionResponseSchema,
   outcomeCheckListSchema,
+  outcomeCaptureResponseSchema,
 } from '@formcrash/contracts';
 
 import { createApp } from '../src/app/create-app.js';
 import { initializePersistence } from '../src/persistence/initialize.js';
 import { ProjectJourneyRepository } from '../src/persistence/project-journey-repository.js';
+import { OutcomeCheckRepository } from '../src/persistence/outcome-check-repository.js';
 import { createTemporaryTestConfig } from './fixtures.js';
 
 const apps: ReturnType<typeof createApp>[] = [];
@@ -52,6 +54,14 @@ describe('Outcome definition routes', () => {
       url: `/api/journeys/${seeded.journeyId}/outcome-checks`,
     });
     expect(outcomeCheckListSchema.parse(checks.json()).items).toEqual([]);
+
+    const activeCapture = await app.inject({
+      method: 'GET',
+      url: `/api/journeys/${seeded.journeyId}/outcome-capture`,
+    });
+    expect(outcomeCaptureResponseSchema.parse(activeCapture.json())).toEqual({
+      capture: null,
+    });
   });
 
   it('rejects an unsupported Critical Action step type', async () => {
@@ -70,9 +80,33 @@ describe('Outcome definition routes', () => {
       error: { code: 'INVALID_CRITICAL_ACTION' },
     });
   });
+
+  it('deletes an exact-version Outcome Check for recapture', async () => {
+    const seeded = seedJourney(true);
+    const app = createApp({ config: seeded.config, logger: false });
+    apps.push(app);
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: `/api/journeys/${seeded.journeyId}/outcome-checks/${seeded.outcomeCheckId}`,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ deletedId: seeded.outcomeCheckId });
+    expect(
+      outcomeCheckListSchema.parse(
+        (
+          await app.inject({
+            method: 'GET',
+            url: `/api/journeys/${seeded.journeyId}/outcome-checks`,
+          })
+        ).json(),
+      ).items,
+    ).toEqual([]);
+  });
 });
 
-function seedJourney() {
+function seedJourney(withOutcomeCheck = false) {
   const temporary = createTemporaryTestConfig();
   cleanups.push(temporary.cleanup);
   const database = initializePersistence(temporary.config);
@@ -116,8 +150,27 @@ function seedJourney() {
       normalizationRule: 'Route test journey.',
     },
   });
+  let outcomeCheckId: string | null = null;
+  if (withOutcomeCheck) {
+    const outcomes = new OutcomeCheckRepository(database.connection);
+    const action = outcomes.approveCriticalAction(journey, {
+      stepId: 'submit',
+      label: 'Submit Tenant',
+    });
+    outcomeCheckId = outcomes.saveOutcomeCheck({
+      journeyId: journey.id,
+      criticalActionId: action.id,
+      type: 'final_pathname_matches',
+      description: 'The final pathname matches.',
+      expectedPathname: '/complete',
+    }).id;
+  }
   database.close();
-  return { config: temporary.config, journeyId: journey.id };
+  return {
+    config: temporary.config,
+    journeyId: journey.id,
+    outcomeCheckId,
+  };
 }
 
 function fingerprint(tagName: string, id: string) {

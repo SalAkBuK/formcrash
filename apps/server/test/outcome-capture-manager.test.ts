@@ -42,6 +42,12 @@ describe('Outcome baseline capture lifecycle', () => {
     const capture = await setup.manager.start(setup.journey.id, {});
 
     expect(capture.status).toBe('awaiting_selection');
+    expect(capture.generatedInputs).toContainEqual(
+      expect.objectContaining({
+        stepId: 'email',
+        template: '{{unique.email}}',
+      }),
+    );
     expect(setup.browser.filledValues).toContainEqual(
       expect.stringMatching(/^formcrash\+[a-f0-9]{12}@example\.test$/u),
     );
@@ -201,6 +207,132 @@ describe('Outcome baseline capture lifecycle', () => {
     expect(setup.browser.closed).toBe(true);
     expect(setup.ownership.activeWorkload).toBeNull();
   });
+
+  it('recovers the active capture after dashboard refresh', async () => {
+    const setup = createSetup();
+    const capture = await setup.manager.start(setup.journey.id, {});
+
+    expect(await setup.manager.getForJourney(setup.journey.id)).toEqual(
+      capture,
+    );
+    expect(await setup.manager.getForJourney('another-journey')).toBeNull();
+    await setup.manager.close(capture.id);
+    expect(await setup.manager.getForJourney(setup.journey.id)).toBeNull();
+  });
+
+  it('reports a manually closed browser, releases ownership, and allows another operation', async () => {
+    const setup = createSetup();
+    const capture = await setup.manager.start(setup.journey.id, {});
+
+    setup.browser.simulateUserClose();
+    const failed = await waitForCaptureStatus(
+      setup.manager,
+      capture.id,
+      'runner_error',
+    );
+    expect(failed.errorMessage).toMatch(/Chromium was closed/u);
+    expect(setup.ownership.activeWorkload).toBeNull();
+    const release = setup.ownership.acquire('recording');
+    release();
+    expect(setup.ownership.activeWorkload).toBeNull();
+  });
+
+  it('closes an active capture and releases ownership during server shutdown', async () => {
+    const setup = createSetup();
+    const capture = await setup.manager.start(setup.journey.id, {});
+
+    await setup.manager.closeAll();
+
+    expect((await setup.manager.get(capture.id))?.status).toBe('completed');
+    expect(setup.browser.closed).toBe(true);
+    expect(setup.ownership.activeWorkload).toBeNull();
+  });
+
+  it('releases ownership when preparation fails before browser launch', async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(500);
+      response.end('preparation failed');
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address();
+    if (address === null || typeof address === 'string') {
+      throw new Error('Preparation failure fixture did not bind.');
+    }
+    const setup = createSetup();
+    setup.settings.save(setup.projectId, {
+      variables: [],
+      beforeRunHook: {
+        method: 'POST',
+        url: `http://127.0.0.1:${address.port}/prepare`,
+        headers: {},
+        body: null,
+        timeoutMs: 1_000,
+      },
+      afterRunHook: null,
+    });
+
+    try {
+      const capture = await setup.manager.start(setup.journey.id, {});
+      expect(capture.status).toBe('runner_error');
+      expect(setup.browserOwner.launchCalls).toBe(0);
+      expect(setup.ownership.activeWorkload).toBeNull();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('closes Chromium and releases ownership when replay fails after launch', async () => {
+    const setup = createSetup();
+    setup.browser.navigateError = new Error('fixture navigation failed');
+
+    const capture = await setup.manager.start(setup.journey.id, {});
+
+    expect(capture).toMatchObject({
+      status: 'runner_error',
+      errorMessage: 'fixture navigation failed',
+    });
+    expect(setup.browser.closed).toBe(true);
+    expect(setup.ownership.activeWorkload).toBeNull();
+  });
+
+  it('surfaces cleanup-hook failure but still releases ownership', async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(500);
+      response.end('cleanup failed');
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address();
+    if (address === null || typeof address === 'string') {
+      throw new Error('Cleanup failure fixture did not bind.');
+    }
+    const setup = createSetup();
+    setup.settings.save(setup.projectId, {
+      variables: [],
+      beforeRunHook: null,
+      afterRunHook: {
+        method: 'POST',
+        url: `http://127.0.0.1:${address.port}/cleanup`,
+        headers: {},
+        body: null,
+        timeoutMs: 1_000,
+      },
+    });
+
+    try {
+      const capture = await setup.manager.start(setup.journey.id, {});
+      const completed = await setup.manager.close(capture.id);
+      expect(completed).toMatchObject({
+        status: 'completed',
+        errorMessage:
+          'The baseline replay closed, but the configured cleanup hook failed.',
+      });
+      expect(setup.ownership.activeWorkload).toBeNull();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 });
 
 function createSetup(
@@ -275,6 +407,7 @@ function createSetup(
     label: 'Submit Tenant',
   });
   const browser = new FakeReplayBrowser();
+  const browserOwner = new FakeBrowserOwner(browser);
   const ownership = new BrowserOwnership();
   const manager = new OutcomeCaptureManager(
     temporary.config,
@@ -283,13 +416,14 @@ function createSetup(
     new AuthStateStore(temporary.config.artifactRoot, settings),
     outcomes,
     ownership,
-    new FakeBrowserOwner(browser),
+    browserOwner,
     now,
     ttlMs ?? 10 * 60 * 1_000,
   );
   return {
     manager,
     browser,
+    browserOwner,
     ownership,
     outcomes,
     journey,
@@ -299,6 +433,8 @@ function createSetup(
 }
 
 class FakeBrowserOwner implements ExternalBrowserOwner {
+  launchCalls = 0;
+
   constructor(private readonly session: FakeReplayBrowser) {}
 
   launchRecording(): Promise<RecordingBrowserSession> {
@@ -306,6 +442,7 @@ class FakeBrowserOwner implements ExternalBrowserOwner {
   }
 
   launchReplay(): Promise<ReplayBrowserSession> {
+    this.launchCalls += 1;
     return Promise.resolve(this.session);
   }
 }
@@ -313,10 +450,13 @@ class FakeBrowserOwner implements ExternalBrowserOwner {
 class FakeReplayBrowser implements ReplayBrowserSession {
   readonly filledValues: string[] = [];
   closed = false;
+  navigateError: Error | null = null;
   private selection: ((selection: OutcomeElementSelection) => void) | null =
     null;
+  private closedCallback: (() => void) | null = null;
 
   navigate(): Promise<void> {
+    if (this.navigateError !== null) return Promise.reject(this.navigateError);
     return Promise.resolve();
   }
   click(): Promise<void> {
@@ -365,6 +505,13 @@ class FakeReplayBrowser implements ReplayBrowserSession {
     this.closed = true;
     return Promise.resolve();
   }
+  onClosed(callback: () => void): void {
+    this.closedCallback = callback;
+  }
+  simulateUserClose(): void {
+    this.closed = true;
+    this.closedCallback?.();
+  }
   enterOutcomeSelection(
     onSelection: (selection: OutcomeElementSelection) => void,
   ): Promise<void> {
@@ -374,6 +521,20 @@ class FakeReplayBrowser implements ReplayBrowserSession {
   emitSelection(selection: OutcomeElementSelection): void {
     this.selection?.(selection);
   }
+}
+
+async function waitForCaptureStatus(
+  manager: OutcomeCaptureManager,
+  captureId: string,
+  status: 'runner_error',
+) {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const capture = await manager.get(captureId);
+    if (capture?.status === status) return capture;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Capture did not reach ${status}.`);
 }
 
 function stableSelection(

@@ -23,6 +23,20 @@
 > recommendations, and immutable experiment versions persist bounded generated,
 > modified, disabled, and manual assertion provenance. Historical findings below
 > about client-owned assertion generation remain unchanged as audit evidence.
+>
+> **Post-audit note, Product Chunk A:** Critical Actions and Outcome Checks are
+> now owned by an exact saved journey-version UUID. Saving another version does
+> not inherit either definition. Current Outcome Checks are immutable while
+> present, but can be explicitly removed from the saved journey version; only
+> after all current checks are removed can the Critical Action step change. A
+> replacement is created through a fresh real baseline replay and approval, not
+> general editing. Baseline capture reuses the existing environment
+> classification, production confirmation, authentication, preparation hook,
+> cleanup hook, and shared Chromium ownership gate. The dashboard warns that
+> the replay can change target state and create test data, exposes server-owned
+> generated-input/template provenance without persisting the resolved literal,
+> and can recover an active capture after a dashboard refresh. Product Chunk B
+> outcome execution has not started.
 
 ## Evidence legend
 
