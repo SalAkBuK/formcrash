@@ -138,6 +138,10 @@ describe('external runner terminal paths', () => {
       lifecycleStatus: 'runner_error',
       outcomeAggregate: 'could_not_verify',
       assertionAggregate: 'could_not_verify',
+      presentation: {
+        primaryStatus: 'runner_error',
+        headline: 'FormCrash could not complete the journey.',
+      },
       outcomeCheckResults: [
         {
           status: 'could_not_verify',

@@ -1087,6 +1087,87 @@ export const externalRunnerErrorSchema = z.object({
   missingVariables: z.array(runtimeVariableNameSchema),
 });
 
+export const externalRunPrimaryStatusSchema = z.enum([
+  'passed',
+  'failed',
+  'could_not_verify',
+  'not_configured',
+  'runner_error',
+]);
+
+export const externalRunPresentationConditionSchema = z.discriminatedUnion(
+  'kind',
+  [
+    z.object({
+      kind: z.literal('visible_match_count'),
+      count: z.number().int().nonnegative().nullable(),
+      description: z.string().min(1).max(500),
+    }),
+    z.object({
+      kind: z.literal('approved_target_visibility'),
+      visible: z.boolean().nullable(),
+      visibleMatchCount: z.number().int().nonnegative().nullable(),
+      description: z.string().min(1).max(500),
+    }),
+    z.object({
+      kind: z.literal('pathname'),
+      pathname: z.string().startsWith('/').max(2_000).nullable(),
+      description: z.string().min(1).max(2_000),
+    }),
+    z.object({
+      kind: z.literal('unavailable'),
+      description: z.string().min(1).max(1_000),
+    }),
+  ],
+);
+
+export const externalRunPresentationObservationSchema = z.object({
+  kind: z.enum(['action', 'request', 'browser']),
+  text: z.string().min(1).max(500),
+  evidenceReferences: outcomeEvidenceReferencesSchema,
+});
+
+export const externalRunProtectionSuggestionSchema = z.object({
+  area: z.enum(['frontend', 'backend']),
+  text: z.string().min(1).max(500),
+});
+
+export const externalRunCheckPresentationSchema = z.object({
+  outcomeCheckId: z.string().min(1),
+  type: outcomeCheckTypeSchema,
+  approvedDescription: z.string().min(1).max(500),
+  status: outcomeEvaluationStatusSchema,
+  headline: z.string().min(1).max(500),
+  expectedCondition: externalRunPresentationConditionSchema,
+  observedCondition: externalRunPresentationConditionSchema,
+  templateBinding: generatedValueBindingSchema.nullable(),
+  reason: z.string().min(1).max(1_000).nullable(),
+  evidenceReferences: outcomeEvidenceReferencesSchema,
+});
+
+export const externalRunResultPresentationSchema = z.object({
+  primaryStatus: externalRunPrimaryStatusSchema,
+  headline: z.string().min(1).max(500),
+  outcomeSummary: z.string().min(1).max(1_000),
+  approvedExpectedOutcomeDescription: z.string().min(1).max(500).nullable(),
+  expectedCondition: externalRunPresentationConditionSchema.nullable(),
+  observedCondition: externalRunPresentationConditionSchema.nullable(),
+  templateBinding: generatedValueBindingSchema.nullable(),
+  observations: z.array(externalRunPresentationObservationSchema).max(20),
+  conclusion: z.string().min(1).max(1_000).nullable(),
+  whyItMatters: z.string().min(1).max(1_000).nullable(),
+  unknowns: z.array(z.string().min(1).max(500)).max(20),
+  protectionSuggestions: z.array(externalRunProtectionSuggestionSchema).max(2),
+  evidenceReferences: outcomeEvidenceReferencesSchema,
+  technicalDetailsAvailable: z.object({
+    assertions: z.boolean(),
+    requests: z.boolean(),
+    events: z.boolean(),
+    screenshots: z.boolean(),
+  }),
+  checks: z.array(externalRunCheckPresentationSchema),
+});
+
 const externalRunDetailObjectSchema = z.object({
   runId: z.string().min(1),
   experimentVersionId: z.string().min(1),
@@ -1121,6 +1202,7 @@ const externalRunDetailObjectSchema = z.object({
     checks: [],
   }),
   outcomeCheckResults: z.array(externalOutcomeCheckResultSchema).default([]),
+  presentation: externalRunResultPresentationSchema,
   events: z.array(z.lazy(() => runEventEnvelopeSchema)),
   runnerError: externalRunnerErrorSchema.nullable(),
   warnings: z.array(externalRunWarningSchema),
@@ -1615,6 +1697,24 @@ export type ExternalAssertionResult = z.infer<
 >;
 export type ExternalRunWarning = z.infer<typeof externalRunWarningSchema>;
 export type ExternalRunnerError = z.infer<typeof externalRunnerErrorSchema>;
+export type ExternalRunPrimaryStatus = z.infer<
+  typeof externalRunPrimaryStatusSchema
+>;
+export type ExternalRunPresentationCondition = z.infer<
+  typeof externalRunPresentationConditionSchema
+>;
+export type ExternalRunPresentationObservation = z.infer<
+  typeof externalRunPresentationObservationSchema
+>;
+export type ExternalRunProtectionSuggestion = z.infer<
+  typeof externalRunProtectionSuggestionSchema
+>;
+export type ExternalRunCheckPresentation = z.infer<
+  typeof externalRunCheckPresentationSchema
+>;
+export type ExternalRunResultPresentation = z.infer<
+  typeof externalRunResultPresentationSchema
+>;
 export type ExternalRunDetail = z.infer<typeof externalRunDetailSchema>;
 export type ExternalRunSummary = z.infer<typeof externalRunSummarySchema>;
 export type ExternalRunListQuery = z.infer<typeof externalRunListQuerySchema>;

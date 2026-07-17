@@ -8,6 +8,7 @@ import {
   externalNetworkObservationSchema,
   externalOutcomeCheckResultSchema,
   externalRunDetailSchema,
+  externalRunLifecycleStatusSchema,
   externalRunListSchema,
   externalRunSummarySchema,
   externalRunnerErrorSchema,
@@ -39,6 +40,7 @@ import type Database from 'better-sqlite3';
 import type { CreateArtifactInput } from './run-repository.js';
 import { RunPersistenceError } from './run-repository.js';
 import { createGuidedJourneySnapshot } from '../runner/external/guided-journey.js';
+import { presentExternalRun } from '../runner/outcomes/outcome-result-presentation.js';
 
 interface ExperimentRow {
   readonly id: string;
@@ -822,14 +824,40 @@ export class ExternalExperimentRepository {
         )
         .all(row.id) as OutcomeResultRow[]
     ).map(mapOutcomeResult);
+    const lifecycleStatus = externalRunLifecycleStatusSchema.parse(
+      row.lifecycleStatus,
+    );
+    const outcomeAggregate = outcomeAggregateSchema.parse(row.outcomeAggregate);
+    const outcomeCheckSnapshot = outcomeCheckRunSnapshotSchema.parse(
+      parseJson(row.outcomeChecksSnapshotJson),
+    );
+    const networkObservations = externalNetworkObservationSchema
+      .array()
+      .parse(parseJson(row.networkObservationsJson));
+    const runnerError =
+      row.runnerErrorJson === null
+        ? null
+        : externalRunnerErrorSchema.parse(parseJson(row.runnerErrorJson));
+    const presentation = presentExternalRun({
+      lifecycleStatus,
+      outcomeAggregate,
+      triggerAttempts: row.triggerAttempts,
+      snapshot: outcomeCheckSnapshot,
+      results: outcomeCheckResults,
+      observations: networkObservations,
+      assertions,
+      events,
+      artifacts,
+      runnerError,
+    });
     return externalRunDetailSchema.parse({
       runId: row.id,
       experimentVersionId: row.experimentVersionId,
       projectId: row.projectId,
       journeyId: row.journeyId,
       status: row.status,
-      lifecycleStatus: row.lifecycleStatus,
-      outcomeAggregate: row.outcomeAggregate,
+      lifecycleStatus,
+      outcomeAggregate,
       assertionAggregate: row.assertionAggregate,
       startedAt: row.startedAt,
       completedAt: row.completedAt,
@@ -841,13 +869,13 @@ export class ExternalExperimentRepository {
       experimentSnapshot: parseJson(row.experimentSnapshotJson),
       resolvedValues: parseJson(row.resolvedValuesJson),
       triggerAttempts: row.triggerAttempts,
-      networkObservations: parseJson(row.networkObservationsJson),
+      networkObservations,
       assertions,
-      outcomeCheckSnapshot: parseJson(row.outcomeChecksSnapshotJson),
+      outcomeCheckSnapshot,
       outcomeCheckResults,
+      presentation,
       events,
-      runnerError:
-        row.runnerErrorJson === null ? null : parseJson(row.runnerErrorJson),
+      runnerError,
       warnings: parseJson(row.warningsJson),
       artifacts,
       createdAt: row.createdAt,
