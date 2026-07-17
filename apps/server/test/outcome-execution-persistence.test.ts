@@ -337,6 +337,12 @@ describe('Outcome Check run persistence', () => {
       outcomeAggregate: 'not_configured',
       outcomeCheckSnapshot: { criticalAction: null, checks: [] },
       outcomeCheckResults: [],
+      presentation: {
+        primaryStatus: 'not_configured',
+        headline:
+          'This run has technical evidence, but no approved Outcome Check was configured.',
+        checks: [],
+      },
     });
     database.close();
   });
@@ -508,6 +514,7 @@ describe('Outcome Check run persistence', () => {
       outcomeAggregate: 'not_configured',
       outcomeCheckSnapshot: { criticalAction: null, checks: [] },
       outcomeCheckResults: [],
+      presentation: { primaryStatus: 'not_configured', checks: [] },
       assertions: [
         {
           assertionResultId: 'legacy-assertion-result',
@@ -527,6 +534,10 @@ describe('Outcome Check run persistence', () => {
       outcomeAggregate: 'not_configured',
       outcomeCheckResults: [],
       runnerError: { code: 'runner_failure' },
+      presentation: {
+        primaryStatus: 'runner_error',
+        headline: 'FormCrash could not complete the journey.',
+      },
     });
     database.close();
   });

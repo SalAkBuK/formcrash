@@ -8,6 +8,7 @@ import {
   createExternalExperimentRequestSchema,
   createProjectRequestSchema,
   experimentTypeSchema,
+  externalRunResultPresentationSchema,
   journeyActionTypeSchema,
   outcomeCheckSchema,
   outcomeCaptureResponseSchema,
@@ -438,6 +439,66 @@ describe('foundational contracts', () => {
         type: 'matching_item_appears_exactly_once',
         description: 'Exactly one tenant appears.',
         bindingExpression: 'var.SECRET',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('validates the bounded server-owned external result presentation', () => {
+    const references = {
+      triggerEventIds: [],
+      requestObservationIds: [],
+      screenshotArtifactIds: [],
+      runnerEventIds: [],
+    };
+    const presentation = externalRunResultPresentationSchema.parse({
+      primaryStatus: 'failed',
+      headline: 'Failed: The expected result appeared twice instead of once.',
+      outcomeSummary: '1 of 1 approved Outcome Check failed.',
+      approvedExpectedOutcomeDescription:
+        'Exactly one generated profile should appear.',
+      expectedCondition: {
+        kind: 'visible_match_count',
+        count: 1,
+        description: 'Exactly 1 visible matching result.',
+      },
+      observedCondition: {
+        kind: 'visible_match_count',
+        count: 2,
+        description: '2 visible matching results.',
+      },
+      templateBinding: {
+        expression: 'unique.email',
+        template: '{{unique.email}}',
+        label: 'Unique email',
+      },
+      observations: [
+        {
+          kind: 'browser',
+          text: 'Two visible results matched the approved generated identity.',
+          evidenceReferences: references,
+        },
+      ],
+      conclusion: 'The approved exact-once browser-visible outcome failed.',
+      whyItMatters: 'Repeated submission can leave duplicate visible results.',
+      unknowns: [
+        'FormCrash did not inspect the application database or hidden backend state.',
+      ],
+      protectionSuggestions: [],
+      evidenceReferences: references,
+      technicalDetailsAvailable: {
+        assertions: true,
+        requests: true,
+        events: true,
+        screenshots: true,
+      },
+      checks: [],
+    });
+
+    expect(presentation.primaryStatus).toBe('failed');
+    expect(
+      externalRunResultPresentationSchema.safeParse({
+        ...presentation,
+        headline: 'x'.repeat(501),
       }).success,
     ).toBe(false);
   });

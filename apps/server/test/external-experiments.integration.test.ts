@@ -272,6 +272,30 @@ describe.sequential('external impatient-user experiments in Chromium', () => {
     expect(vulnerableRun.status).toBe('failed');
     expect(vulnerableRun.lifecycleStatus).toBe('completed');
     expect(vulnerableRun.outcomeAggregate).toBe('failed');
+    expect(vulnerableRun.presentation).toMatchObject({
+      primaryStatus: 'failed',
+      headline: 'Failed: The expected result appeared twice instead of once.',
+      approvedExpectedOutcomeDescription:
+        'Exactly one profile matching the generated email should appear.',
+      expectedCondition: { kind: 'visible_match_count', count: 1 },
+      observedCondition: { kind: 'visible_match_count', count: 2 },
+      technicalDetailsAvailable: { assertions: true, screenshots: true },
+    });
+    expect(
+      vulnerableRun.presentation.observations.map((item) => item.text),
+    ).toEqual(
+      expect.arrayContaining([
+        'FormCrash triggered "Save profile" twice.',
+        'Two matching requests completed successfully.',
+        'Two visible results matched the approved generated identity.',
+      ]),
+    );
+    expect(vulnerableRun.presentation.unknowns).toContain(
+      'FormCrash did not inspect the application database or hidden backend state.',
+    );
+    expect(JSON.stringify(vulnerableRun.presentation)).not.toContain(
+      'two database records',
+    );
     expect(vulnerableRun.outcomeCheckResults).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -338,6 +362,18 @@ describe.sequential('external impatient-user experiments in Chromium', () => {
     expect(fixedRun.status).toBe('passed');
     expect(fixedRun.lifecycleStatus).toBe('completed');
     expect(fixedRun.outcomeAggregate).toBe('passed');
+    expect(fixedRun.presentation).toMatchObject({
+      primaryStatus: 'passed',
+      headline: 'Passed: The intended result occurred exactly once.',
+      approvedExpectedOutcomeDescription:
+        'Exactly one profile matching the generated email should appear.',
+      expectedCondition: { kind: 'visible_match_count', count: 1 },
+      observedCondition: { kind: 'visible_match_count', count: 1 },
+      technicalDetailsAvailable: { assertions: true, screenshots: true },
+    });
+    expect(
+      fixedRun.presentation.observations.map((item) => item.text),
+    ).toContain('One visible result matched the approved generated identity.');
     expect(fixedRun.outcomeCheckResults).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

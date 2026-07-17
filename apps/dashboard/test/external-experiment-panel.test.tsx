@@ -244,6 +244,9 @@ beforeEach(() => {
     projectId: project.id,
     journeyId: journey.id,
     status: 'passed',
+    lifecycleStatus: 'completed',
+    outcomeAggregate: 'not_configured',
+    assertionAggregate: 'passed',
     startedAt: '2026-07-16T00:00:00.000Z',
     completedAt: '2026-07-16T00:00:01.000Z',
     durationMs: 1_000,
@@ -266,6 +269,37 @@ beforeEach(() => {
         evaluatedAt: '2026-07-16T00:00:01.000Z',
       },
     ],
+    outcomeCheckSnapshot: { criticalAction: null, checks: [] },
+    outcomeCheckResults: [],
+    presentation: {
+      primaryStatus: 'not_configured',
+      headline:
+        'This run has technical evidence, but no approved Outcome Check was configured.',
+      outcomeSummary:
+        'Technical assertions and captured evidence remain available below, but they do not establish an approved application outcome.',
+      approvedExpectedOutcomeDescription: null,
+      expectedCondition: null,
+      observedCondition: null,
+      templateBinding: null,
+      observations: [],
+      conclusion: null,
+      whyItMatters: null,
+      unknowns: [],
+      protectionSuggestions: [],
+      evidenceReferences: {
+        triggerEventIds: [],
+        requestObservationIds: [],
+        screenshotArtifactIds: [],
+        runnerEventIds: [],
+      },
+      technicalDetailsAvailable: {
+        assertions: true,
+        requests: true,
+        events: false,
+        screenshots: true,
+      },
+      checks: [],
+    },
     runnerError: null,
     warnings: [],
     networkObservations: [
@@ -372,7 +406,7 @@ describe('external experiment dashboard workflow', () => {
     expect(
       await screen.findByText('Likely create request — Recommended'),
     ).toBeVisible();
-    expect(screen.getByText('POST /api/profile')).toBeVisible();
+    expect(screen.getAllByText('POST /api/profile').length).toBeGreaterThan(0);
     expect(
       screen.getByText('No more than two matching requests are sent.'),
     ).toBeVisible();
@@ -474,7 +508,12 @@ describe('external experiment dashboard workflow', () => {
         'The action handled the repeated trigger safely.',
       ),
     ).toBeVisible();
-    expect(screen.getByText('1/1 assertions passed')).toBeVisible();
+    expect(
+      screen.getByRole('heading', {
+        name: 'This run has technical evidence, but no approved Outcome Check was configured.',
+      }),
+    ).toBeVisible();
+    expect(screen.getByText('Technical evidence')).toBeVisible();
   });
 
   it('configures discovery, an immutable version, runtime values and a prominent result', async () => {
@@ -564,10 +603,12 @@ describe('external experiment dashboard workflow', () => {
 
     await user.click(screen.getByRole('button', { name: 'Run' }));
     expect(
-      await screen.findByRole('heading', { name: 'passed' }),
+      await screen.findByRole('heading', {
+        name: 'This run has technical evidence, but no approved Outcome Check was configured.',
+      }),
     ).toBeVisible();
-    expect(screen.getByText('1/1 assertions passed')).toBeVisible();
-    expect(screen.getByText('POST /api/profile')).toBeVisible();
+    expect(screen.getByText('Technical evidence')).toBeVisible();
+    expect(screen.getAllByText('POST /api/profile').length).toBeGreaterThan(0);
     expect(
       screen.getByRole('img', { name: 'final-result screenshot' }),
     ).toBeVisible();
