@@ -14,6 +14,7 @@ import { initializePersistence } from '../src/persistence/initialize.js';
 import { ExternalExperimentRepository } from '../src/persistence/external-experiment-repository.js';
 import { ProjectJourneyRepository } from '../src/persistence/project-journey-repository.js';
 import { ProjectSettingsRepository } from '../src/persistence/project-settings-repository.js';
+import { OutcomeCheckRepository } from '../src/persistence/outcome-check-repository.js';
 import {
   AuthCaptureManager,
   AuthStateStore,
@@ -43,8 +44,10 @@ let database: FormCrashDatabase;
 let projects: ProjectJourneyRepository;
 let settings: ProjectSettingsRepository;
 let experiments: ExternalExperimentRepository;
+let outcomes: OutcomeCheckRepository;
 let createdCount = 0;
 const createdRunIds = new Set<string>();
+const observedEmailsByRunId = new Map<string, Set<string>>();
 
 beforeAll(async () => {
   server = createServer((request, response) => {
@@ -60,6 +63,7 @@ beforeAll(async () => {
   projects = new ProjectJourneyRepository(database.connection);
   settings = new ProjectSettingsRepository(database.connection);
   experiments = new ExternalExperimentRepository(database.connection);
+  outcomes = new OutcomeCheckRepository(database.connection);
 }, 20_000);
 
 async function handleFixtureRequest(
@@ -86,6 +90,7 @@ async function handleFixtureRequest(
   ) {
     createdCount = 0;
     createdRunIds.clear();
+    if (request.method === 'POST') observedEmailsByRunId.clear();
     await readBody(request);
     return sendJson(response, 200, { reset: true });
   }
@@ -95,7 +100,13 @@ async function handleFixtureRequest(
     const body = JSON.parse(await readBody(request)) as {
       readonly mode?: string;
       readonly runId?: string;
+      readonly email?: string;
     };
+    if (body.runId !== undefined && body.email !== undefined) {
+      const emails = observedEmailsByRunId.get(body.runId) ?? new Set<string>();
+      emails.add(body.email);
+      observedEmailsByRunId.set(body.runId, emails);
+    }
     if (body.mode !== 'fixed' || !createdRunIds.has(body.runId ?? '')) {
       createdCount += 1;
       createdRunIds.add(body.runId ?? '');
@@ -254,8 +265,35 @@ describe.sequential('external impatient-user experiments in Chromium', () => {
     const vulnerableRun = await createRunner().run(vulnerableVersion.id, {
       SECRET_PASSWORD: 'RuntimePasswordOnly',
     });
+    const vulnerableGeneratedEmail = onlyObservedGeneratedEmail(
+      vulnerableRun.runId,
+    );
 
     expect(vulnerableRun.status).toBe('failed');
+    expect(vulnerableRun.lifecycleStatus).toBe('completed');
+    expect(vulnerableRun.outcomeAggregate).toBe('failed');
+    expect(vulnerableRun.outcomeCheckResults).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'matching_item_appears_exactly_once',
+          status: 'failed',
+          observedCount: 2,
+        }),
+        expect.objectContaining({
+          type: 'visible_element_exists',
+          status: 'passed',
+        }),
+        expect.objectContaining({
+          type: 'final_pathname_matches',
+          status: 'passed',
+        }),
+      ]),
+    );
+    expect(
+      vulnerableRun.outcomeCheckResults.find(
+        (result) => result.type === 'matching_item_appears_exactly_once',
+      )?.evidenceReferences.screenshotArtifactIds,
+    ).toHaveLength(3);
     expect(vulnerableRun.triggerAttempts).toBe(2);
     expect(vulnerableRun.assertions).toEqual(
       expect.arrayContaining([
@@ -295,8 +333,20 @@ describe.sequential('external impatient-user experiments in Chromium', () => {
     const fixedRun = await createRunner().run(fixedVersion.id, {
       SECRET_PASSWORD: 'AnotherRuntimePassword',
     });
+    const fixedGeneratedEmail = onlyObservedGeneratedEmail(fixedRun.runId);
 
     expect(fixedRun.status).toBe('passed');
+    expect(fixedRun.lifecycleStatus).toBe('completed');
+    expect(fixedRun.outcomeAggregate).toBe('passed');
+    expect(fixedRun.outcomeCheckResults).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'matching_item_appears_exactly_once',
+          status: 'passed',
+          observedCount: 1,
+        }),
+      ]),
+    );
     expect(fixedRun.triggerAttempts).toBe(2);
     expect(
       fixedRun.networkObservations.filter((item) => item.matched),
@@ -308,6 +358,51 @@ describe.sequential('external impatient-user experiments in Chromium', () => {
 
     const persisted = experiments.getRun(fixedRun.runId);
     expect(persisted).toEqual(fixedRun);
+    const generatedEmails = [vulnerableGeneratedEmail, fixedGeneratedEmail];
+    const persistedRows = database.connection
+      .prepare(
+        `SELECT *
+           FROM external_runs WHERE id IN (?, ?)`,
+      )
+      .all(vulnerableRun.runId, fixedRun.runId);
+    const persistedEvents = database.connection
+      .prepare(`SELECT * FROM external_run_events WHERE run_id IN (?, ?)`)
+      .all(vulnerableRun.runId, fixedRun.runId);
+    const persistedAssertions = database.connection
+      .prepare(
+        `SELECT * FROM external_assertion_results WHERE run_id IN (?, ?)`,
+      )
+      .all(vulnerableRun.runId, fixedRun.runId);
+    const persistedOutcomeRows = database.connection
+      .prepare(
+        `SELECT *
+           FROM external_outcome_check_results WHERE run_id IN (?, ?)`,
+      )
+      .all(vulnerableRun.runId, fixedRun.runId);
+    const persistedArtifacts = database.connection
+      .prepare(`SELECT * FROM external_artifacts WHERE run_id IN (?, ?)`)
+      .all(vulnerableRun.runId, fixedRun.runId);
+    const durablePayload = JSON.stringify({
+      runs: persistedRows,
+      events: persistedEvents,
+      assertions: persistedAssertions,
+      outcomeResults: persistedOutcomeRows,
+      artifactMetadata: persistedArtifacts,
+    });
+    const serializedResponses = JSON.stringify([vulnerableRun, fixedRun]);
+    database.connection.pragma('wal_checkpoint(TRUNCATE)');
+    const sqliteBytes = readFileSync(temporary.config.databasePath);
+    for (const generatedEmail of generatedEmails) {
+      expect(durablePayload).not.toContain(generatedEmail);
+      expect(serializedResponses).not.toContain(generatedEmail);
+      expect(sqliteBytes.includes(Buffer.from(generatedEmail))).toBe(false);
+    }
+    expect(durablePayload).toContain('{{unique.email}}');
+    expect(durablePayload).toContain(
+      'visible item(s) matched the approved generated identity',
+    );
+    expect(fixedRun.assertionAggregate).toBe('passed');
+    expect(fixedRun.assertions).toHaveLength(4);
   }, 45_000);
 });
 
@@ -376,6 +471,56 @@ async function configureScenario(
       warningCount: 0,
       normalizationRule: 'Integration fixture journey.',
     },
+  });
+  const criticalAction = outcomes.approveCriticalAction(journey, {
+    stepId: targetStepId,
+    label: 'Save profile',
+  });
+  const outcomeTarget = {
+    locator: { strategy: 'data-formcrash' as const, value: 'profile-result' },
+    fingerprint: {
+      tagName: 'li',
+      dataFormcrash: 'profile-result',
+      dataTestId: null,
+      id: null,
+      role: null,
+      accessibleName: null,
+      name: null,
+      cssPath: '#profile-results > li',
+    },
+    preview: 'Profile generated email',
+    reliability: 'high' as const,
+    warnings: [],
+    generatedBindings: [
+      {
+        expression: 'unique.email' as const,
+        template: '{{unique.email}}' as const,
+        label: 'Unique email',
+      },
+    ],
+  };
+  outcomes.saveOutcomeCheck({
+    journeyId: journey.id,
+    criticalActionId: criticalAction.id,
+    type: 'matching_item_appears_exactly_once',
+    description:
+      'Exactly one profile matching the generated email should appear.',
+    target: outcomeTarget,
+    binding: outcomeTarget.generatedBindings[0]!,
+  });
+  outcomes.saveOutcomeCheck({
+    journeyId: journey.id,
+    criticalActionId: criticalAction.id,
+    type: 'visible_element_exists',
+    description: 'A profile result should be visible.',
+    target: outcomeTarget,
+  });
+  outcomes.saveOutcomeCheck({
+    journeyId: journey.id,
+    criticalActionId: criticalAction.id,
+    type: 'final_pathname_matches',
+    description: 'The profile form pathname should remain visible.',
+    expectedPathname: '/protected',
   });
   settings.save(project.id, {
     variables: [
@@ -509,6 +654,8 @@ function createRunner(): ExternalExperimentRunner {
     new AuthStateStore(temporary.config.artifactRoot, settings),
     experiments,
     new BrowserOwnership(),
+    undefined,
+    outcomes,
   );
 }
 
@@ -537,6 +684,16 @@ function step(
     value,
     sensitive,
   } as const;
+}
+
+function onlyObservedGeneratedEmail(runId: string): string {
+  const emails = [...(observedEmailsByRunId.get(runId) ?? [])];
+  if (emails.length !== 1 || emails[0] === undefined) {
+    throw new Error(
+      `Expected exactly one generated email for fixture run ${runId}.`,
+    );
+  }
+  return emails[0];
 }
 
 function hasAuthentication(request: IncomingMessage): boolean {

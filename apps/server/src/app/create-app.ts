@@ -114,6 +114,8 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     authStateStore,
     externalExperimentRepository,
     browserOwnership,
+    undefined,
+    outcomeCheckRepository,
   );
   const outcomeCaptures = new OutcomeCaptureManager(
     options.config,

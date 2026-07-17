@@ -5,10 +5,14 @@ import type {
   ExternalAssertionResult,
   ExternalExperimentVersion,
   ExternalNetworkObservation,
+  ExternalOutcomeCheckResult,
   ExternalRunDetail,
   ExternalRunnerError,
   ExternalRunWarning,
   ReplayFailure,
+  RunArtifact,
+  OutcomeAggregate,
+  OutcomeCheckRunSnapshot,
 } from '@formcrash/contracts';
 
 import {
@@ -20,8 +24,14 @@ import type { ServerConfig } from '../../app/config.js';
 import type { ExternalExperimentRepository } from '../../persistence/external-experiment-repository.js';
 import type { ProjectJourneyRepository } from '../../persistence/project-journey-repository.js';
 import type { ProjectSettingsRepository } from '../../persistence/project-settings-repository.js';
+import type { OutcomeCheckRepository } from '../../persistence/outcome-check-repository.js';
 import { RunPersistenceError } from '../../persistence/run-repository.js';
 import { RunEventLog } from '../engine/event-log.js';
+import {
+  aggregateOutcomeChecks,
+  createUnverifiedOutcomeResults,
+  evaluateOutcomeChecks,
+} from '../outcomes/outcome-evaluator.js';
 import type { BrowserOwnership } from '../infrastructure/browser-ownership.js';
 import {
   PlaywrightExternalBrowserOwner,
@@ -47,6 +57,7 @@ import {
   redactSensitiveText,
   resolveHook,
   resolveRuntime,
+  resolveTemplateValue,
   resolveStepRuntimeValue,
   resolveStepValue,
   type ResolvedRuntime,
@@ -65,6 +76,7 @@ export class ExternalExperimentRunner {
     private readonly repository: ExternalExperimentRepository,
     private readonly ownership: BrowserOwnership,
     browserOwner?: ExternalBrowserOwner,
+    private readonly outcomes?: OutcomeCheckRepository,
   ) {
     this.browserOwner = browserOwner ?? new PlaywrightExternalBrowserOwner();
     this.screenshotStore = new ScreenshotStore(config.artifactRoot, repository);
@@ -96,6 +108,7 @@ export class ExternalExperimentRunner {
       'External experiment execution',
     );
     const journey = experiment.journeySnapshot;
+    const outcomeCheckSnapshot = this.resolveOutcomeCheckSnapshot(experiment);
     const storedSettings = this.settings.get(project.id);
     const runId = randomUUID();
     const startedAtMs = Date.now();
@@ -107,6 +120,7 @@ export class ExternalExperimentRunner {
       ephemeral,
       hooks: [storedSettings.beforeRunHook, storedSettings.afterRunHook],
       assertions: experiment.assertions,
+      outcomeChecks: outcomeCheckSnapshot.checks,
     });
     const storageStatePath = this.authStore.usablePath(project.id);
     const release = this.ownership.acquire('external_experiment');
@@ -117,7 +131,12 @@ export class ExternalExperimentRunner {
         targetUrl: project.targetUrl,
         projectName: project.name,
         journeyName: journey.name,
-        safeResolvedValues: createSafeSnapshot(journey, runtime),
+        safeResolvedValues: createSafeSnapshot(
+          journey,
+          runtime,
+          outcomeCheckSnapshot,
+        ),
+        outcomeCheckSnapshot,
         startedAt,
       });
     } catch (error: unknown) {
@@ -131,6 +150,8 @@ export class ExternalExperimentRunner {
     let triggerAttempts = 0;
     let observations: readonly ExternalNetworkObservation[] = [];
     let assertionResults: readonly ExternalAssertionResult[] = [];
+    let outcomeCheckResults: readonly ExternalOutcomeCheckResult[] = [];
+    const evidenceArtifacts: RunArtifact[] = [];
     const disabledDuringRepeatedActionAssertionIds = new Set<string>();
     const warnings: ExternalRunWarning[] = [];
     let runnerError: ExternalRunnerError | null = null;
@@ -203,10 +224,24 @@ export class ExternalExperimentRunner {
       for (const [index, step] of journey.steps
         .slice(0, targetIndex)
         .entries()) {
-        await executeWithEvents(session, step, index, events, runtime);
+        await executeWithEvents(
+          session,
+          step,
+          index,
+          events,
+          runtime,
+          outcomeCheckSnapshot,
+        );
       }
 
-      await this.capture(session, runId, 'before-disruption', events, warnings);
+      const beforeArtifact = await this.capture(
+        session,
+        runId,
+        'before-disruption',
+        events,
+        warnings,
+      );
+      if (beforeArtifact !== null) evidenceArtifacts.push(beforeArtifact);
       if (target.locator === null)
         throw new ConfigurationError(
           'Experiment target has no replay locator.',
@@ -255,7 +290,14 @@ export class ExternalExperimentRunner {
         collector,
         experiment.networkMatcher !== null,
       );
-      await this.capture(session, runId, 'after-disruption', events, warnings);
+      const afterArtifact = await this.capture(
+        session,
+        runId,
+        'after-disruption',
+        events,
+        warnings,
+      );
+      if (afterArtifact !== null) evidenceArtifacts.push(afterArtifact);
 
       if (experiment.continueAfterTarget) {
         for (const [offset, step] of journey.steps
@@ -267,6 +309,7 @@ export class ExternalExperimentRunner {
             targetIndex + 1 + offset,
             events,
             runtime,
+            outcomeCheckSnapshot,
           );
         }
       } else {
@@ -276,7 +319,11 @@ export class ExternalExperimentRunner {
         });
       }
       await session.settle(900);
-      observations = collector.snapshot();
+      observations = sanitizeNetworkObservations(
+        collector.snapshot(),
+        runtime,
+        outcomeCheckSnapshot,
+      );
       this.repository.updateStatus(runId, 'evaluating');
       events.append('run.evaluating', {});
       assertionResults = await evaluateExternalAssertions({
@@ -287,7 +334,31 @@ export class ExternalExperimentRunner {
         events,
         disabledDuringRepeatedActionAssertionIds,
       });
-      await this.capture(session, runId, 'final-result', events, warnings);
+      const finalArtifact = await this.capture(
+        session,
+        runId,
+        'final-result',
+        events,
+        warnings,
+      );
+      if (finalArtifact !== null) evidenceArtifacts.push(finalArtifact);
+      outcomeCheckResults = await evaluateOutcomeChecks({
+        runId,
+        snapshot: outcomeCheckSnapshot,
+        session,
+        runtime,
+        events: events.snapshot(),
+        observations,
+        artifacts: evidenceArtifacts,
+      });
+      for (const result of outcomeCheckResults) {
+        events.append('outcome_check.evaluated', {
+          outcomeCheckId: result.outcomeCheckId,
+          type: result.type,
+          status: result.status,
+          observedCount: result.observedCount,
+        });
+      }
     } catch (error: unknown) {
       runnerError = mapRunnerError(error);
     } finally {
@@ -335,6 +406,27 @@ export class ExternalExperimentRunner {
           ? 'passed'
           : 'failed';
     const completedAtMs = Date.now();
+    if (
+      runnerError !== null &&
+      outcomeCheckResults.length === 0 &&
+      outcomeCheckSnapshot.checks.length > 0
+    ) {
+      outcomeCheckResults = createUnverifiedOutcomeResults({
+        runId,
+        snapshot: outcomeCheckSnapshot,
+        events: events.snapshot(),
+        observations,
+        artifacts: evidenceArtifacts,
+        reason:
+          'The runner did not reach a browser state where this approved Outcome Check could be evaluated.',
+      });
+    }
+    const outcomeAggregate: OutcomeAggregate =
+      aggregateOutcomeChecks(outcomeCheckResults);
+    const assertionAggregate = aggregateAssertions(
+      assertionResults,
+      experiment.assertions.length,
+    );
     this.repository.finalizeRun({
       runId,
       status,
@@ -345,6 +437,9 @@ export class ExternalExperimentRunner {
       runnerError,
       warnings,
       assertions: assertionResults,
+      outcomeAggregate,
+      assertionAggregate,
+      outcomeCheckResults,
     });
     events.append(
       runnerError === null ? `run.${status}` : 'runner.error',
@@ -364,7 +459,7 @@ export class ExternalExperimentRunner {
     label: ScreenshotLabel,
     events: RunEventLog,
     warnings: ExternalRunWarning[],
-  ): Promise<void> {
+  ): Promise<RunArtifact | null> {
     try {
       const artifact = await this.screenshotStore.capture(
         session,
@@ -376,6 +471,7 @@ export class ExternalExperimentRunner {
         label,
         captureSequence: artifact.captureSequence,
       });
+      return artifact;
     } catch (error: unknown) {
       if (!(error instanceof ScreenshotCaptureError)) throw error;
       const warning: ExternalRunWarning = {
@@ -385,7 +481,43 @@ export class ExternalExperimentRunner {
       };
       warnings.push(warning);
       events.append('artifact.capture_failed', warning);
+      return null;
     }
+  }
+
+  private resolveOutcomeCheckSnapshot(
+    experiment: ExternalExperimentVersion,
+  ): OutcomeCheckRunSnapshot {
+    if (this.outcomes === undefined) {
+      return { criticalAction: null, checks: [] };
+    }
+    const criticalAction = this.outcomes.getCriticalAction(
+      experiment.journeyId,
+    );
+    const checks = this.outcomes.listOutcomeChecks(experiment.journeyId);
+    if (checks.length === 0) return { criticalAction, checks: [] };
+    if (criticalAction === null) {
+      throw new ConfigurationError(
+        'Outcome Checks exist without an approved Critical Action.',
+      );
+    }
+    if (criticalAction.stepId !== experiment.targetStepId) {
+      throw new ConfigurationError(
+        'The experiment target must be the approved Critical Action for these Outcome Checks.',
+      );
+    }
+    if (
+      checks.some(
+        (check) =>
+          check.journeyId !== experiment.journeyId ||
+          check.criticalActionId !== criticalAction.id,
+      )
+    ) {
+      throw new ConfigurationError(
+        'Outcome Checks are not owned by this exact journey version and Critical Action.',
+      );
+    }
+    return { criticalAction, checks: [...checks] };
   }
 
   private async settleAfterDisruption(
@@ -419,6 +551,7 @@ async function executeWithEvents(
   index: number,
   events: RunEventLog,
   runtime: ResolvedRuntime,
+  outcomeCheckSnapshot: OutcomeCheckRunSnapshot,
 ): Promise<void> {
   events.append('journey.step.started', {
     stepId: step.id,
@@ -435,7 +568,8 @@ async function executeWithEvents(
       step,
       index,
       error,
-      isStepValueSensitive(step, runtime),
+      isStepValueSensitive(step, runtime) ||
+        isOutcomeBoundStep(step, runtime, outcomeCheckSnapshot),
       runtime,
     );
   }
@@ -447,20 +581,120 @@ async function executeWithEvents(
   });
 }
 
+function isOutcomeBoundStep(
+  step: ExternalExperimentVersion['journeySnapshot']['steps'][number],
+  runtime: ResolvedRuntime,
+  snapshot: OutcomeCheckRunSnapshot,
+): boolean {
+  if (step.value === null) return false;
+  const resolved = resolveStepRuntimeValue(step, runtime).value;
+  return snapshot.checks.some(
+    (check) =>
+      check.type === 'matching_item_appears_exactly_once' &&
+      resolved.includes(
+        resolveTemplateValue(
+          check.binding.template,
+          runtime.values,
+          runtime.context,
+        ).value,
+      ),
+  );
+}
+
 function createSafeSnapshot(
   journey: ExternalExperimentVersion['journeySnapshot'],
   runtime: ResolvedRuntime,
+  outcomeCheckSnapshot: OutcomeCheckRunSnapshot,
 ): Readonly<Record<string, string>> {
-  const snapshot: Record<string, string> = { ...runtime.safeSnapshot };
+  const outcomeBoundValues = new Set(
+    outcomeCheckSnapshot.checks
+      .filter((check) => check.type === 'matching_item_appears_exactly_once')
+      .map(
+        (check) =>
+          resolveTemplateValue(
+            check.binding.template,
+            runtime.values,
+            runtime.context,
+          ).value,
+      ),
+  );
+  const snapshot: Record<string, string> = Object.fromEntries(
+    Object.entries(runtime.safeSnapshot).filter(
+      ([, value]) => !containsOutcomeBoundValue(value, outcomeBoundValues),
+    ),
+  );
   for (const [index, step] of journey.steps.entries()) {
     if (step.value?.kind !== 'safe' || !step.value.value.includes('{{'))
       continue;
     const resolved = resolveStepRuntimeValue(step, runtime);
-    if (!resolved.sensitive) {
+    if (
+      !resolved.sensitive &&
+      !containsOutcomeBoundValue(resolved.value, outcomeBoundValues)
+    ) {
       snapshot[`RESOLVED_STEP_${index + 1}`] = resolved.value;
     }
   }
   return snapshot;
+}
+
+function containsOutcomeBoundValue(
+  candidate: string,
+  outcomeBoundValues: ReadonlySet<string>,
+): boolean {
+  return [...outcomeBoundValues].some(
+    (value) =>
+      value !== '' &&
+      (candidate.includes(value) ||
+        candidate.includes(encodeURIComponent(value))),
+  );
+}
+
+function sanitizeNetworkObservations(
+  observations: readonly ExternalNetworkObservation[],
+  runtime: ResolvedRuntime,
+  snapshot: OutcomeCheckRunSnapshot,
+): readonly ExternalNetworkObservation[] {
+  const protectedValues = snapshot.checks
+    .filter((check) => check.type === 'matching_item_appears_exactly_once')
+    .map(
+      (check) =>
+        resolveTemplateValue(
+          check.binding.template,
+          runtime.values,
+          runtime.context,
+        ).value,
+    );
+  return observations.map((observation) => {
+    let pathname = redactSensitiveText(observation.pathname, runtime);
+    for (const value of protectedValues) {
+      if (value === '') continue;
+      pathname = pathname
+        .replaceAll(value, '[GENERATED_VALUE]')
+        .replaceAll(encodeURIComponent(value), '[GENERATED_VALUE]');
+    }
+    return { ...observation, pathname };
+  });
+}
+
+function aggregateAssertions(
+  results: readonly ExternalAssertionResult[],
+  configuredAssertionCount: number,
+): OutcomeAggregate {
+  if (results.length === 0) {
+    return configuredAssertionCount === 0
+      ? 'not_configured'
+      : 'could_not_verify';
+  }
+  if (results.some((result) => result.status === 'failed')) return 'failed';
+  if (
+    results.some(
+      (result) =>
+        result.status === 'error' || result.status === 'not_evaluated',
+    )
+  ) {
+    return 'could_not_verify';
+  }
+  return 'passed';
 }
 
 function mapRunnerError(error: unknown): ExternalRunnerError {

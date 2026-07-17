@@ -2,6 +2,7 @@ import type {
   EphemeralRuntimeValues,
   ExternalAssertion,
   HttpHook,
+  OutcomeCheck,
   PersistedJourney,
   RecordedJourneyStep,
   RuntimeVariableDeclarationInput,
@@ -65,6 +66,7 @@ export function resolveRuntime(input: {
   readonly ephemeral: EphemeralRuntimeValues;
   readonly hooks: readonly (HttpHook | null)[];
   readonly assertions?: readonly ExternalAssertion[];
+  readonly outcomeChecks?: readonly OutcomeCheck[];
 }): ResolvedRuntime {
   const timestamp = new Date().toISOString();
   const shortId = input.runId.replaceAll('-', '').slice(0, 12);
@@ -174,6 +176,11 @@ export function resolveRuntime(input: {
     }
   }
   validateAssertionTemplates(input.assertions ?? [], values, context);
+  for (const check of input.outcomeChecks ?? []) {
+    if (check.type === 'matching_item_appears_exactly_once') {
+      resolveTemplate(check.binding.template, values, context);
+    }
+  }
 
   return {
     values,

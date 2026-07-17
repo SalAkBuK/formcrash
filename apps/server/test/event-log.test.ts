@@ -12,4 +12,15 @@ describe('in-memory run events', () => {
 
     expect(events.snapshot().map((event) => event.sequence)).toEqual([1, 2, 3]);
   });
+
+  it('does not expose an event when durable append fails', () => {
+    const events = new RunEventLog('run-1', () => {
+      throw new Error('persistence unavailable');
+    });
+
+    expect(() => events.append('run.created', {})).toThrow(
+      'persistence unavailable',
+    );
+    expect(events.snapshot()).toEqual([]);
+  });
 });

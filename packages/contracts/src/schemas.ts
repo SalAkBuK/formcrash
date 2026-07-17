@@ -1009,6 +1009,59 @@ export const externalAssertionResultSchema = z.object({
   evaluatedAt: z.iso.datetime({ offset: true }),
 });
 
+export const outcomeCheckRunSnapshotSchema = z.object({
+  criticalAction: criticalActionSchema.nullable(),
+  checks: z.array(outcomeCheckSchema),
+});
+
+export const outcomeEvaluationStatusSchema = z.enum([
+  'passed',
+  'failed',
+  'could_not_verify',
+]);
+
+export const outcomeAggregateSchema = z.enum([
+  'passed',
+  'failed',
+  'could_not_verify',
+  'not_configured',
+]);
+
+export const externalRunLifecycleStatusSchema = z.enum([
+  'created',
+  'starting',
+  'running',
+  'evaluating',
+  'completed',
+  'runner_error',
+]);
+
+export const outcomeEvidenceReferencesSchema = z.object({
+  triggerEventIds: z.array(z.string().min(1)).max(3),
+  requestObservationIds: z.array(z.string().min(1)).max(100),
+  screenshotArtifactIds: z.array(z.string().min(1)).max(3),
+  runnerEventIds: z.array(z.string().min(1)).max(20),
+});
+
+export const externalOutcomeCheckResultSchema = z.object({
+  outcomeCheckResultId: z.string().min(1),
+  runId: z.string().min(1),
+  outcomeCheckId: z.string().min(1),
+  journeyId: z.string().min(1),
+  criticalActionId: z.string().min(1),
+  type: outcomeCheckTypeSchema,
+  expected: z.json(),
+  observed: z.json(),
+  expectedCount: z.number().int().nonnegative().nullable(),
+  observedCount: z.number().int().nonnegative().nullable(),
+  status: outcomeEvaluationStatusSchema,
+  reason: z.string().min(1).max(1_000).nullable(),
+  evidenceReferences: outcomeEvidenceReferencesSchema,
+  templateBinding: generatedValueBindingSchema.nullable(),
+  unknowns: z.array(z.string().min(1).max(500)).max(10),
+  evaluatedAt: z.iso.datetime({ offset: true }),
+});
+
 export const externalRunWarningSchema = z.object({
   code: z.enum(['screenshot_capture_failed', 'cleanup_hook_failed']),
   message: z.string().min(1),
@@ -1034,7 +1087,7 @@ export const externalRunnerErrorSchema = z.object({
   missingVariables: z.array(runtimeVariableNameSchema),
 });
 
-export const externalRunDetailSchema = z.object({
+const externalRunDetailObjectSchema = z.object({
   runId: z.string().min(1),
   experimentVersionId: z.string().min(1),
   projectId: z.string().min(1),
@@ -1048,6 +1101,9 @@ export const externalRunDetailSchema = z.object({
     'failed',
     'runner_error',
   ]),
+  lifecycleStatus: externalRunLifecycleStatusSchema.optional(),
+  outcomeAggregate: outcomeAggregateSchema.default('not_configured'),
+  assertionAggregate: outcomeAggregateSchema.default('not_configured'),
   startedAt: z.iso.datetime({ offset: true }),
   completedAt: z.iso.datetime({ offset: true }).nullable(),
   durationMs: z.number().int().nonnegative().nullable(),
@@ -1060,6 +1116,11 @@ export const externalRunDetailSchema = z.object({
   triggerAttempts: z.number().int().nonnegative(),
   networkObservations: z.array(externalNetworkObservationSchema),
   assertions: z.array(externalAssertionResultSchema),
+  outcomeCheckSnapshot: outcomeCheckRunSnapshotSchema.default({
+    criticalAction: null,
+    checks: [],
+  }),
+  outcomeCheckResults: z.array(externalOutcomeCheckResultSchema).default([]),
   events: z.array(z.lazy(() => runEventEnvelopeSchema)),
   runnerError: externalRunnerErrorSchema.nullable(),
   warnings: z.array(externalRunWarningSchema),
@@ -1067,12 +1128,25 @@ export const externalRunDetailSchema = z.object({
   createdAt: z.iso.datetime({ offset: true }),
 });
 
+export const externalRunDetailSchema = externalRunDetailObjectSchema.transform(
+  (run) => ({
+    ...run,
+    lifecycleStatus:
+      run.lifecycleStatus ??
+      (run.status === 'runner_error'
+        ? 'runner_error'
+        : run.status === 'passed' || run.status === 'failed'
+          ? 'completed'
+          : run.status),
+  }),
+);
+
 export const externalRunSummarySchema = z.object({
   runId: z.string().min(1),
   experimentVersionId: z.string().min(1),
   projectId: z.string().min(1),
   journeyId: z.string().min(1),
-  status: externalRunDetailSchema.shape.status,
+  status: externalRunDetailObjectSchema.shape.status,
   startedAt: z.iso.datetime({ offset: true }),
   completedAt: z.iso.datetime({ offset: true }).nullable(),
   durationMs: z.number().int().nonnegative().nullable(),
@@ -1416,6 +1490,22 @@ export type ApproveOutcomeCheckRequest = z.infer<
 >;
 export type OutcomeCheck = z.infer<typeof outcomeCheckSchema>;
 export type OutcomeCheckList = z.infer<typeof outcomeCheckListSchema>;
+export type OutcomeCheckRunSnapshot = z.infer<
+  typeof outcomeCheckRunSnapshotSchema
+>;
+export type OutcomeEvaluationStatus = z.infer<
+  typeof outcomeEvaluationStatusSchema
+>;
+export type OutcomeAggregate = z.infer<typeof outcomeAggregateSchema>;
+export type ExternalRunLifecycleStatus = z.infer<
+  typeof externalRunLifecycleStatusSchema
+>;
+export type OutcomeEvidenceReferences = z.infer<
+  typeof outcomeEvidenceReferencesSchema
+>;
+export type ExternalOutcomeCheckResult = z.infer<
+  typeof externalOutcomeCheckResultSchema
+>;
 export type ReplayFailure = z.infer<typeof replayFailureSchema>;
 export type ReplayResult = z.infer<typeof replayResultSchema>;
 export type RuntimeVariableName = z.infer<typeof runtimeVariableNameSchema>;

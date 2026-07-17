@@ -6,6 +6,7 @@ import {
   externalExperimentListSchema,
   externalExperimentVersionSchema,
   externalNetworkObservationSchema,
+  externalOutcomeCheckResultSchema,
   externalRunDetailSchema,
   externalRunListSchema,
   externalRunSummarySchema,
@@ -14,16 +15,21 @@ import {
   persistedJourneySchema,
   runArtifactSchema,
   runEventEnvelopeSchema,
+  outcomeAggregateSchema,
+  outcomeCheckRunSnapshotSchema,
   type CreateExternalExperimentRequest,
   type ExternalAssertionResult,
   type ExternalExperimentVersion,
   type ExternalNetworkObservation,
+  type ExternalOutcomeCheckResult,
   type ExternalRunDetail,
   type ExternalRunList,
   type ExternalRunListQuery,
   type ExternalRunSummary,
   type ExternalRunnerError,
   type ExternalRunWarning,
+  type OutcomeAggregate,
+  type OutcomeCheckRunSnapshot,
   type PersistedJourney,
   type RunArtifact,
   type RunEventEnvelope,
@@ -56,6 +62,9 @@ interface RunRow {
   readonly projectId: string;
   readonly journeyId: string;
   readonly status: string;
+  readonly lifecycleStatus: string;
+  readonly outcomeAggregate: string;
+  readonly assertionAggregate: string;
   readonly startedAt: string;
   readonly completedAt: string | null;
   readonly durationMs: number | null;
@@ -64,12 +73,32 @@ interface RunRow {
   readonly journeyName: string;
   readonly experimentName: string;
   readonly experimentSnapshotJson: string;
+  readonly outcomeChecksSnapshotJson: string;
   readonly resolvedValuesJson: string;
   readonly triggerAttempts: number;
   readonly networkObservationsJson: string;
   readonly runnerErrorJson: string | null;
   readonly warningsJson: string;
   readonly createdAt: string;
+}
+
+interface OutcomeResultRow {
+  readonly id: string;
+  readonly runId: string;
+  readonly outcomeCheckId: string;
+  readonly journeyId: string;
+  readonly criticalActionId: string;
+  readonly outcomeType: string;
+  readonly expectedJson: string;
+  readonly observedJson: string;
+  readonly expectedCount: number | null;
+  readonly observedCount: number | null;
+  readonly status: string;
+  readonly reason: string | null;
+  readonly evidenceReferencesJson: string;
+  readonly templateBindingJson: string | null;
+  readonly unknownsJson: string;
+  readonly evaluatedAt: string;
 }
 
 interface RunSummaryRow {
@@ -260,6 +289,7 @@ export class ExternalExperimentRepository {
     readonly projectName: string;
     readonly journeyName: string;
     readonly safeResolvedValues: Readonly<Record<string, string>>;
+    readonly outcomeCheckSnapshot?: OutcomeCheckRunSnapshot;
     readonly startedAt: string;
   }): void {
     this.protect('create an external run', () => {
@@ -269,8 +299,8 @@ export class ExternalExperimentRepository {
             (id, experiment_version_id, project_id, journey_id, status,
              started_at, target_url, project_name, journey_name,
              experiment_name, experiment_snapshot_json, resolved_values_json,
-             created_at)
-           VALUES (?, ?, ?, ?, 'created', ?, ?, ?, ?, ?, ?, ?, ?)`,
+             outcome_checks_snapshot_json, created_at)
+           VALUES (?, ?, ?, ?, 'created', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           input.runId,
@@ -284,6 +314,14 @@ export class ExternalExperimentRepository {
           input.experiment.name,
           JSON.stringify(input.experiment),
           JSON.stringify(input.safeResolvedValues),
+          JSON.stringify(
+            outcomeCheckRunSnapshotSchema.parse(
+              input.outcomeCheckSnapshot ?? {
+                criticalAction: null,
+                checks: [],
+              },
+            ),
+          ),
           input.startedAt,
         );
     });
@@ -292,8 +330,10 @@ export class ExternalExperimentRepository {
   updateStatus(runId: string, status: ExternalRunDetail['status']): void {
     this.protect('update external run status', () => {
       this.database
-        .prepare('UPDATE external_runs SET status = ? WHERE id = ?')
-        .run(status, runId);
+        .prepare(
+          'UPDATE external_runs SET status = ?, lifecycle_status = ? WHERE id = ?',
+        )
+        .run(status, status, runId);
     });
   }
 
@@ -333,15 +373,25 @@ export class ExternalExperimentRepository {
     readonly runnerError: ExternalRunnerError | null;
     readonly warnings: readonly ExternalRunWarning[];
     readonly assertions: readonly ExternalAssertionResult[];
+    readonly outcomeAggregate?: OutcomeAggregate;
+    readonly assertionAggregate?: OutcomeAggregate;
+    readonly outcomeCheckResults?: readonly ExternalOutcomeCheckResult[];
   }): void {
     this.protect('finalize an external run', () => {
       const complete = this.database.transaction(() => {
+        this.assertOutcomeEvidenceReferences(
+          input.runId,
+          input.outcomeCheckResults ?? [],
+          input.networkObservations,
+        );
         this.database
           .prepare(
             `UPDATE external_runs
                 SET status = ?, completed_at = ?, duration_ms = ?,
                     trigger_attempts = ?, network_observations_json = ?,
-                    runner_error_json = ?, warnings_json = ?
+                    runner_error_json = ?, warnings_json = ?,
+                    lifecycle_status = ?, outcome_aggregate = ?,
+                    assertion_aggregate = ?
               WHERE id = ?`,
           )
           .run(
@@ -361,6 +411,18 @@ export class ExternalExperimentRepository {
                 ),
             JSON.stringify(
               externalRunWarningSchema.array().parse(input.warnings),
+            ),
+            input.status === 'runner_error' ? 'runner_error' : 'completed',
+            outcomeAggregateSchema.parse(
+              input.outcomeAggregate ?? 'not_configured',
+            ),
+            outcomeAggregateSchema.parse(
+              input.assertionAggregate ??
+                (input.status === 'passed'
+                  ? 'passed'
+                  : input.status === 'failed'
+                    ? 'failed'
+                    : 'could_not_verify'),
             ),
             input.runId,
           );
@@ -384,9 +446,95 @@ export class ExternalExperimentRepository {
             parsed.evaluatedAt,
           );
         }
+        const insertOutcome = this.database.prepare(
+          `INSERT INTO external_outcome_check_results
+            (id, run_id, outcome_check_id, journey_id, critical_action_id,
+             outcome_type, expected_json, observed_json, expected_count,
+             observed_count, status, reason, evidence_references_json,
+             template_binding_json, unknowns_json, evaluated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        );
+        for (const result of input.outcomeCheckResults ?? []) {
+          const parsed = externalOutcomeCheckResultSchema.parse(result);
+          insertOutcome.run(
+            parsed.outcomeCheckResultId,
+            input.runId,
+            parsed.outcomeCheckId,
+            parsed.journeyId,
+            parsed.criticalActionId,
+            parsed.type,
+            JSON.stringify(parsed.expected),
+            JSON.stringify(parsed.observed),
+            parsed.expectedCount,
+            parsed.observedCount,
+            parsed.status,
+            parsed.reason,
+            JSON.stringify(parsed.evidenceReferences),
+            parsed.templateBinding === null
+              ? null
+              : JSON.stringify(parsed.templateBinding),
+            JSON.stringify(parsed.unknowns),
+            parsed.evaluatedAt,
+          );
+        }
       });
       complete();
     });
+  }
+
+  private assertOutcomeEvidenceReferences(
+    runId: string,
+    results: readonly ExternalOutcomeCheckResult[],
+    observations: readonly ExternalNetworkObservation[],
+  ): void {
+    const eventIds = new Set(
+      (
+        this.database
+          .prepare('SELECT id FROM external_run_events WHERE run_id = ?')
+          .all(runId) as Array<{ readonly id: string }>
+      ).map((row) => row.id),
+    );
+    const artifactIds = new Set(
+      (
+        this.database
+          .prepare('SELECT id FROM external_artifacts WHERE run_id = ?')
+          .all(runId) as Array<{ readonly id: string }>
+      ).map((row) => row.id),
+    );
+    const requestIds = new Set(observations.map((item) => item.requestId));
+    for (const candidate of results) {
+      const result = externalOutcomeCheckResultSchema.parse(candidate);
+      if (result.runId !== runId) {
+        throw new Error('Outcome Check result belongs to another run.');
+      }
+      const referencedEventIds = [
+        ...result.evidenceReferences.triggerEventIds,
+        ...result.evidenceReferences.runnerEventIds,
+      ];
+      if (referencedEventIds.some((id) => !eventIds.has(id))) {
+        throw new Error(
+          'Outcome Check result references an event that was not persisted for this run.',
+        );
+      }
+      if (
+        result.evidenceReferences.screenshotArtifactIds.some(
+          (id) => !artifactIds.has(id),
+        )
+      ) {
+        throw new Error(
+          'Outcome Check result references a screenshot that was not persisted for this run.',
+        );
+      }
+      if (
+        result.evidenceReferences.requestObservationIds.some(
+          (id) => !requestIds.has(id),
+        )
+      ) {
+        throw new Error(
+          'Outcome Check result references a request observation that was not persisted for this run.',
+        );
+      }
+    }
   }
 
   createArtifact(input: CreateArtifactInput): RunArtifact {
@@ -476,6 +624,11 @@ export class ExternalExperimentRepository {
       const artifacts = this.listArtifacts('WHERE run_id = ?', runId);
       this.database.transaction(() => {
         this.database
+          .prepare(
+            'DELETE FROM external_outcome_check_results WHERE run_id = ?',
+          )
+          .run(runId);
+        this.database
           .prepare('DELETE FROM external_assertion_results WHERE run_id = ?')
           .run(runId);
         this.database
@@ -504,6 +657,11 @@ export class ExternalExperimentRepository {
       );
       this.database.transaction(() => {
         for (const { id } of runIds) {
+          this.database
+            .prepare(
+              'DELETE FROM external_outcome_check_results WHERE run_id = ?',
+            )
+            .run(id);
           this.database
             .prepare('DELETE FROM external_assertion_results WHERE run_id = ?')
             .run(id);
@@ -589,11 +747,15 @@ export class ExternalExperimentRepository {
         .prepare(
           `SELECT id, experiment_version_id AS experimentVersionId,
                   project_id AS projectId, journey_id AS journeyId, status,
+                  lifecycle_status AS lifecycleStatus,
+                  outcome_aggregate AS outcomeAggregate,
+                  assertion_aggregate AS assertionAggregate,
                   started_at AS startedAt, completed_at AS completedAt,
                   duration_ms AS durationMs, target_url AS targetUrl,
                   project_name AS projectName, journey_name AS journeyName,
                   experiment_name AS experimentName,
                   experiment_snapshot_json AS experimentSnapshotJson,
+                  outcome_checks_snapshot_json AS outcomeChecksSnapshotJson,
                   resolved_values_json AS resolvedValuesJson,
                   trigger_attempts AS triggerAttempts,
                   network_observations_json AS networkObservationsJson,
@@ -644,12 +806,31 @@ export class ExternalExperimentRepository {
         )
         .all(row.id) as ArtifactRow[]
     ).map(mapArtifact);
+    const outcomeCheckResults = (
+      this.database
+        .prepare(
+          `SELECT id, run_id AS runId, outcome_check_id AS outcomeCheckId,
+                  journey_id AS journeyId, critical_action_id AS criticalActionId,
+                  outcome_type AS outcomeType, expected_json AS expectedJson,
+                  observed_json AS observedJson, expected_count AS expectedCount,
+                  observed_count AS observedCount, status, reason,
+                  evidence_references_json AS evidenceReferencesJson,
+                  template_binding_json AS templateBindingJson,
+                  unknowns_json AS unknownsJson, evaluated_at AS evaluatedAt
+             FROM external_outcome_check_results WHERE run_id = ?
+             ORDER BY evaluated_at, id`,
+        )
+        .all(row.id) as OutcomeResultRow[]
+    ).map(mapOutcomeResult);
     return externalRunDetailSchema.parse({
       runId: row.id,
       experimentVersionId: row.experimentVersionId,
       projectId: row.projectId,
       journeyId: row.journeyId,
       status: row.status,
+      lifecycleStatus: row.lifecycleStatus,
+      outcomeAggregate: row.outcomeAggregate,
+      assertionAggregate: row.assertionAggregate,
       startedAt: row.startedAt,
       completedAt: row.completedAt,
       durationMs: row.durationMs,
@@ -662,6 +843,8 @@ export class ExternalExperimentRepository {
       triggerAttempts: row.triggerAttempts,
       networkObservations: parseJson(row.networkObservationsJson),
       assertions,
+      outcomeCheckSnapshot: parseJson(row.outcomeChecksSnapshotJson),
+      outcomeCheckResults,
       events,
       runnerError:
         row.runnerErrorJson === null ? null : parseJson(row.runnerErrorJson),
@@ -790,6 +973,30 @@ function mapAssertion(row: AssertionRow): ExternalAssertionResult {
     description: row.description,
     expectedDescription: row.expectedDescription,
     observedDescription: row.observedDescription,
+    evaluatedAt: row.evaluatedAt,
+  });
+}
+
+function mapOutcomeResult(row: OutcomeResultRow): ExternalOutcomeCheckResult {
+  return externalOutcomeCheckResultSchema.parse({
+    outcomeCheckResultId: row.id,
+    runId: row.runId,
+    outcomeCheckId: row.outcomeCheckId,
+    journeyId: row.journeyId,
+    criticalActionId: row.criticalActionId,
+    type: row.outcomeType,
+    expected: parseJson(row.expectedJson),
+    observed: parseJson(row.observedJson),
+    expectedCount: row.expectedCount,
+    observedCount: row.observedCount,
+    status: row.status,
+    reason: row.reason,
+    evidenceReferences: parseJson(row.evidenceReferencesJson),
+    templateBinding:
+      row.templateBindingJson === null
+        ? null
+        : parseJson(row.templateBindingJson),
+    unknowns: parseJson(row.unknownsJson),
     evaluatedAt: row.evaluatedAt,
   });
 }

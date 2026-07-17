@@ -83,6 +83,10 @@ export interface ReplayBrowserSession {
   captureScreenshot(destination: string): Promise<void>;
   setScreenshotMasks(locators: readonly ReplayLocator[]): void;
   isVisible(locator: ReplayLocator): Promise<boolean>;
+  countVisibleMatches?(
+    locator: ReplayLocator,
+    containingText?: string,
+  ): Promise<VisibleMatchCount>;
   isDisabled(locator: ReplayLocator): Promise<boolean>;
   textVisible(text: string): Promise<boolean>;
   inputValue(locator: ReplayLocator): Promise<string | null>;
@@ -98,6 +102,13 @@ export interface ReplayBrowserSession {
   currentUrl(): string;
   settle(milliseconds: number): Promise<void>;
   close(): Promise<void>;
+}
+
+export interface VisibleMatchCount {
+  readonly visibleCount: number;
+  readonly examinedCount: number;
+  readonly totalLocatorMatchCount: number;
+  readonly truncated: boolean;
 }
 
 export interface OutcomeElementSelection {
@@ -330,6 +341,31 @@ class PlaywrightExternalSession
 
   async isVisible(locator: ReplayLocator): Promise<boolean> {
     return resolveLocator(this.page, locator).isVisible();
+  }
+
+  async countVisibleMatches(
+    locator: ReplayLocator,
+    containingText?: string,
+  ): Promise<VisibleMatchCount> {
+    const matches = resolveLocator(this.page, locator);
+    const totalLocatorMatchCount = await matches.count();
+    const count = Math.min(totalLocatorMatchCount, 100);
+    let visible = 0;
+    for (let index = 0; index < count; index += 1) {
+      const match = matches.nth(index);
+      if (!(await match.isVisible())) continue;
+      if (containingText !== undefined) {
+        const text = (await match.innerText()).replace(/\s+/gu, ' ').trim();
+        if (!text.includes(containingText)) continue;
+      }
+      visible += 1;
+    }
+    return {
+      visibleCount: visible,
+      examinedCount: count,
+      totalLocatorMatchCount,
+      truncated: totalLocatorMatchCount > count,
+    };
   }
 
   async isDisabled(locator: ReplayLocator): Promise<boolean> {

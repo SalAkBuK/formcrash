@@ -2,13 +2,17 @@ import { writeFileSync } from 'node:fs';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ReplayLocator } from '@formcrash/contracts';
+import {
+  externalRunDetailSchema,
+  type ReplayLocator,
+} from '@formcrash/contracts';
 
 import type { FormCrashDatabase } from '../src/persistence/database.js';
 import { initializePersistence } from '../src/persistence/initialize.js';
 import { ExternalExperimentRepository } from '../src/persistence/external-experiment-repository.js';
 import { ProjectJourneyRepository } from '../src/persistence/project-journey-repository.js';
 import { ProjectSettingsRepository } from '../src/persistence/project-settings-repository.js';
+import { OutcomeCheckRepository } from '../src/persistence/outcome-check-repository.js';
 import { AuthStateStore } from '../src/runner/external/auth-session.js';
 import { ExternalExperimentRunner } from '../src/runner/external/external-experiment-runner.js';
 import {
@@ -33,6 +37,7 @@ let database: FormCrashDatabase;
 let projects: ProjectJourneyRepository;
 let settings: ProjectSettingsRepository;
 let experiments: ExternalExperimentRepository;
+let outcomes: OutcomeCheckRepository;
 
 beforeEach(() => {
   temporary = createTemporaryTestConfig({ browserTimeoutMs: 500 });
@@ -40,6 +45,7 @@ beforeEach(() => {
   projects = new ProjectJourneyRepository(database.connection);
   settings = new ProjectSettingsRepository(database.connection);
   experiments = new ExternalExperimentRepository(database.connection);
+  outcomes = new OutcomeCheckRepository(database.connection);
 });
 
 afterEach(() => {
@@ -114,6 +120,50 @@ describe('external runner terminal paths', () => {
     expect(result.status).toBe('runner_error');
     expect(result.runnerError?.code).toBe('before_hook_failed');
     expect(owner.launchCount).toBe(0);
+  });
+
+  it('keeps runner failure distinct from an explanatory could-not-verify outcome', async () => {
+    const configured = configure({
+      withOutcomeCheck: true,
+      beforeHookUrl: 'http://127.0.0.1:1/test-support/reset',
+    });
+    const owner = new FakeOwner();
+    const result = await runner(owner, new BrowserOwnership()).run(
+      configured.versionId,
+      {},
+    );
+
+    expect(result).toMatchObject({
+      status: 'runner_error',
+      lifecycleStatus: 'runner_error',
+      outcomeAggregate: 'could_not_verify',
+      assertionAggregate: 'could_not_verify',
+      outcomeCheckResults: [
+        {
+          status: 'could_not_verify',
+          observed: {
+            verified: false,
+            evidenceBoundary: 'browser_visible_only',
+          },
+          evidenceReferences: {
+            triggerEventIds: [],
+            requestObservationIds: [],
+            screenshotArtifactIds: [],
+            runnerEventIds: [],
+          },
+        },
+      ],
+    });
+    expect(result.outcomeCheckResults[0]?.reason).toContain(
+      'did not reach a browser state',
+    );
+    expect(owner.launchCount).toBe(0);
+
+    const legacyShape: Record<string, unknown> = { ...result };
+    delete legacyShape.lifecycleStatus;
+    expect(externalRunDetailSchema.parse(legacyShape).lifecycleStatus).toBe(
+      'runner_error',
+    );
   });
 
   it('classifies a restored session redirect to login as authentication required', async () => {
@@ -255,6 +305,56 @@ describe('external runner terminal paths', () => {
       ),
     ).not.toContain(syntheticSecret);
   });
+
+  it('persists could_not_verify and releases Chromium after locator evaluation fails', async () => {
+    const configured = configure({ withOutcomeCheck: true });
+    const owner = new FakeOwner({ failOutcomeEvaluation: true });
+    const ownership = new BrowserOwnership();
+    const result = await runner(owner, ownership).run(configured.versionId, {});
+
+    expect(result.lifecycleStatus).toBe('completed');
+    expect(result.outcomeAggregate).toBe('could_not_verify');
+    expect(result.outcomeCheckResults).toEqual([
+      expect.objectContaining({ status: 'could_not_verify' }),
+    ]);
+    expect(owner.lastSession?.closed).toBe(true);
+    expect(ownership.activeWorkload).toBeNull();
+  });
+
+  it('omits unavailable screenshots and requests instead of persisting dangling evidence', async () => {
+    const configured = configure({ withOutcomeCheck: true });
+    const owner = new FakeOwner({ failScreenshots: true });
+    const result = await runner(owner, new BrowserOwnership()).run(
+      configured.versionId,
+      {},
+    );
+
+    expect(result.lifecycleStatus).toBe('completed');
+    expect(result.warnings).toHaveLength(3);
+    expect(result.artifacts).toEqual([]);
+    expect(result.networkObservations).toEqual([]);
+    expect(result.outcomeCheckResults[0]?.evidenceReferences).toMatchObject({
+      requestObservationIds: [],
+      screenshotArtifactIds: [],
+    });
+  });
+
+  it('rejects a malformed generated binding before browser ownership or execution', async () => {
+    const configured = configure({ invalidOutcomeBinding: true });
+    const owner = new FakeOwner();
+    const ownership = new BrowserOwnership();
+
+    await expect(
+      runner(owner, ownership).run(configured.versionId, {}),
+    ).rejects.toThrow();
+    expect(owner.launchCount).toBe(0);
+    expect(ownership.activeWorkload).toBeNull();
+    expect(
+      database.connection
+        .prepare('SELECT COUNT(*) AS count FROM external_runs')
+        .get(),
+    ).toEqual({ count: 0 });
+  });
 });
 
 function configure(options: {
@@ -262,6 +362,8 @@ function configure(options: {
   readonly beforeHookUrl?: string;
   readonly afterHookUrl?: string;
   readonly assertionText?: string;
+  readonly withOutcomeCheck?: boolean;
+  readonly invalidOutcomeBinding?: boolean;
 }) {
   const project = projects.createProject({
     name: `Runner ${crypto.randomUUID()}`,
@@ -292,6 +394,61 @@ function configure(options: {
       normalizationRule: 'test',
     },
   });
+  if (options.withOutcomeCheck || options.invalidOutcomeBinding) {
+    const action = outcomes.approveCriticalAction(journey, {
+      stepId: targetStepId,
+      label: 'Submit',
+    });
+    const target = {
+      locator: { strategy: 'id' as const, value: 'complete' },
+      fingerprint: {
+        tagName: 'section',
+        dataFormcrash: null,
+        dataTestId: null,
+        id: 'complete',
+        role: null,
+        accessibleName: null,
+        name: null,
+        cssPath: '#complete',
+      },
+      preview: 'Complete',
+      reliability: 'high' as const,
+      warnings: [],
+      generatedBindings: [],
+    };
+    if (options.invalidOutcomeBinding) {
+      database.connection
+        .prepare(
+          `INSERT INTO outcome_checks
+            (id, journey_id, critical_action_id, outcome_type,
+             definition_json, created_at)
+           VALUES (?, ?, ?, 'matching_item_appears_exactly_once', ?, ?)`,
+        )
+        .run(
+          crypto.randomUUID(),
+          journey.id,
+          action.id,
+          JSON.stringify({
+            description: 'Malformed binding',
+            target,
+            binding: {
+              expression: 'var.SECRET',
+              template: '{{var.SECRET}}',
+              label: 'Unsafe binding',
+            },
+          }),
+          new Date().toISOString(),
+        );
+    } else {
+      outcomes.saveOutcomeCheck({
+        journeyId: journey.id,
+        criticalActionId: action.id,
+        type: 'visible_element_exists',
+        description: 'Completion should be visible.',
+        target,
+      });
+    }
+  }
   const secretHeader = options.requiredVariable
     ? { authorization: 'Bearer {{var.API_TOKEN}}' }
     : {};
@@ -480,6 +637,7 @@ function runner(owner: ExternalBrowserOwner, ownership: BrowserOwnership) {
     experiments,
     ownership,
     owner,
+    outcomes,
   );
 }
 
@@ -492,6 +650,8 @@ class FakeOwner implements ExternalBrowserOwner {
     private readonly options: {
       readonly failFillWithValue?: boolean;
       readonly currentUrl?: string;
+      readonly failOutcomeEvaluation?: boolean;
+      readonly failScreenshots?: boolean;
     } = {},
   ) {}
 
@@ -516,6 +676,8 @@ class FakeSession implements ReplayBrowserSession {
     private readonly options: {
       readonly failFillWithValue?: boolean;
       readonly currentUrl?: string;
+      readonly failOutcomeEvaluation?: boolean;
+      readonly failScreenshots?: boolean;
     } = {},
   ) {}
   navigate(): Promise<void> {
@@ -553,6 +715,9 @@ class FakeSession implements ReplayBrowserSession {
     this.observer = observer;
   }
   captureScreenshot(destination: string): Promise<void> {
+    if (this.options.failScreenshots) {
+      return Promise.reject(new Error('screenshot unavailable'));
+    }
     writeFileSync(destination, 'fake png');
     return Promise.resolve();
   }
@@ -561,6 +726,17 @@ class FakeSession implements ReplayBrowserSession {
   }
   isVisible(): Promise<boolean> {
     return Promise.resolve(true);
+  }
+  countVisibleMatches() {
+    if (this.options.failOutcomeEvaluation) {
+      return Promise.reject(new Error('stale locator'));
+    }
+    return Promise.resolve({
+      visibleCount: 1,
+      examinedCount: 1,
+      totalLocatorMatchCount: 1,
+      truncated: false,
+    });
   }
   isDisabled(): Promise<boolean> {
     return Promise.resolve(true);
@@ -579,7 +755,9 @@ class FakeSession implements ReplayBrowserSession {
     return Promise.resolve();
   }
   close(): Promise<void> {
+    this.closed = true;
     this.observer = null;
     return Promise.resolve();
   }
+  closed = false;
 }
