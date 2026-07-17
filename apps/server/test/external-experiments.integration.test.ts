@@ -25,6 +25,8 @@ import { RequestDiscoveryService } from '../src/runner/external/request-discover
 import { BrowserOwnership } from '../src/runner/infrastructure/browser-ownership.js';
 import type { FormCrashDatabase } from '../src/persistence/database.js';
 import { createTemporaryTestConfig } from './fixtures.js';
+import { createApp } from '../src/app/create-app.js';
+import { externalRunComparisonResponseSchema } from '@formcrash/contracts';
 
 const fixtureHtml = readFileSync(
   path.resolve(
@@ -48,6 +50,7 @@ let outcomes: OutcomeCheckRepository;
 let createdCount = 0;
 const createdRunIds = new Set<string>();
 const observedEmailsByRunId = new Map<string, Set<string>>();
+let fixtureModeOverride: 'vulnerable' | 'fixed' | null = null;
 
 beforeAll(async () => {
   server = createServer((request, response) => {
@@ -122,7 +125,14 @@ async function handleFixtureRequest(
     return sendJson(response, 201, { invited: true });
   }
   response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-  response.end(fixtureHtml);
+  response.end(
+    fixtureModeOverride === null
+      ? fixtureHtml
+      : fixtureHtml.replace(
+          "const mode = parameters.get('mode') === 'fixed' ? 'fixed' : 'vulnerable';",
+          `const mode = '${fixtureModeOverride}';`,
+        ),
+  );
 }
 
 afterAll(async () => {
@@ -252,7 +262,7 @@ describe.sequential('external impatient-user experiments in Chromium', () => {
     ).toBe(false);
   }, 45_000);
 
-  it('fails the vulnerable endpoint and passes the fixed endpoint with durable sanitized evidence', async () => {
+  it('proves the same compatible experiment failed before and passed after the fixture fix', async () => {
     const vulnerable = projects
       .listProjects()
       .find((project) => project.name === 'External vulnerable');
@@ -340,8 +350,12 @@ describe.sequential('external impatient-user experiments in Chromium', () => {
       vulnerableRun.events.map((_event, index) => index + 1),
     );
 
-    const fixed = await configureScenario('fixed');
-    const fixedDiscovery = await discoverScenario(fixed);
+    fixtureModeOverride = 'fixed';
+    const fixedDiscovery = await discoverScenario({
+      projectId: vulnerable.id,
+      journeyId: vulnerableJourney.id,
+      targetStepId: vulnerableVersion.targetStepId,
+    });
     const submitStateRecommendation = fixedDiscovery.assertionRecommendationSets
       .find(
         (set) =>
@@ -353,7 +367,7 @@ describe.sequential('external impatient-user experiments in Chromium', () => {
       type: 'element_disabled',
       observationWindow: 'during_repeated_action',
     });
-    const fixedVersion = createVersion(fixed.journeyId);
+    const fixedVersion = createVersion(vulnerableJourney.id);
     const fixedRun = await createRunner().run(fixedVersion.id, {
       SECRET_PASSWORD: 'AnotherRuntimePassword',
     });
@@ -439,6 +453,62 @@ describe.sequential('external impatient-user experiments in Chromium', () => {
     );
     expect(fixedRun.assertionAggregate).toBe('passed');
     expect(fixedRun.assertions).toHaveLength(4);
+
+    const app = createApp({ config: temporary.config, logger: false });
+    const comparisonResponse = await app.inject({
+      method: 'POST',
+      url: '/api/external-run-comparisons',
+      payload: {
+        beforeRunId: vulnerableRun.runId,
+        afterRunId: fixedRun.runId,
+      },
+    });
+    await app.close();
+    expect(comparisonResponse.statusCode).toBe(200);
+    const comparison = externalRunComparisonResponseSchema.parse(
+      comparisonResponse.json(),
+    );
+    expect(comparison).toMatchObject({
+      compatibility: 'compatible',
+      primaryStatus: 'protection_verified',
+      presentation: {
+        headline: 'Repeated-submission protection verified.',
+        successfulRequestCounts: { before: 2, after: 1 },
+        failureRecipe: { triggerCount: 2 },
+      },
+    });
+    expect(comparison.presentation?.unknowns).toEqual(
+      expect.arrayContaining([
+        'Database state was not inspected.',
+        'Hidden backend records or side effects were not evaluated.',
+      ]),
+    );
+    expect(
+      comparison.presentation?.checks.find(
+        (check) => check.type === 'matching_item_appears_exactly_once',
+      ),
+    ).toMatchObject({
+      beforeStatus: 'failed',
+      afterStatus: 'passed',
+      expectedCondition: { kind: 'visible_match_count', count: 1 },
+      beforeObservedCondition: { kind: 'visible_match_count', count: 2 },
+      afterObservedCondition: { kind: 'visible_match_count', count: 1 },
+    });
+    expect(comparison.presentation?.checks.map((check) => check.type)).toEqual([
+      'matching_item_appears_exactly_once',
+      'visible_element_exists',
+      'final_pathname_matches',
+    ]);
+    expect(
+      comparison.presentation?.screenshots.every(
+        (pair) => pair.before !== null && pair.after !== null,
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(comparison)).not.toContain(vulnerableGeneratedEmail);
+    expect(JSON.stringify(comparison)).not.toContain(fixedGeneratedEmail);
+    expect(JSON.stringify(comparison)).not.toMatch(
+      /database duplicate|backend idempotency|root cause was resolved/iu,
+    );
   }, 45_000);
 });
 

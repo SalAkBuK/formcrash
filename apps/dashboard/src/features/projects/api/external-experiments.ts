@@ -5,6 +5,7 @@ import {
   externalExperimentListSchema,
   externalExperimentVersionSchema,
   externalRunDetailSchema,
+  externalRunComparisonResponseSchema,
   externalRunListSchema,
   projectExecutionSettingsSchema,
   requestDiscoveryResultSchema,
@@ -14,6 +15,7 @@ import {
   type EphemeralRuntimeValues,
   type ExternalExperimentVersion,
   type ExternalRunDetail,
+  type ExternalRunComparisonResponse,
   type ExternalRunList,
   type ProjectExecutionSettings,
   type ProjectExecutionSettingsInput,
@@ -184,6 +186,21 @@ export function listExternalRuns(
 
 export function getExternalRun(runId: string): Promise<ExternalRunDetail> {
   return requestJson(`/api/external-runs/${runId}`, externalRunDetailSchema);
+}
+
+export function compareExternalRuns(
+  beforeRunId: string,
+  afterRunId: string,
+): Promise<ExternalRunComparisonResponse> {
+  return requestJson(
+    '/api/external-run-comparisons',
+    externalRunComparisonResponseSchema,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ beforeRunId, afterRunId }),
+    },
+  );
 }
 
 export function getExternalArtifactUrl(

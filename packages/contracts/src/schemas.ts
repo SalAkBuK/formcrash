@@ -1229,6 +1229,9 @@ export const externalRunSummarySchema = z.object({
   projectId: z.string().min(1),
   journeyId: z.string().min(1),
   status: externalRunDetailObjectSchema.shape.status,
+  lifecycleStatus: externalRunLifecycleStatusSchema,
+  outcomeAggregate: outcomeAggregateSchema,
+  assertionAggregate: outcomeAggregateSchema,
   startedAt: z.iso.datetime({ offset: true }),
   completedAt: z.iso.datetime({ offset: true }).nullable(),
   durationMs: z.number().int().nonnegative().nullable(),
@@ -1254,6 +1257,178 @@ export const externalRunListSchema = z.object({
   items: z.array(externalRunSummarySchema),
   limit: z.number().int().positive(),
   offset: z.number().int().nonnegative(),
+});
+
+export const externalRunComparisonRequestSchema = z
+  .object({
+    beforeRunId: z.string().min(1).max(200),
+    afterRunId: z.string().min(1).max(200),
+  })
+  .strict();
+
+export const externalRunComparisonCompatibilitySchema = z.enum([
+  'compatible',
+  'incompatible',
+]);
+
+export const externalRunComparisonStatusSchema = z.enum([
+  'protection_verified',
+  'still_failing',
+  'regressed',
+  'no_material_change',
+  'could_not_verify',
+  'incompatible',
+]);
+
+export const externalRunComparisonDifferenceSchema = z.object({
+  code: z.enum([
+    'same_run',
+    'different_project',
+    'different_journey_version',
+    'different_critical_action',
+    'different_failure_recipe',
+    'different_trigger_count',
+    'different_trigger_interval',
+    'different_continuation_behavior',
+    'different_experiment_configuration',
+    'different_outcome_checks',
+    'different_generated_template_strategy',
+    'different_request_matcher',
+    'different_assertions',
+    'reverse_chronology',
+    'run_not_completed',
+    'runner_error',
+    'outcome_checks_not_configured',
+    'outcome_results_missing',
+  ]),
+  message: z.string().min(1).max(500),
+});
+
+export const externalRunComparisonMatchedPropertySchema = z.object({
+  key: z.enum([
+    'project',
+    'journey_version',
+    'critical_action',
+    'failure_recipe',
+    'outcome_checks',
+    'generated_template_strategy',
+    'request_matcher',
+    'technical_assertions',
+  ]),
+  label: z.string().min(1).max(120),
+  value: z.string().min(1).max(500),
+});
+
+export const externalRunComparisonRunReferenceSchema = z.object({
+  runId: z.string().min(1),
+  experimentVersionId: z.string().min(1),
+  label: z.enum(['Before fix', 'After fix']),
+  createdAt: z.iso.datetime({ offset: true }),
+  completedAt: z.iso.datetime({ offset: true }),
+  outcomeAggregate: outcomeAggregateSchema,
+  assertionAggregate: outcomeAggregateSchema,
+});
+
+export const externalRunComparisonCriticalActionSchema = z.object({
+  id: z.string().min(1),
+  stepId: z.string().min(1),
+  label: z.string().min(1).max(160),
+  recordedStepName: z.string().min(1).max(160),
+});
+
+export const externalRunComparisonFailureRecipeSchema = z.object({
+  type: z.literal('impatient_user'),
+  targetStepId: z.string().min(1),
+  targetStepName: z.string().min(1).max(160),
+  triggerCount: z.union([z.literal(2), z.literal(3)]),
+  intervalMs: z.union([z.literal(0), z.literal(100), z.literal(300)]),
+  continueAfterTarget: z.boolean(),
+});
+
+export const externalRunComparisonCheckSchema = z.object({
+  identity: z.string().min(1).max(128),
+  outcomeCheckId: z.string().min(1),
+  type: outcomeCheckTypeSchema,
+  approvedDescription: z.string().min(1).max(500),
+  expectedCondition: externalRunPresentationConditionSchema,
+  beforeStatus: outcomeEvaluationStatusSchema,
+  afterStatus: outcomeEvaluationStatusSchema,
+  beforeObservedCondition: externalRunPresentationConditionSchema,
+  afterObservedCondition: externalRunPresentationConditionSchema,
+  templateBinding: generatedValueBindingSchema.nullable(),
+  beforeEvidenceReferences: outcomeEvidenceReferencesSchema,
+  afterEvidenceReferences: outcomeEvidenceReferencesSchema,
+});
+
+export const externalRunComparisonEvidenceValueSchema = z.union([
+  z.string().min(1).max(500),
+  z.number().int().nonnegative(),
+]);
+
+export const externalRunComparisonEvidenceRowSchema = z.object({
+  key: z.enum([
+    'critical_action_triggers',
+    'successful_matching_requests',
+    'visible_matching_results',
+    'expected_visible_results',
+    'outcome',
+  ]),
+  label: z.string().min(1).max(120),
+  before: externalRunComparisonEvidenceValueSchema,
+  after: externalRunComparisonEvidenceValueSchema,
+});
+
+export const externalRunComparisonScreenshotReferenceSchema = z.object({
+  artifactId: z.string().min(1),
+  runId: z.string().min(1),
+  label: z.enum(['before-disruption', 'after-disruption', 'final-result']),
+  createdAt: z.iso.datetime({ offset: true }),
+});
+
+export const externalRunComparisonScreenshotPairSchema = z.object({
+  label: z.enum(['before-disruption', 'after-disruption', 'final-result']),
+  before: externalRunComparisonScreenshotReferenceSchema.nullable(),
+  after: externalRunComparisonScreenshotReferenceSchema.nullable(),
+});
+
+export const externalRunComparisonPresentationSchema = z.object({
+  primaryStatus: externalRunComparisonStatusSchema.exclude(['incompatible']),
+  headline: z.string().min(1).max(500),
+  summary: z.string().min(1).max(1_000),
+  beforeRun: externalRunComparisonRunReferenceSchema,
+  afterRun: externalRunComparisonRunReferenceSchema,
+  criticalAction: externalRunComparisonCriticalActionSchema,
+  failureRecipe: externalRunComparisonFailureRecipeSchema,
+  checks: z.array(externalRunComparisonCheckSchema).min(1).max(20),
+  evidenceTable: z.array(externalRunComparisonEvidenceRowSchema).max(5),
+  successfulRequestCounts: z
+    .object({
+      before: z.number().int().nonnegative(),
+      after: z.number().int().nonnegative(),
+    })
+    .nullable(),
+  technicalAssertionAggregates: z.object({
+    before: outcomeAggregateSchema,
+    after: outcomeAggregateSchema,
+  }),
+  screenshots: z.array(externalRunComparisonScreenshotPairSchema).length(3),
+  configurationIdentity: z.object({
+    algorithm: z.literal('sha256'),
+    fingerprint: z.string().regex(/^[a-f0-9]{64}$/u),
+  }),
+  observed: z.array(z.string().min(1).max(500)).max(20),
+  conclusion: z.string().min(1).max(1_000).nullable(),
+  unknowns: z.array(z.string().min(1).max(500)).min(1).max(20),
+});
+
+export const externalRunComparisonResponseSchema = z.object({
+  compatibility: externalRunComparisonCompatibilitySchema,
+  primaryStatus: externalRunComparisonStatusSchema,
+  differences: z.array(externalRunComparisonDifferenceSchema).max(20),
+  matchedProperties: z
+    .array(externalRunComparisonMatchedPropertySchema)
+    .max(20),
+  presentation: externalRunComparisonPresentationSchema.nullable(),
 });
 
 export const missingRuntimeVariablesErrorSchema = z.object({
@@ -1719,6 +1894,27 @@ export type ExternalRunDetail = z.infer<typeof externalRunDetailSchema>;
 export type ExternalRunSummary = z.infer<typeof externalRunSummarySchema>;
 export type ExternalRunListQuery = z.infer<typeof externalRunListQuerySchema>;
 export type ExternalRunList = z.infer<typeof externalRunListSchema>;
+export type ExternalRunComparisonRequest = z.infer<
+  typeof externalRunComparisonRequestSchema
+>;
+export type ExternalRunComparisonCompatibility = z.infer<
+  typeof externalRunComparisonCompatibilitySchema
+>;
+export type ExternalRunComparisonStatus = z.infer<
+  typeof externalRunComparisonStatusSchema
+>;
+export type ExternalRunComparisonDifference = z.infer<
+  typeof externalRunComparisonDifferenceSchema
+>;
+export type ExternalRunComparisonMatchedProperty = z.infer<
+  typeof externalRunComparisonMatchedPropertySchema
+>;
+export type ExternalRunComparisonPresentation = z.infer<
+  typeof externalRunComparisonPresentationSchema
+>;
+export type ExternalRunComparisonResponse = z.infer<
+  typeof externalRunComparisonResponseSchema
+>;
 export type AssertionResultStatus = z.infer<typeof assertionResultStatusSchema>;
 export type RunEventEnvelope = z.infer<typeof runEventEnvelopeSchema>;
 export type SampleRunMode = z.infer<typeof sampleRunModeSchema>;

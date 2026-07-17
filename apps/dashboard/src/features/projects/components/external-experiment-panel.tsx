@@ -57,6 +57,7 @@ import {
   type RecommendationSelection,
 } from '../models/assertion-recommendations';
 import { ExternalRunResult } from './external-run-result';
+import { ExternalRunComparison } from './external-run-comparison';
 import { GuidedTestPanel } from './guided-test-panel';
 
 const noCandidates: readonly RankedRequestCandidate[] = [];
@@ -543,13 +544,18 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
       ) : null}
 
       {workspaceMode === 'guided' ? (
-        <GuidedTestPanel
-          journeys={journeys}
-          onCompleted={handleGuidedCompleted}
-          onOpenAdvanced={() => setWorkspaceMode('advanced')}
-          project={project}
-          settings={settingsState}
-        />
+        <>
+          <GuidedTestPanel
+            journeys={journeys}
+            onCompleted={handleGuidedCompleted}
+            onOpenAdvanced={() => setWorkspaceMode('advanced')}
+            project={project}
+            settings={settingsState}
+          />
+          {result !== null ? (
+            <ExternalRunComparison beforeRun={result} runs={runHistory} />
+          ) : null}
+        </>
       ) : (
         <>
           <div className="panel settings-panel">
@@ -1209,7 +1215,12 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
                 </p>
               ) : null}
             </div>
-            {result !== null ? <ExternalRunResult result={result} /> : null}
+            {result !== null ? (
+              <>
+                <ExternalRunResult result={result} />
+                <ExternalRunComparison beforeRun={result} runs={runHistory} />
+              </>
+            ) : null}
             <div className="external-run-history">
               <div className="section-heading-row compact-heading">
                 <div>
