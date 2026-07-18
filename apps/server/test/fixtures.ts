@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -31,6 +31,20 @@ export function createTemporaryTestConfig(
     },
     cleanup: () => rmSync(root, { recursive: true, force: true }),
   };
+}
+
+export function restoreSampleNextEnv(filePath: string): void {
+  writeFileSync(
+    filePath,
+    `/// <reference types="next" />
+/// <reference types="next/image-types/global" />
+import "./.next/dev/types/routes.d.ts";
+
+// NOTE: This file should not be edited
+// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.
+`,
+    'utf8',
+  );
 }
 
 export function buildSampleRunResult(

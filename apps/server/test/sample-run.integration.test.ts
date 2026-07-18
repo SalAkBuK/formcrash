@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -14,7 +14,7 @@ import {
 
 import { createApp } from '../src/app/create-app.js';
 import type { SampleRunResult } from '../src/runner/sample/types.js';
-import { createTemporaryTestConfig } from './fixtures.js';
+import { createTemporaryTestConfig, restoreSampleNextEnv } from './fixtures.js';
 
 const SAMPLE_PORT = 4210;
 const SAMPLE_BASE_URL = `http://127.0.0.1:${SAMPLE_PORT}`;
@@ -25,6 +25,15 @@ const sampleCheckoutDirectory = path.resolve(
 const nextCli = path.resolve(
   sampleCheckoutDirectory,
   'node_modules/next/dist/bin/next',
+);
+const sampleDistDirectoryName = `.next-test-${process.pid}-${SAMPLE_PORT}`;
+const sampleDistDirectory = path.resolve(
+  sampleCheckoutDirectory,
+  sampleDistDirectoryName,
+);
+const sampleNextEnvPath = path.resolve(
+  sampleCheckoutDirectory,
+  'next-env.d.ts',
 );
 const temporary = createTemporaryTestConfig({
   browserHeadless: true,
@@ -46,7 +55,11 @@ beforeAll(async () => {
     [nextCli, 'dev', '--hostname', '127.0.0.1', '--port', String(SAMPLE_PORT)],
     {
       cwd: sampleCheckoutDirectory,
-      env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1' },
+      env: {
+        ...process.env,
+        NEXT_TELEMETRY_DISABLED: '1',
+        FORMCRASH_NEXT_DIST_DIR: sampleDistDirectoryName,
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
@@ -69,6 +82,13 @@ afterAll(async () => {
     ]);
     if (sampleProcess.exitCode === null) sampleProcess.kill('SIGKILL');
   }
+  rmSync(sampleDistDirectory, {
+    recursive: true,
+    force: true,
+    maxRetries: 3,
+    retryDelay: 100,
+  });
+  restoreSampleNextEnv(sampleNextEnvPath);
   temporary.cleanup();
 }, 10_000);
 
