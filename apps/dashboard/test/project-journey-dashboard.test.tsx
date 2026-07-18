@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -315,7 +315,11 @@ describe('external project journey workflow', () => {
     mocks.listJourneys.mockResolvedValue([journey]);
     await user.click(screen.getByRole('button', { name: 'Save journey' }));
 
-    expect(await screen.findByText('Version 1 · 1 steps')).toBeVisible();
+    expect(
+      await screen.findByRole('heading', { name: 'Profile journey' }),
+    ).toBeVisible();
+    expect(screen.getByLabelText('Journey version')).toHaveValue(journey.id);
+    expect(screen.getAllByText('1 step').length).toBeGreaterThan(0);
     await user.click(screen.getByRole('button', { name: 'Replay' }));
     expect(await screen.findByText(/Replay passed/)).toBeVisible();
     expect(mocks.saveJourney).toHaveBeenCalledWith(
@@ -355,11 +359,9 @@ describe('external project journey workflow', () => {
     render(<ProjectJourneyDashboard />);
 
     await user.click(await screen.findByRole('button', { name: 'Replay' }));
-    expect(await screen.findByText('Authentication interrupted')).toBeVisible();
+    expect(await screen.findAllByText('Needs replacement')).not.toHaveLength(0);
     expect(
-      screen.getByText(
-        'The saved authentication session appears to have expired.',
-      ),
+      screen.getByText(/saved authentication session appears to have expired/u),
     ).toBeVisible();
 
     await user.click(screen.getByRole('button', { name: 'Sign in again' }));
@@ -592,10 +594,14 @@ describe('external project journey workflow', () => {
     await user.click(
       screen.getByRole('button', { name: 'Remove and recapture' }),
     );
-    expect(mocks.deleteOutcomeCheck).toHaveBeenCalledWith(
-      journey.id,
-      savedCheck.id,
+    await waitFor(() =>
+      expect(mocks.deleteOutcomeCheck).toHaveBeenCalledWith(
+        journey.id,
+        savedCheck.id,
+      ),
     );
-    expect(screen.getByText('No Outcome Checks saved yet.')).toBeVisible();
+    expect(
+      await screen.findByText('No Outcome Checks saved yet.'),
+    ).toBeVisible();
   });
 });

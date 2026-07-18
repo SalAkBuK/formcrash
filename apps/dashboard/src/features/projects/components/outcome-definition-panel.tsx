@@ -31,12 +31,18 @@ export function OutcomeDefinitionPanel({
   confirmProduction,
   environment,
   disabled,
+  expanded,
+  onExpandedChange,
+  onStateChange,
 }: {
   readonly journey: PersistedJourney;
   readonly runtimeValues: EphemeralRuntimeValues;
   readonly confirmProduction: boolean;
   readonly environment: ProjectEnvironment;
   readonly disabled: boolean;
+  readonly expanded?: boolean;
+  readonly onExpandedChange?: (expanded: boolean) => void;
+  readonly onStateChange?: (state: OutcomeDefinitionState) => void;
 }) {
   const compatibleSteps = useMemo(
     () =>
@@ -65,8 +71,10 @@ export function OutcomeDefinitionPanel({
   const [bindingExpression, setBindingExpression] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     void Promise.all([
       getCriticalAction(journey.id),
       listOutcomeChecks(journey.id),
@@ -84,8 +92,13 @@ export function OutcomeDefinitionPanel({
           setActionLabel(action.label);
         }
       })
-      .catch((reason: unknown) => setError(messageOf(reason)));
+      .catch((reason: unknown) => setError(messageOf(reason)))
+      .finally(() => setLoading(false));
   }, [journey.id]);
+
+  useEffect(() => {
+    onStateChange?.({ checks, criticalAction, error, loading });
+  }, [checks, criticalAction, error, loading, onStateChange]);
 
   useEffect(() => {
     if (
@@ -208,7 +221,12 @@ export function OutcomeDefinitionPanel({
   const requiresBinding = checkType === 'matching_item_appears_exactly_once';
 
   return (
-    <details className="outcome-definition">
+    <details
+      className="outcome-definition"
+      id="journey-outcome-configuration"
+      open={expanded}
+      onToggle={(event) => onExpandedChange?.(event.currentTarget.open)}
+    >
       <summary>Define Critical Action and Outcome Checks</summary>
       <div className="outcome-definition-body">
         {error === null ? null : (
@@ -503,6 +521,13 @@ export function OutcomeDefinitionPanel({
       </div>
     </details>
   );
+}
+
+export interface OutcomeDefinitionState {
+  readonly checks: readonly OutcomeCheck[];
+  readonly criticalAction: CriticalAction | null;
+  readonly error: string | null;
+  readonly loading: boolean;
 }
 
 function readableOutcome(check: OutcomeCheck): string {

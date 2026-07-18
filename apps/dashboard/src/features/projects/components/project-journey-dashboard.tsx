@@ -16,7 +16,7 @@ import type {
 } from '@formcrash/contracts';
 
 import { StatusBadge } from '../../../components/ui/status-badge';
-import { FormCrashApiError, resolveApiUrl } from '../../../lib/api-client';
+import { FormCrashApiError } from '../../../lib/api-client';
 import { formatLocalDateTime, formatCount } from '../../../lib/formatters';
 import {
   confirmAuthenticationCapture,
@@ -36,13 +36,15 @@ import {
   stopRecording,
 } from '../api/projects';
 import { ExternalExperimentPanel } from './external-experiment-panel';
-import { OutcomeDefinitionPanel } from './outcome-definition-panel';
-import { journeyRuntimeRequirements } from '../models/journey-runtime';
+import { JourneyDetail } from './journey-detail';
 
 export function ProjectJourneyDashboard() {
   const [projects, setProjects] = useState<readonly Project[]>([]);
   const [selected, setSelected] = useState<Project | null>(null);
   const [journeys, setJourneys] = useState<readonly PersistedJourney[]>([]);
+  const [selectedJourneyId, setSelectedJourneyId] = useState<string | null>(
+    null,
+  );
   const [projectDetailsLoading, setProjectDetailsLoading] = useState(false);
   const [recording, setRecording] = useState<RecordingSession | null>(null);
   const [reviewSteps, setReviewSteps] = useState<
@@ -80,6 +82,7 @@ export function ProjectJourneyDashboard() {
     if (selected === null) return;
     setProjectDetailsLoading(true);
     setJourneys([]);
+    setSelectedJourneyId(null);
     setExecutionSettings(null);
     setProductionReplayConfirmed(false);
     setReplayAuthenticationRequired(false);
@@ -93,6 +96,7 @@ export function ProjectJourneyDashboard() {
       .then(([nextJourneys, nextSettings]) => {
         if (!active) return;
         setJourneys(nextJourneys);
+        setSelectedJourneyId(nextJourneys[0]?.id ?? null);
         setExecutionSettings(nextSettings);
         setReplayValues({});
       })
@@ -309,6 +313,7 @@ export function ProjectJourneyDashboard() {
         reviewSteps,
       );
       setJourneys(await listJourneys(selected.id));
+      setSelectedJourneyId(saved.id);
       setJourneyName(saved.name);
     } catch (reason: unknown) {
       setError(messageOf(reason));
@@ -397,7 +402,17 @@ export function ProjectJourneyDashboard() {
     setError(null);
     try {
       await deleteJourney(journey.id);
-      if (selected !== null) setJourneys(await listJourneys(selected.id));
+      if (selected !== null) {
+        const remaining = await listJourneys(selected.id);
+        setJourneys(remaining);
+        setSelectedJourneyId((current) =>
+          current === journey.id
+            ? (remaining[0]?.id ?? null)
+            : current !== null && remaining.some((item) => item.id === current)
+              ? current
+              : (remaining[0]?.id ?? null),
+        );
+      }
       setReplayResult(null);
       setReplayValues((current) =>
         Object.fromEntries(
@@ -954,325 +969,51 @@ export function ProjectJourneyDashboard() {
             </section>
           ) : null}
 
-          <ExternalExperimentPanel project={selected} journeys={journeys} />
+          <JourneyDetail
+            authCapture={replayAuthCapture}
+            authMessage={replayAuthMessage}
+            authenticationRequired={replayAuthenticationRequired}
+            busy={busy}
+            executionSettings={executionSettings}
+            journeys={journeys}
+            loading={projectDetailsLoading}
+            onAuthenticationConfirm={() =>
+              void confirmReplayAuthenticationCapture()
+            }
+            onAuthenticationStart={() =>
+              void beginReplayAuthenticationCapture()
+            }
+            onDelete={(journey) => void removeJourney(journey)}
+            onProductionConfirmationChange={setProductionReplayConfirmed}
+            onReplay={(journey) => void runReplay(journey)}
+            onReplayModeChange={setReplayMode}
+            onReplayPacingChange={setReplayPacing}
+            onRuntimeValueChange={(journeyId, variableName, value) =>
+              setReplayValues((current) => ({
+                ...current,
+                [journeyId]: {
+                  ...current[journeyId],
+                  [variableName]: value,
+                },
+              }))
+            }
+            onSelectionChange={(journeyId) => {
+              setSelectedJourneyId(journeyId);
+              setReplayResult(null);
+              setReplayAuthenticationRequired(false);
+              setReplayAuthCapture(null);
+              setReplayAuthMessage(null);
+            }}
+            productionReplayConfirmed={productionReplayConfirmed}
+            project={selected}
+            replayMode={replayMode}
+            replayPacing={replayPacing}
+            replayResult={replayResult}
+            replayValues={replayValues}
+            selectedJourneyId={selectedJourneyId}
+          />
 
-          <section className="panel saved-journeys">
-            <div className="section-heading-row">
-              <div>
-                <p className="eyebrow">Saved journeys</p>
-                <h2>Reproducible normal paths</h2>
-              </div>
-            </div>
-            <label className="journey-name">
-              Replay behavior
-              <select
-                value={replayMode}
-                onChange={(event) =>
-                  setReplayMode(event.target.value as ReplayMode)
-                }
-              >
-                <option value="adaptive">
-                  Adaptive — recover safely and verify state
-                </option>
-                <option value="strict">
-                  Strict — use the recorded strategy
-                </option>
-              </select>
-            </label>
-            <label className="journey-name">
-              Replay pacing
-              <select
-                value={replayPacing}
-                onChange={(event) =>
-                  setReplayPacing(event.target.value as ReplayPacing)
-                }
-              >
-                <option value="recorded">
-                  Recorded â€” preserve human pauses, capped at 5 seconds
-                </option>
-                <option value="deliberate">
-                  Deliberate â€” wait 1 second before every action
-                </option>
-                <option value="fast">Fast â€” no added pauses</option>
-              </select>
-            </label>
-            <p className="technical-note">
-              Pacing applies to normal journey steps. Repeated-action tests keep
-              their configured 0, 100, or 300 ms injection interval so they can
-              still expose race conditions.
-            </p>
-            {selected.environment === 'production' ? (
-              <label className="production-confirmation">
-                <input
-                  checked={productionReplayConfirmed}
-                  onChange={(event) =>
-                    setProductionReplayConfirmed(event.target.checked)
-                  }
-                  type="checkbox"
-                />{' '}
-                I understand that replay can submit forms and change real
-                production data.
-              </label>
-            ) : null}
-            {replayAuthenticationRequired ? (
-              <div className="state-message state-message-error" role="alert">
-                <strong>Authentication interrupted</strong>
-                <p>
-                  {replayAuthMessage ??
-                    'The application required sign-in during replay. The session may have expired, or a preceding journey action may have signed out or redirected the browser.'}
-                </p>
-                <div className="recording-actions">
-                  <button
-                    className="button button-secondary button-compact"
-                    disabled={busy !== null}
-                    onClick={() => void beginReplayAuthenticationCapture()}
-                    type="button"
-                  >
-                    {busy === 'replay-auth-start'
-                      ? 'Launching sign-in…'
-                      : 'Sign in again'}
-                  </button>
-                  {replayAuthCapture?.status === 'awaiting_confirmation' ? (
-                    <button
-                      className="button button-primary button-compact"
-                      disabled={busy !== null}
-                      onClick={() => void confirmReplayAuthenticationCapture()}
-                      type="button"
-                    >
-                      {busy === 'replay-auth-confirm'
-                        ? 'Saving session…'
-                        : 'I am signed in — save session'}
-                    </button>
-                  ) : null}
-                </div>
-                {replayAuthCapture !== null ? (
-                  <p>Capture: {replayAuthCapture.status}</p>
-                ) : null}
-              </div>
-            ) : null}
-            {!replayAuthenticationRequired && replayAuthMessage !== null ? (
-              <div className="state-message" role="status">
-                {replayAuthMessage}
-              </div>
-            ) : null}
-            {replayResult !== null ? (
-              <div
-                className={`replay-result replay-${replayResult.status}`}
-                role="status"
-              >
-                <strong>Replay {replayResult.status}</strong>
-                {replayResult.failedStep === null
-                  ? ' — every persisted step completed.'
-                  : ` — step ${replayResult.failedStep.stepNumber}, “${replayResult.failedStep.stepName}”, failed.`}
-                {replayResult.failedStep?.technicalMessage !== null &&
-                replayResult.failedStep?.technicalMessage !== undefined ? (
-                  <p>{replayResult.failedStep.technicalMessage}</p>
-                ) : null}
-                {replayResult.failedStep !== null ? (
-                  <dl className="replay-diagnostics">
-                    <div>
-                      <dt>Locator</dt>
-                      <dd>
-                        <code>
-                          {formatLocator(replayResult.failedStep.locator)}
-                        </code>
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Browser URL</dt>
-                      <dd>
-                        <code>
-                          {replayResult.failedStep.currentUrl ?? 'Unavailable'}
-                        </code>
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Frame</dt>
-                      <dd>
-                        <code>
-                          {replayResult.failedStep.pageId ?? 'page-1'}
-                          {(replayResult.failedStep.framePath ?? []).length > 0
-                            ? ` / ${replayResult.failedStep.framePath?.join(' / ')}`
-                            : ''}
-                        </code>
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Side effect observed</dt>
-                      <dd>
-                        {replayResult.failedStep.sideEffectObserved === true
-                          ? 'Yes — FormCrash did not retry'
-                          : 'No'}
-                      </dd>
-                    </div>
-                  </dl>
-                ) : null}
-                {(replayResult.failedStep?.expectedState?.length ?? 0) > 0 ? (
-                  <div className="technical-note">
-                    <strong>State verification</strong>
-                    <p>
-                      Expected:{' '}
-                      {replayResult.failedStep?.expectedState?.join('; ')}
-                    </p>
-                    <p>
-                      Observed:{' '}
-                      {replayResult.failedStep?.observedState?.join('; ') ||
-                        'Nothing verifiable'}
-                    </p>
-                  </div>
-                ) : null}
-                {(replayResult.interactionOutcomes?.length ?? 0) > 0 ? (
-                  <p className="technical-note">
-                    {replayResult.interactionOutcomes
-                      ?.map(
-                        (outcome) =>
-                          `${outcome.status}: ${outcome.strategy} (${Math.round(outcome.confidence * 100)}%)`,
-                      )
-                      .join(' · ')}
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-            {journeys.length === 0 ? (
-              <p className="empty-state">
-                No recorded journeys saved for this project.
-              </p>
-            ) : (
-              <div className="journey-list">
-                {journeys.map((journey) => {
-                  const requirements = journeyRuntimeRequirements(
-                    journey,
-                    executionSettings,
-                  );
-                  return (
-                    <article className="journey-card" key={journey.id}>
-                      <div>
-                        <strong>{journey.name}</strong>
-                        <span>
-                          Version {journey.version} · {journey.steps.length}{' '}
-                          steps
-                        </span>
-                        {journey.trace?.videoCaptured === true ? (
-                          <details className="unsupported-list">
-                            <summary>Recorded page video</summary>
-                            <video
-                              controls
-                              preload="metadata"
-                              src={resolveApiUrl(
-                                `/api/journeys/${journey.id}/trace/videos/0`,
-                              )}
-                              style={{ width: '100%', maxWidth: 720 }}
-                            >
-                              Recorded Chromium video is unavailable in this
-                              browser.
-                            </video>
-                            <p className="technical-note">
-                              Video is diagnostic evidence. Replay is driven by
-                              the synchronized input and state trace.
-                            </p>
-                          </details>
-                        ) : null}
-                        <span>
-                          {journey.replayFormat === 'hybrid-v2'
-                            ? `Hybrid trace · ${journey.trace?.interactionCount ?? 0} verified interactions`
-                            : 'Legacy semantic replay'}
-                        </span>
-                        {requirements.length > 0 ? (
-                          <div className="runtime-value-grid replay-runtime-grid">
-                            {requirements.map((requirement) => (
-                              <label key={requirement.name}>
-                                {requirement.label}
-                                <input
-                                  aria-label={`${journey.name} ${requirement.name}`}
-                                  autoComplete="off"
-                                  placeholder={requirement.name}
-                                  type={
-                                    requirement.secret ? 'password' : 'text'
-                                  }
-                                  value={
-                                    replayValues[journey.id]?.[
-                                      requirement.name
-                                    ] ?? ''
-                                  }
-                                  onChange={(event) =>
-                                    setReplayValues((current) => ({
-                                      ...current,
-                                      [journey.id]: {
-                                        ...current[journey.id],
-                                        [requirement.name]: event.target.value,
-                                      },
-                                    }))
-                                  }
-                                />
-                              </label>
-                            ))}
-                          </div>
-                        ) : (
-                          <span>No runtime values required.</span>
-                        )}
-                        <OutcomeDefinitionPanel
-                          confirmProduction={
-                            selected.environment !== 'production' ||
-                            productionReplayConfirmed
-                          }
-                          disabled={
-                            busy !== null ||
-                            requirements.some(
-                              (requirement) =>
-                                (
-                                  replayValues[journey.id]?.[
-                                    requirement.name
-                                  ] ?? ''
-                                ).trim() === '',
-                            )
-                          }
-                          environment={selected.environment}
-                          journey={journey}
-                          runtimeValues={nonEmptyValues(
-                            replayValues[journey.id] ?? {},
-                          )}
-                        />
-                      </div>
-                      <div className="journey-card-actions">
-                        <button
-                          className="button button-secondary button-compact"
-                          disabled={
-                            busy !== null ||
-                            (selected.environment === 'production' &&
-                              !productionReplayConfirmed) ||
-                            requirements.some(
-                              (requirement) =>
-                                (
-                                  replayValues[journey.id]?.[
-                                    requirement.name
-                                  ] ?? ''
-                                ).trim() === '',
-                            )
-                          }
-                          onClick={() => void runReplay(journey)}
-                          type="button"
-                        >
-                          {busy === `replay-${journey.id}`
-                            ? 'Replaying…'
-                            : 'Replay'}
-                        </button>
-                        <button
-                          className="copy-button"
-                          disabled={busy !== null}
-                          onClick={() => void removeJourney(journey)}
-                          type="button"
-                        >
-                          {busy === `delete-journey-${journey.id}`
-                            ? 'Deleting…'
-                            : 'Delete'}
-                        </button>
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            )}
-          </section>
+          <ExternalExperimentPanel project={selected} journeys={journeys} />
         </>
       ) : null}
     </main>
