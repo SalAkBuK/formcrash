@@ -32,8 +32,10 @@ export function OutcomeDefinitionPanel({
   environment,
   disabled,
   expanded,
+  id = 'journey-outcome-configuration',
   onExpandedChange,
   onStateChange,
+  presentation = 'disclosure',
 }: {
   readonly journey: PersistedJourney;
   readonly runtimeValues: EphemeralRuntimeValues;
@@ -41,8 +43,10 @@ export function OutcomeDefinitionPanel({
   readonly environment: ProjectEnvironment;
   readonly disabled: boolean;
   readonly expanded?: boolean;
+  readonly id?: string;
   readonly onExpandedChange?: (expanded: boolean) => void;
   readonly onStateChange?: (state: OutcomeDefinitionState) => void;
+  readonly presentation?: 'disclosure' | 'wizard';
 }) {
   const compatibleSteps = useMemo(
     () =>
@@ -222,13 +226,22 @@ export function OutcomeDefinitionPanel({
 
   return (
     <details
-      className="outcome-definition"
-      id="journey-outcome-configuration"
-      open={expanded}
-      onToggle={(event) => onExpandedChange?.(event.currentTarget.open)}
+      className={`outcome-definition outcome-definition-${presentation}`}
+      id={id}
+      open={presentation === 'wizard' ? true : expanded}
+      onToggle={(event) => {
+        if (presentation === 'disclosure') {
+          onExpandedChange?.(event.currentTarget.open);
+        }
+      }}
     >
       <summary>Define Critical Action and Outcome Checks</summary>
       <div className="outcome-definition-body">
+        {loading ? (
+          <div className="state-message state-message-loading" role="status">
+            Loading the saved Critical Action and Outcome Checks…
+          </div>
+        ) : null}
         {error === null ? null : (
           <div className="state-message state-message-error" role="alert">
             {error}
@@ -312,7 +325,11 @@ export function OutcomeDefinitionPanel({
           </p>
           <div className="guided-action-row">
             <button
-              className="button button-primary button-compact"
+              className={`button button-compact ${
+                presentation === 'wizard'
+                  ? 'button-secondary'
+                  : 'button-primary'
+              }`}
               disabled={
                 busy !== null ||
                 disabled ||
@@ -449,7 +466,11 @@ export function OutcomeDefinitionPanel({
 
             <div className="guided-action-row">
               <button
-                className="button button-primary button-compact"
+                className={`button button-compact ${
+                  presentation === 'wizard'
+                    ? 'button-secondary'
+                    : 'button-primary'
+                }`}
                 disabled={
                   busy !== null ||
                   description.trim() === '' ||

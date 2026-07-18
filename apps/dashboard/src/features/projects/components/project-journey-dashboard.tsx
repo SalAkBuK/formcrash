@@ -1013,7 +1013,12 @@ export function ProjectJourneyDashboard() {
             selectedJourneyId={selectedJourneyId}
           />
 
-          <ExternalExperimentPanel project={selected} journeys={journeys} />
+          <ExternalExperimentPanel
+            journeys={journeys}
+            onSelectedJourneyChange={setSelectedJourneyId}
+            project={selected}
+            selectedJourneyId={selectedJourneyId}
+          />
         </>
       ) : null}
     </main>

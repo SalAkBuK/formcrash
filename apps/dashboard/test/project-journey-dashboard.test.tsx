@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -402,7 +402,7 @@ describe('external project journey workflow', () => {
     };
     mocks.listJourneys.mockResolvedValue([outcomeJourney]);
     mocks.getCriticalAction.mockResolvedValue(action);
-    mocks.getActiveOutcomeCapture.mockResolvedValue({
+    const activeCapture = {
       id: 'outcome-capture-1',
       journeyId: journey.id,
       criticalActionId: action.id,
@@ -423,17 +423,25 @@ describe('external project journey workflow', () => {
       startedAt: '2026-07-17T00:01:00.000Z',
       expiresAt: '2026-07-17T00:11:00.000Z',
       completedAt: null,
-    });
+    };
+    mocks.getActiveOutcomeCapture.mockResolvedValue(activeCapture);
+    mocks.getOutcomeCapture.mockResolvedValue(activeCapture);
 
     render(<ProjectJourneyDashboard />);
+    await screen.findByRole('heading', { name: outcomeJourney.name });
+    const detailOutcome = document.querySelector(
+      '#journey-outcome-configuration',
+    );
+    expect(detailOutcome).not.toBeNull();
+    const outcome = within(detailOutcome as HTMLElement);
     await user.click(
-      await screen.findByText('Define Critical Action and Outcome Checks'),
+      outcome.getByText('Define Critical Action and Outcome Checks'),
     );
 
-    expect(await screen.findByText('awaiting_selection')).toBeVisible();
-    expect(screen.getByText(/Chromium is waiting/u)).toBeVisible();
+    expect(await outcome.findByText('awaiting_selection')).toBeVisible();
+    expect(outcome.getByText(/Chromium is waiting/u)).toBeVisible();
     expect(
-      screen.getByRole('button', { name: 'Start outcome baseline' }),
+      outcome.getByRole('button', { name: 'Start outcome baseline' }),
     ).toBeDisabled();
   });
 
@@ -550,17 +558,23 @@ describe('external project journey workflow', () => {
     });
 
     render(<ProjectJourneyDashboard />);
+    await screen.findByRole('heading', { name: outcomeJourney.name });
+    const detailOutcome = document.querySelector(
+      '#journey-outcome-configuration',
+    );
+    expect(detailOutcome).not.toBeNull();
+    const outcome = within(detailOutcome as HTMLElement);
     await user.click(
-      await screen.findByText('Define Critical Action and Outcome Checks'),
+      outcome.getByText('Define Critical Action and Outcome Checks'),
     );
     expect(
-      screen.getByText(/send state-changing requests and create test data/u),
+      outcome.getByText(/send state-changing requests and create test data/u),
     ).toBeVisible();
     expect(
-      screen.getByText(/controlled non-production environment/u),
+      outcome.getByText(/controlled non-production environment/u),
     ).toBeVisible();
     await user.click(
-      screen.getByRole('button', { name: 'Approve Critical Action' }),
+      outcome.getByRole('button', { name: 'Approve Critical Action' }),
     );
     expect(mocks.approveCriticalAction).toHaveBeenCalledWith(
       journey.id,
@@ -569,14 +583,14 @@ describe('external project journey workflow', () => {
     );
 
     await user.click(
-      screen.getByRole('button', { name: 'Start outcome baseline' }),
+      outcome.getByRole('button', { name: 'Start outcome baseline' }),
     );
-    expect(await screen.findByText('Profile {{unique.email}}')).toBeVisible();
-    expect(screen.getByText('Fill unique email')).toBeVisible();
+    expect(await outcome.findByText('Profile {{unique.email}}')).toBeVisible();
+    expect(outcome.getByText('Fill unique email')).toBeVisible();
     expect(
-      screen.getByText(/resolved run-specific literal.*not persisted/u),
+      outcome.getByText(/resolved run-specific literal.*not persisted/u),
     ).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Approve check' }));
+    await user.click(outcome.getByRole('button', { name: 'Approve check' }));
 
     expect(mocks.approveOutcomeCheck).toHaveBeenCalledWith(capture.id, {
       type: 'matching_item_appears_exactly_once',
@@ -584,15 +598,15 @@ describe('external project journey workflow', () => {
       bindingExpression: 'unique.email',
     });
     expect(
-      await screen.findByText(
+      await outcome.findByText(
         'Exactly one result matching {{unique.email}} should appear.',
       ),
     ).toBeVisible();
 
-    await user.click(screen.getByRole('button', { name: 'Finish capture' }));
+    await user.click(outcome.getByRole('button', { name: 'Finish capture' }));
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     await user.click(
-      screen.getByRole('button', { name: 'Remove and recapture' }),
+      outcome.getByRole('button', { name: 'Remove and recapture' }),
     );
     await waitFor(() =>
       expect(mocks.deleteOutcomeCheck).toHaveBeenCalledWith(
@@ -601,7 +615,7 @@ describe('external project journey workflow', () => {
       ),
     );
     expect(
-      await screen.findByText('No Outcome Checks saved yet.'),
+      await outcome.findByText('No Outcome Checks saved yet.'),
     ).toBeVisible();
   });
 });

@@ -59,11 +59,11 @@ This mapping treats Stitch as a visual reference, not as an executable product s
 - **Intended FormCrash route:** `/projects`, Guided mode, expected-outcome stage
 - **Current route:** `/projects`; component-state step, not a route
 - **Primary component:** `GuidedTestPanel`
-- **Related child components:** `OutcomeDefinitionPanel`, readiness and candidate controls in the Guided workflow
-- **Existing functionality represented:** selecting/approving an Outcome Check, generated binding choices, expected-count logic, and technical assertion disclosure
+- **Related child components:** `OutcomeDefinitionPanel` and its existing baseline-capture, approval, list, and delete controls
+- **Existing functionality represented:** persisted Critical Action, every saved Outcome Check, baseline capture, the three existing Outcome Check types, and all-check runner semantics
 - **Stitch-only decorative or mocked elements:** “Step 2 of 4,” fake selector values, fixed card choices, profile/search controls, and draft navigation
-- **Unsupported Stitch elements:** a separate wizard URL and hardcoded CSS selectors or outcome values
-- **Existing functionality absent from Stitch that must remain:** captured browser target provenance, exactly-once generated bindings, Outcome Check types already supported by contracts, baseline capture reconciliation, redaction, and Advanced access
+- **Unsupported Stitch elements:** a separate wizard URL, hardcoded CSS selectors or outcome values, recommendation confidence/provenance, generated/manual badges, enable/disable, editing, and per-experiment check subsets
+- **Existing functionality absent from Stitch that must remain:** exactly-once generated bindings, visible-element and final-pathname checks, baseline capture reconciliation, existing delete behavior, redaction, all-saved-check evaluation, and Advanced access
 - **Planned implementation chunk:** **Chunk 4**
 
 ### 5. Test Wizard: Safety & Data
@@ -73,10 +73,10 @@ This mapping treats Stitch as a visual reference, not as an executable product s
 - **Current route:** `/projects`; component-state step, not a route
 - **Primary component:** `GuidedTestPanel`
 - **Related child components:** project settings and runtime inputs in `ExternalExperimentPanel`
-- **Existing functionality represented:** environment review, authentication state, generated runtime values, cleanup, and production safety confirmation
+- **Existing functionality represented:** real target/environment review, authentication availability, runtime readiness, safe generated templates, hooks, cleanup residue, replay pacing, recorded-environment summary, browser boundaries, and production safety confirmation
 - **Stitch-only decorative or mocked elements:** fixed environment, fake data preview, profile/search controls, and a fixed numbered wizard
-- **Unsupported Stitch elements:** separate Test Data page, fabricated secrets/test identities, and any implication that production execution is safe by default
-- **Existing functionality absent from Stitch that must remain:** explicit production confirmation, saved authentication lifecycle, before/after hooks, redaction, generated values, cleanup requirements, and unsupported boundary handling
+- **Unsupported Stitch elements:** separate Test Data page, fabricated secrets/test identities, secret previews, persisted authentication requirements, and any implication that production execution is safe by default
+- **Existing functionality absent from Stitch that must remain:** explicit production confirmation, truthful configured/available authentication state, an unknown authentication requirement until replay, before/after hooks, redaction, generated values, cleanup requirements, pacing, and unsupported boundary handling
 - **Planned implementation chunk:** **Chunk 4**
 
 ### 6. Test Wizard: Review & Run
@@ -85,11 +85,11 @@ This mapping treats Stitch as a visual reference, not as an executable product s
 - **Intended FormCrash route:** `/projects`, Guided mode, review/run stage
 - **Current route:** `/projects`; component-state step, not a route
 - **Primary component:** `GuidedTestPanel`
-- **Related child components:** `ExternalExperimentPanel`, readiness summary, experiment plan, assertion list
-- **Existing functionality represented:** repeated-action configuration, selected Critical Action, Outcome Checks, generated data, run readiness, and run initiation
+- **Related child components:** `ExternalExperimentPanel`, readiness summary, experiment plan, and the existing `ExternalRunResult`
+- **Existing functionality represented:** repeated-action configuration, selected Critical Action, every saved Outcome Check, generated templates, run readiness, duplicate-submit protection, and existing run initiation
 - **Stitch-only decorative or mocked elements:** fixed plan content, account chrome, a four-step route model, and hardcoded run values
-- **Unsupported Stitch elements:** a separate wizard URL and any generated data not obtained from current contracts
-- **Existing functionality absent from Stitch that must remain:** repeat count/interval contracts, request selection provenance, matcher/assertion configuration, authentication, cleanup, production safety, Guided/Advanced switching, and persisted experiment versions
+- **Unsupported Stitch elements:** a separate wizard URL, a new live-progress architecture, Outcome Check recommendation/provenance controls, and generated data not obtained from current contracts
+- **Existing functionality absent from Stitch that must remain:** repeat count/interval contracts, false continuation, request discovery used internally by Guided, technical matcher/assertion configuration only in Advanced, authentication availability, cleanup, production safety, Guided/Advanced switching, persisted immutable experiment versions, and the existing result surface
 - **Planned implementation chunk:** **Chunk 4**
 
 ### 7. Run Result: Vulnerability Reproduced

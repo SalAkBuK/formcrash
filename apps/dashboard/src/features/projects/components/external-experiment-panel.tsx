@@ -66,6 +66,8 @@ const noCandidates: readonly RankedRequestCandidate[] = [];
 interface Props {
   readonly project: Project;
   readonly journeys: readonly PersistedJourney[];
+  readonly selectedJourneyId?: string | null;
+  readonly onSelectedJourneyChange?: (journeyId: string) => void;
 }
 
 const emptySettings: ProjectExecutionSettingsInput = {
@@ -83,7 +85,12 @@ interface AssertionDraft {
   readonly recommendation: AssertionRecommendation | null;
 }
 
-export function ExternalExperimentPanel({ project, journeys }: Props) {
+export function ExternalExperimentPanel({
+  project,
+  journeys,
+  selectedJourneyId,
+  onSelectedJourneyChange,
+}: Props) {
   const [workspaceMode, setWorkspaceMode] = useState<'guided' | 'advanced'>(
     'guided',
   );
@@ -201,8 +208,24 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
   useEffect(() => {
     const selected = journeys.find((item) => item.id === journeyId);
     if (selected !== undefined) return;
-    setJourneyId(journeys[0]?.id ?? '');
-  }, [journeyId, journeys]);
+    setJourneyId(
+      journeys.find((item) => item.id === selectedJourneyId)?.id ??
+        journeys[0]?.id ??
+        '',
+    );
+  }, [journeyId, journeys, selectedJourneyId]);
+
+  useEffect(() => {
+    if (
+      selectedJourneyId === null ||
+      selectedJourneyId === undefined ||
+      selectedJourneyId === journeyId ||
+      !journeys.some((item) => item.id === selectedJourneyId)
+    ) {
+      return;
+    }
+    setJourneyId(selectedJourneyId);
+  }, [journeyId, journeys, selectedJourneyId]);
 
   useEffect(() => {
     if (journey === null) {
@@ -512,9 +535,9 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
           <p className="eyebrow">Testing workspace</p>
           <h2>How do you want to test this project?</h2>
           <p>
-            Guided Test finds the request and creates sensible checks for you.
-            Advanced mode exposes every authentication, runtime, matcher, and
-            assertion control.
+            Guided Test uses the saved Critical Action and Outcome Checks,
+            reviews safety, then prepares the existing repeated-action runner.
+            Advanced mode exposes request matchers and technical assertions.
           </p>
         </div>
         <div
@@ -562,7 +585,9 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
             onAuthenticationRecaptured={handleGuidedAuthenticationRecaptured}
             onCompleted={handleGuidedCompleted}
             onOpenAdvanced={() => setWorkspaceMode('advanced')}
+            onSelectedJourneyChange={onSelectedJourneyChange}
             project={project}
+            selectedJourneyId={selectedJourneyId}
             settings={settingsState}
           />
           {result !== null ? (
@@ -814,7 +839,10 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
                   Journey
                   <select
                     value={journeyId}
-                    onChange={(event) => setJourneyId(event.target.value)}
+                    onChange={(event) => {
+                      setJourneyId(event.target.value);
+                      onSelectedJourneyChange?.(event.target.value);
+                    }}
                   >
                     {journeys.map((item) => (
                       <option key={item.id} value={item.id}>
