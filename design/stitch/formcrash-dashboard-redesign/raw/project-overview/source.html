@@ -1,0 +1,434 @@
+<!DOCTYPE html><html lang="en" class="dark"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=block" rel="stylesheet"><script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script><script id="tailwind-config">try{
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "surface-container-high": "#1d2b3a",
+                    "error-container": "#93000a",
+                    "primary-pressed": "#E99A31",
+                    "tertiary-fixed-dim": "#6dd2fe",
+                    "text-secondary": "#AAB5C4",
+                    "inverse-on-surface": "#243240",
+                    "on-primary-fixed-variant": "#663e00",
+                    "on-background": "#d5e4f7",
+                    "on-secondary-fixed-variant": "#00497a",
+                    "on-tertiary": "#003546",
+                    "on-tertiary-fixed": "#001f2a",
+                    "tertiary": "#b5e6ff",
+                    "tertiary-fixed": "#bee9ff",
+                    "surface-container-lowest": "#020f1d",
+                    "fail-bg": "#2B151A",
+                    "surface-subtle": "#131A24",
+                    "outcome-evidence": "#FFB454",
+                    "warn-bg": "#2A2412",
+                    "primary-fixed": "#ffddb9",
+                    "primary-fixed-dim": "#ffb961",
+                    "on-secondary-fixed": "#001d35",
+                    "secondary-fixed-dim": "#9bcaff",
+                    "warn-border": "#6A5726",
+                    "surface-container-highest": "#283645",
+                    "on-primary-fixed": "#2b1700",
+                    "on-error": "#690005",
+                    "border": "#293647",
+                    "secondary": "#9bcaff",
+                    "on-surface": "#d5e4f7",
+                    "primary-hover": "#FFC477",
+                    "text-primary": "#F4F7FB",
+                    "on-error-container": "#ffdad6",
+                    "primary": "#ffd8af",
+                    "surface-raised": "#18212D",
+                    "primary-container": "#ffb454",
+                    "success": "#58D6A3",
+                    "inverse-primary": "#865300",
+                    "surface-container-low": "#0f1d2b",
+                    "on-surface-variant": "#d6c3b1",
+                    "text-muted": "#738195",
+                    "on-primary": "#23180A",
+                    "on-tertiary-fixed-variant": "#004d64",
+                    "pass-bg": "#10271F",
+                    "border-strong": "#3A4A60",
+                    "surface-container": "#13212f",
+                    "tertiary-container": "#69cffa",
+                    "browser-evidence": "#6CB6FF",
+                    "surface-bright": "#2d3a4a",
+                    "inverse-surface": "#d5e4f7",
+                    "surface": "#0F141C",
+                    "warning": "#F4C95D",
+                    "request-evidence": "#B78CFF",
+                    "info": "#6CB6FF",
+                    "fail-border": "#74313A",
+                    "surface-variant": "#283645",
+                    "surface-dim": "#061422",
+                    "focus": "#73B7FF",
+                    "secondary-fixed": "#d0e4ff",
+                    "on-primary-container": "#734600",
+                    "on-secondary": "#003256",
+                    "danger": "#FF6B78",
+                    "background": "#0A0D12",
+                    "on-tertiary-container": "#005771",
+                    "danger-strong": "#FF4858",
+                    "outline": "#9f8e7d",
+                    "neutral": "#8A98AA",
+                    "outline-variant": "#524436",
+                    "secondary-container": "#006cb0",
+                    "surface-high": "#1E2937",
+                    "error": "#ffb4ab",
+                    "surface-tint": "#ffb961",
+                    "info-bg": "#102338",
+                    "info-border": "#28557D",
+                    "pass-border": "#285F4C",
+                    "on-secondary-container": "#dae9ff"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "md": "16px",
+                    "page-inline": "32px",
+                    "sm": "8px",
+                    "content-max": "1440px",
+                    "page-block": "28px",
+                    "xl": "32px",
+                    "xxl": "48px",
+                    "unit": "8px",
+                    "xs": "4px",
+                    "lg": "24px"
+            },
+            "fontFamily": {
+                    "code": ["JetBrains Mono"],
+                    "label-sm": ["Inter"],
+                    "label-md": ["Inter"],
+                    "display": ["Inter"],
+                    "headline-lg": ["Inter"],
+                    "body-md": ["Inter"],
+                    "headline-md": ["Inter"],
+                    "headline-sm": ["Inter"],
+                    "body-lg": ["Inter"],
+                    "body-sm": ["Inter"]
+            },
+            "fontSize": {
+                    "code": ["12.5px", {"lineHeight": "19px", "fontWeight": "400"}],
+                    "label-sm": ["11px", {"lineHeight": "14px", "letterSpacing": "0.06em", "fontWeight": "700"}],
+                    "label-md": ["12px", {"lineHeight": "16px", "letterSpacing": "0.025em", "fontWeight": "650"}],
+                    "display": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.03em", "fontWeight": "700"}],
+                    "headline-lg": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                    "body-md": ["14px", {"lineHeight": "21px", "fontWeight": "400"}],
+                    "headline-md": ["20px", {"lineHeight": "28px", "letterSpacing": "-0.015em", "fontWeight": "650"}],
+                    "headline-sm": ["17px", {"lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "650"}],
+                    "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "body-sm": ["13px", {"lineHeight": "19px", "fontWeight": "400"}]
+            }
+          },
+        },
+      }
+    }catch(_e){}</script><meta charset="utf-8"></head><body class="dark overflow-x-hidden">
+<!-- Side Navigation Shell -->
+<aside class="h-screen w-64 fixed left-0 top-0 bg-surface border-r border-border flex flex-col py-page-block px-md z-50">
+<div class="mb-xxl flex items-center gap-sm">
+<div class="w-8 h-8 bg-primary rounded flex items-center justify-center">
+<span class="material-symbols-outlined text-on-primary text-[20px]" style="font-variation-settings: 'FILL' 1;" data-original-icon="bug_report">bug_report</span>
+</div>
+<div>
+<h1 class="font-headline-md text-headline-md font-bold text-primary">FormCrash</h1>
+<p class="font-label-sm text-label-sm text-text-muted uppercase tracking-widest">Reliability Workbench</p>
+</div>
+</div>
+<nav class="flex-1 space-y-xs">
+<!-- Active Tab: Overview -->
+<a href="#" class="flex items-center gap-md px-md py-sm rounded bg-surface-container-high text-primary border-l-2 border-primary cursor-pointer transition-colors duration-200">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span class="font-label-md text-label-md">Overview</span>
+</a>
+<a href="#" class="flex items-center gap-md px-md py-sm rounded text-text-secondary hover:bg-surface-subtle cursor-pointer transition-colors duration-200">
+<span class="material-symbols-outlined" data-icon="conversion_path">conversion_path</span>
+<span class="font-label-md text-label-md">Journeys</span>
+</a>
+<a href="#" class="flex items-center gap-md px-md py-sm rounded text-text-secondary hover:bg-surface-subtle cursor-pointer transition-colors duration-200">
+<span class="material-symbols-outlined" data-icon="biotech">biotech</span>
+<span class="font-label-md text-label-md">Tests</span>
+</a>
+<a href="#" class="flex items-center gap-md px-md py-sm rounded text-text-secondary hover:bg-surface-subtle cursor-pointer transition-colors duration-200">
+<span class="material-symbols-outlined" data-icon="history">history</span>
+<span class="font-label-md text-label-md">Runs</span>
+</a>
+<a href="#" class="flex items-center gap-md px-md py-sm rounded text-text-secondary hover:bg-surface-subtle cursor-pointer transition-colors duration-200">
+<span class="material-symbols-outlined" data-icon="database">database</span>
+<span class="font-label-md text-label-md">Test Data</span>
+</a>
+<a href="#" class="flex items-center gap-md px-md py-sm rounded text-text-secondary hover:bg-surface-subtle cursor-pointer transition-colors duration-200">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="font-label-md text-label-md">Settings</span>
+</a>
+</nav>
+<div class="mt-auto pt-lg border-t border-border">
+<a href="#" class="flex items-center gap-md px-md py-sm rounded text-text-secondary hover:bg-surface-subtle cursor-pointer transition-colors duration-200">
+<span class="material-symbols-outlined" data-icon="swap_horiz">swap_horiz</span>
+<span class="font-label-md text-label-md">Project Switcher</span>
+</a>
+</div>
+</aside>
+<!-- Top App Bar -->
+<header class="fixed top-0 right-0 w-[calc(100%-16rem)] h-14 bg-surface-dim border-b border-border flex items-center justify-between px-page-inline z-40 backdrop-blur-md">
+<div class="flex items-center gap-lg">
+<h2 class="font-headline-sm text-headline-sm font-bold text-text-primary">Overview</h2>
+<div class="relative group">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-text-muted text-[18px]">search</span>
+<input type="text" placeholder="Search workbench..." class="bg-surface-container-low border border-border rounded-md pl-10 pr-4 py-1.5 text-body-sm focus:outline-none focus:ring-1 focus:ring-focus w-64 transition-all duration-200">
+</div>
+</div>
+<div class="flex items-center gap-md">
+<button class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-surface-subtle text-text-muted transition-all">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+</button>
+<button class="w-9 h-9 flex items-center justify-center rounded-full hover:bg-surface-subtle text-text-muted transition-all">
+<span class="material-symbols-outlined" data-icon="help_outline">help_outline</span>
+</button>
+<div class="h-6 w-[1px] bg-border mx-sm"></div>
+<div class="flex items-center gap-sm cursor-pointer group">
+<img class="w-8 h-8 rounded-full border border-border-strong group-hover:border-primary transition-colors" data-alt="A professional headshot of a software reliability engineer in a dark techwear jacket, subtle dramatic studio lighting with blue and amber rim lights, high-end commercial portrait photography style." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBG31B4AsV_IJOVosHIwrjZJCRKKLQS8QlGfozwkJyJdYKVykzk9jg_Y_nmvyn5Z4npyyyCs11Ad6sjoDz2pEei8wKrqe4nENOS5BwlfBzkYvwZil0_G-fYE4UmH7Wyt2QuZ1bs8yH4TUJEPJpNDAhrn48B45l6EvVrTemtdrFgwqcZ6g-LdKCe_gd4oM3XySMMMvd0nK4gH12C6SiMZqAzjHiFt5Kv5WikgvDQaEjDyGmObi4m2kp6YzCSCkEuhVi1GJX36rWQvqY">
+<span class="material-symbols-outlined text-text-muted text-[16px]">expand_more</span>
+</div>
+</div>
+</header>
+<!-- Main Content Area -->
+<main class="ml-64 pt-14 min-h-screen">
+<div class="max-w-content-max mx-auto px-page-inline py-page-block">
+<!-- Summary Metrics Header -->
+<section class="grid grid-cols-2 md:grid-cols-5 gap-md mb-xl">
+<div class="bg-surface border border-border rounded-lg p-md hover:border-primary-pressed transition-colors cursor-default">
+<p class="font-label-sm text-label-sm text-text-muted uppercase mb-xs">Journeys</p>
+<p class="font-display text-display text-text-primary">12</p>
+</div>
+<div class="bg-surface border border-border rounded-lg p-md hover:border-primary-pressed transition-colors cursor-default">
+<p class="font-label-sm text-label-sm text-text-muted uppercase mb-xs">Tests</p>
+<p class="font-display text-display text-text-primary">48</p>
+</div>
+<div class="bg-surface border border-border rounded-lg p-md hover:border-primary-pressed transition-colors cursor-default">
+<p class="font-label-sm text-label-sm text-text-muted uppercase mb-xs">Protected</p>
+<p class="font-display text-display text-success">10</p>
+</div>
+<div class="bg-surface border border-border rounded-lg p-md hover:border-primary-pressed transition-colors cursor-default">
+<p class="font-label-sm text-label-sm text-text-muted uppercase mb-xs">Vulnerabilities</p>
+<p class="font-display text-display text-danger-strong">2</p>
+</div>
+<div class="bg-surface border border-border rounded-lg p-md hover:border-primary-pressed transition-colors cursor-default">
+<p class="font-label-sm text-label-sm text-text-muted uppercase mb-xs">Unverified</p>
+<p class="font-display text-display text-warning">1</p>
+</div>
+</section>
+<!-- Main Bento Layout -->
+<div class="bento-grid">
+<!-- Critical Finding Card (Span 8) -->
+<div class="col-span-12 lg:col-span-8 bg-surface-raised border border-border rounded-xl overflow-hidden flex flex-col">
+<div class="p-lg border-b border-border flex justify-between items-center">
+<div class="flex items-center gap-sm">
+<span class="flex h-3 w-3 relative">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-danger opacity-75"></span>
+<span class="relative inline-flex rounded-full h-3 w-3 bg-danger"></span>
+</span>
+<h3 class="font-headline-sm text-headline-sm font-bold text-text-primary">Critical Finding</h3>
+</div>
+<span class="px-sm py-xs bg-fail-bg border border-fail-border text-danger font-label-sm text-label-sm rounded uppercase">Reproduced</span>
+</div>
+<div class="p-lg flex-1 flex flex-col">
+<div class="mb-lg">
+<h4 class="font-headline-md text-headline-md text-primary mb-xs">Duplicate guest creation reproduced</h4>
+<p class="font-body-md text-body-md text-text-secondary max-w-2xl">A race condition in the POST /v1/guests endpoint allows for the creation of identical guest entities when concurrent requests are fired within a 50ms window.</p>
+</div>
+<div class="mt-auto grid grid-cols-3 gap-md">
+<div class="bg-surface-subtle border border-border p-sm rounded">
+<p class="font-label-sm text-label-sm text-text-muted mb-xs">Impact Area</p>
+<div class="flex items-center gap-xs text-text-primary">
+<span class="material-symbols-outlined text-[18px] text-request-evidence">api</span>
+<span class="font-code text-code">Guest API</span>
+</div>
+</div>
+<div class="bg-surface-subtle border border-border p-sm rounded">
+<p class="font-label-sm text-label-sm text-text-muted mb-xs">Reproduction Rate</p>
+<div class="flex items-center gap-xs text-text-primary">
+<span class="material-symbols-outlined text-[18px] text-outcome-evidence">rebase_edit</span>
+<span class="font-code text-code">88.4%</span>
+</div>
+</div>
+<div class="bg-surface-subtle border border-border p-sm rounded">
+<p class="font-label-sm text-label-sm text-text-muted mb-xs">Detected In</p>
+<div class="flex items-center gap-xs text-text-primary">
+<span class="material-symbols-outlined text-[18px] text-browser-evidence">terminal</span>
+<span class="font-code text-code">Run #812</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Needs Attention Sidebar (Span 4) -->
+<div class="col-span-12 lg:col-span-4 bg-surface-container-high border border-border rounded-xl p-lg">
+<div class="flex items-center justify-between mb-lg">
+<h3 class="font-headline-sm text-headline-sm font-bold text-text-primary">Needs Attention</h3>
+<span class="bg-primary-container text-on-primary-container font-label-sm text-label-sm px-sm py-xs rounded-full">3 Items</span>
+</div>
+<ul class="space-y-md">
+<li class="group cursor-pointer">
+<div class="flex items-start gap-md">
+<div class="mt-1 w-2 h-2 rounded-full bg-warning"></div>
+<div class="flex-1">
+<p class="font-body-sm text-body-sm font-bold text-text-primary group-hover:text-primary transition-colors">Stale Test Data Found</p>
+<p class="font-body-sm text-body-sm text-text-muted">Environment 'Staging-B' contains 4.2GB of unreferenced blob data.</p>
+</div>
+</div>
+</li>
+<li class="group cursor-pointer">
+<div class="flex items-start gap-md">
+<div class="mt-1 w-2 h-2 rounded-full bg-danger"></div>
+<div class="flex-1">
+<p class="font-body-sm text-body-sm font-bold text-text-primary group-hover:text-primary transition-colors">Failing Journey: Checkout</p>
+<p class="font-body-sm text-body-sm text-text-muted">Step 4 (Payment Processing) is timing out consistently in Production.</p>
+</div>
+</div>
+</li>
+<li class="group cursor-pointer">
+<div class="flex items-start gap-md">
+<div class="mt-1 w-2 h-2 rounded-full bg-info"></div>
+<div class="flex-1">
+<p class="font-body-sm text-body-sm font-bold text-text-primary group-hover:text-primary transition-colors">Update Available</p>
+<p class="font-body-sm text-body-sm text-text-muted">Agent v2.4.1 fixes several issues with gRPC interception.</p>
+</div>
+</div>
+</li>
+</ul>
+<button class="w-full mt-lg py-sm border border-border-strong rounded font-label-md text-label-md text-text-primary hover:bg-surface-subtle active:scale-95 transition-all">View All Alerts</button>
+</div>
+<!-- Recent Runs Table (Span 12) -->
+<div class="col-span-12 bg-surface border border-border rounded-xl overflow-hidden">
+<div class="p-lg border-b border-border flex justify-between items-center bg-surface-dim">
+<h3 class="font-headline-sm text-headline-sm font-bold text-text-primary">Recent Runs</h3>
+<div class="flex gap-sm">
+<button class="p-sm hover:bg-surface-subtle rounded border border-border text-text-muted">
+<span class="material-symbols-outlined text-[20px]">filter_list</span>
+</button>
+<button class="bg-primary text-on-primary px-md py-sm rounded font-label-md text-label-md font-bold active:scale-95 transition-transform flex items-center gap-sm">
+<span class="material-symbols-outlined text-[18px]" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+                                Run New Test
+                            </button>
+</div>
+</div>
+<div class="overflow-x-auto scrollbar-hide">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-subtle">
+<th class="px-lg py-md font-label-sm text-label-sm text-text-muted uppercase border-b border-border">Test</th>
+<th class="px-lg py-md font-label-sm text-label-sm text-text-muted uppercase border-b border-border">Journey</th>
+<th class="px-lg py-md font-label-sm text-label-sm text-text-muted uppercase border-b border-border">Outcome</th>
+<th class="px-lg py-md font-label-sm text-label-sm text-text-muted uppercase border-b border-border">Status</th>
+<th class="px-lg py-md font-label-sm text-label-sm text-text-muted uppercase border-b border-border">Environment</th>
+<th class="px-lg py-md font-label-sm text-label-sm text-text-muted uppercase border-b border-border">Started</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-border">
+<tr class="hover:bg-surface-subtle transition-colors cursor-pointer group">
+<td class="px-lg py-md font-code text-code text-primary">auth-resilience-001</td>
+<td class="px-lg py-md font-body-sm text-body-sm text-text-primary">User Login Flow</td>
+<td class="px-lg py-md">
+<div class="flex items-center gap-xs px-sm py-xs bg-pass-bg border border-pass-border text-success rounded-full w-fit">
+<span class="material-symbols-outlined text-[14px]">check_circle</span>
+<span class="font-label-sm text-label-sm">PASSED</span>
+</div>
+</td>
+<td class="px-lg py-md font-label-md text-label-md text-text-muted">Completed</td>
+<td class="px-lg py-md">
+<span class="font-code text-code bg-surface-container-high px-sm py-xs rounded border border-border">production</span>
+</td>
+<td class="px-lg py-md font-body-sm text-body-sm text-text-muted">2 mins ago</td>
+</tr>
+<tr class="hover:bg-surface-subtle transition-colors cursor-pointer group">
+<td class="px-lg py-md font-code text-code text-primary">race-condition-042</td>
+<td class="px-lg py-md font-body-sm text-body-sm text-text-primary">Guest Creation</td>
+<td class="px-lg py-md">
+<div class="flex items-center gap-xs px-sm py-xs bg-fail-bg border border-fail-border text-danger rounded-full w-fit">
+<span class="material-symbols-outlined text-[14px]">error</span>
+<span class="font-label-sm text-label-sm">FAILED</span>
+</div>
+</td>
+<td class="px-lg py-md font-label-md text-label-md text-text-muted">Regression</td>
+<td class="px-lg py-md">
+<span class="font-code text-code bg-surface-container-high px-sm py-xs rounded border border-border">staging-a</span>
+</td>
+<td class="px-lg py-md font-body-sm text-body-sm text-text-muted">14 mins ago</td>
+</tr>
+<tr class="hover:bg-surface-subtle transition-colors cursor-pointer group">
+<td class="px-lg py-md font-code text-code text-primary">latency-stress-99</td>
+<td class="px-lg py-md font-body-sm text-body-sm text-text-primary">Search Indexing</td>
+<td class="px-lg py-md">
+<div class="flex items-center gap-xs px-sm py-xs bg-warn-bg border border-warn-border text-warning rounded-full w-fit">
+<span class="material-symbols-outlined text-[14px]">warning</span>
+<span class="font-label-sm text-label-sm">DEGRADED</span>
+</div>
+</td>
+<td class="px-lg py-md font-label-md text-label-md text-text-muted">Warning</td>
+<td class="px-lg py-md">
+<span class="font-code text-code bg-surface-container-high px-sm py-xs rounded border border-border">production</span>
+</td>
+<td class="px-lg py-md font-body-sm text-body-sm text-text-muted">45 mins ago</td>
+</tr>
+<tr class="hover:bg-surface-subtle transition-colors cursor-pointer group">
+<td class="px-lg py-md font-code text-code text-primary">db-poisoning-leak</td>
+<td class="px-lg py-md font-body-sm text-body-sm text-text-primary">Profile Update</td>
+<td class="px-lg py-md">
+<div class="flex items-center gap-xs px-sm py-xs bg-pass-bg border border-pass-border text-success rounded-full w-fit">
+<span class="material-symbols-outlined text-[14px]">check_circle</span>
+<span class="font-label-sm text-label-sm">PASSED</span>
+</div>
+</td>
+<td class="px-lg py-md font-label-md text-label-md text-text-muted">Completed</td>
+<td class="px-lg py-md">
+<span class="font-code text-code bg-surface-container-high px-sm py-xs rounded border border-border">dev-local</span>
+</td>
+<td class="px-lg py-md font-body-sm text-body-sm text-text-muted">1 hour ago</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="p-md bg-surface-dim border-t border-border flex justify-between items-center">
+<p class="font-body-sm text-body-sm text-text-muted">Showing 4 of 1,204 runs</p>
+<div class="flex gap-xs">
+<button class="px-sm py-1 border border-border rounded hover:bg-surface-subtle text-text-muted">
+<span class="material-symbols-outlined text-[18px]">chevron_left</span>
+</button>
+<button class="px-sm py-1 border border-border rounded hover:bg-surface-subtle text-text-muted">
+<span class="material-symbols-outlined text-[18px]">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Micro-interaction overlay/glow -->
+<div class="fixed top-0 left-0 w-full h-full pointer-events-none z-[-1] opacity-20">
+
+</div>
+<script>
+        // Micro-interactions for dashboard elements
+        document.querySelectorAll('.bento-grid > div').forEach(card => {
+            card.addEventListener('mouseenter', () => {
+                card.style.transform = 'translateY(-2px)';
+                card.style.transition = 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)';
+            });
+            card.addEventListener('mouseleave', () => {
+                card.style.transform = 'translateY(0)';
+            });
+        });
+
+        // Search bar focus effect
+        const searchInput = document.querySelector('input[type="text"]');
+        searchInput.addEventListener('focus', () => {
+            searchInput.parentElement.classList.add('ring-2', 'ring-primary/20');
+        });
+        searchInput.addEventListener('blur', () => {
+            searchInput.parentElement.classList.remove('ring-2', 'ring-primary/20');
+        });
+    </script>
+</body></html>

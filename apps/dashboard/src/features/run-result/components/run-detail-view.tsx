@@ -5,9 +5,10 @@ import {
   type PersistedRunDetail,
   type RunStatus,
 } from '@formcrash/contracts';
-import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 
+import { CopyButton } from '../../../components/ui/copy-button';
+import { StatusBadge } from '../../../components/ui/status-badge';
 import {
   formatDuration,
   formatLocalDateTime,
@@ -48,13 +49,6 @@ export function RunDetailView({
 
   return (
     <main className="dashboard-shell run-detail-shell">
-      <nav className="top-nav" aria-label="Run navigation">
-        <Link href="/" className="brand-link">
-          FormCrash Lab
-        </Link>
-        <Link href="/">← Back to run history</Link>
-      </nav>
-
       <header className={`result-hero result-${status}`}>
         <div>
           <p className="eyebrow">Sample Checkout · Impatient User</p>
@@ -63,9 +57,19 @@ export function RunDetailView({
           </h1>
           <p>{resultSummary(status)}</p>
         </div>
-        <span className={`result-seal status-${status}`} aria-live="polite">
+        <StatusBadge
+          className={`result-seal status-${status}`}
+          live
+          tone={
+            status === 'passed'
+              ? 'pass'
+              : status === 'failed' || status === 'runner_error'
+                ? 'failure'
+                : 'warning'
+          }
+        >
           {sentenceCase(status)}
-        </span>
+        </StatusBadge>
         <dl className="result-metadata">
           <div>
             <dt>Mode</dt>
@@ -87,13 +91,7 @@ export function RunDetailView({
         <div className="run-identity">
           <span>Run ID</span>
           <code>{detail.runId}</code>
-          <button
-            className="copy-button"
-            type="button"
-            onClick={() => void navigator.clipboard.writeText(detail.runId)}
-          >
-            Copy
-          </button>
+          <CopyButton label="Copy run ID" value={detail.runId} />
         </div>
       </header>
 

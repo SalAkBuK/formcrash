@@ -1,5 +1,6 @@
 import type { RunEventEnvelope } from '@formcrash/contracts';
 
+import { DisclosurePanel } from '../../../components/ui/disclosure-panel';
 import { formatRelativeTime } from '../../../lib/formatters';
 import { presentRunEvent } from '../models/event-presentation';
 
@@ -15,21 +16,14 @@ export function EventTimeline({
   );
   if (collapsible) {
     return (
-      <details className="panel timeline-disclosure">
-        <summary>
-          <span>
-            <small>Developer detail</small>
-            <strong>Technical timeline</strong>
-            <span>
-              {ordered.length} recorded events for debugging and audit.
-            </span>
-          </span>
-          <span className="disclosure-action">Open timeline</span>
-        </summary>
-        <div className="timeline-disclosure-body">
-          <TimelineContent events={ordered} />
-        </div>
-      </details>
+      <DisclosurePanel
+        action="Open timeline"
+        className="timeline-disclosure"
+        description={`${ordered.length} recorded events for debugging and audit.`}
+        title="Technical timeline"
+      >
+        <TimelineContent events={ordered} />
+      </DisclosurePanel>
     );
   }
 

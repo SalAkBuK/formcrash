@@ -1,0 +1,14 @@
+{
+  "title": "Run Result: Not Configured",
+  "screenId": "1caafc56960440edb94ed2a2039965b6",
+  "projectId": "4677329075423301517",
+  "deviceType": "DESKTOP",
+  "width": 2560,
+  "height": 2048,
+  "files": [
+    "preview.png",
+    "source.html",
+    "assets/generated-image-01.png",
+    "assets/generated-image-02.png"
+  ]
+}

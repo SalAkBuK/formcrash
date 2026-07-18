@@ -1,0 +1,9 @@
+{
+  "title": "Test Wizard: Review & Run",
+  "screenId": "b8e1bc2e406240a09939489acbe0c708",
+  "projectId": "4677329075423301517",
+  "deviceType": "DESKTOP",
+  "width": 2560,
+  "height": 2048,
+  "files": ["preview.png", "source.html", "assets/generated-image-01.png"]
+}

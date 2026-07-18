@@ -504,6 +504,7 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
   return (
     <section
       className="external-workbench"
+      id="experiment-workspace"
       aria-label="External experiment configuration"
     >
       <div className="panel test-mode-switcher">

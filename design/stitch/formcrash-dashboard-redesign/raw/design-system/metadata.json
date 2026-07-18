@@ -1,0 +1,21 @@
+{
+  "projectId": "4677329075423301517",
+  "screenInstanceId": "asset-stub-assets_733fe26b6cc44c11bcc9ecfbfd1dcfd0",
+  "assetId": "assets/733fe26b6cc44c11bcc9ecfbfd1dcfd0",
+  "version": "1",
+  "displayName": "FormCrash — Controlled Failure Workbench",
+  "colorMode": "DARK",
+  "font": "INTER",
+  "headlineFont": "INTER",
+  "labelFont": "INTER",
+  "roundness": "ROUND_EIGHT",
+  "primaryColor": "#ffb454",
+  "secondaryColor": "#6cb6ff",
+  "neutralColor": "#8a98aa",
+  "availability": {
+    "designSystemMetadata": true,
+    "previewDownloadUrl": false,
+    "generatedCodeDownloadUrl": false
+  },
+  "failure": "The Stitch design-system canvas entry is an asset instance, not a screen resource. get_screen returned no screenshot or htmlCode resource for the supplied asset-stub ID."
+}

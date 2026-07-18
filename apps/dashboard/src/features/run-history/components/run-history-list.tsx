@@ -3,6 +3,12 @@
 import type { PersistedRunSummary } from '@formcrash/contracts';
 import Link from 'next/link';
 
+import { Button } from '../../../components/ui/button';
+import {
+  StatusBadge,
+  type StatusTone,
+} from '../../../components/ui/status-badge';
+import { StateMessage } from '../../../components/ui/state-message';
 import {
   formatDuration,
   formatLocalDateTime,
@@ -29,26 +35,25 @@ export function RunHistoryList({
           <p className="eyebrow">Durable evidence</p>
           <h2 id="history-title">Recent runs</h2>
         </div>
-        <button
-          className="button button-secondary button-compact"
-          type="button"
+        <Button
+          compact
           onClick={onRefresh}
           disabled={loading}
           aria-busy={loading}
         >
           {loading ? 'Refreshing…' : 'Refresh'}
-        </button>
+        </Button>
       </div>
 
       {loading && runs.length === 0 ? (
-        <p className="state-message" role="status">
+        <StateMessage variant="loading">
           Loading persisted run history…
-        </p>
+        </StateMessage>
       ) : null}
       {error !== null ? (
-        <p className="state-message state-message-error" role="alert">
+        <StateMessage variant="error">
           {error} Sample execution remains available.
-        </p>
+        </StateMessage>
       ) : null}
       {!loading && error === null && runs.length === 0 ? (
         <div className="empty-state">
@@ -65,9 +70,12 @@ export function RunHistoryList({
             <li key={run.runId}>
               <Link className="history-card" href={`/runs/${run.runId}`}>
                 <div className="history-card-heading">
-                  <span className={`status-badge status-${run.status}`}>
+                  <StatusBadge
+                    className={`status-${run.status}`}
+                    tone={runStatusTone(run.status)}
+                  >
                     {sentenceCase(run.status)}
-                  </span>
+                  </StatusBadge>
                   <strong>{sentenceCase(run.mode)} mode</strong>
                 </div>
                 <dl className="history-metrics">
@@ -103,4 +111,11 @@ export function RunHistoryList({
       ) : null}
     </section>
   );
+}
+
+function runStatusTone(status: PersistedRunSummary['status']): StatusTone {
+  if (status === 'passed') return 'pass';
+  if (status === 'failed' || status === 'runner_error') return 'failure';
+  if (status === 'incomplete') return 'warning';
+  return 'neutral';
 }
