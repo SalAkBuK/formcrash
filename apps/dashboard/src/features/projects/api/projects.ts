@@ -25,6 +25,7 @@ import {
   type RecordingSession,
   type ReplayResult,
   type ReplayMode,
+  type ReplayPacing,
 } from '@formcrash/contracts';
 
 import { requestJson } from '../../../lib/api-client';
@@ -125,11 +126,17 @@ export async function replayJourney(
   variables: EphemeralRuntimeValues,
   confirmProduction: boolean,
   replayMode: ReplayMode = 'adaptive',
+  replayPacing: ReplayPacing = 'recorded',
 ): Promise<ReplayResult> {
   return requestJson(`/api/journeys/${journeyId}/replay`, replayResultSchema, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ variables, confirmProduction, replayMode }),
+    body: JSON.stringify({
+      variables,
+      confirmProduction,
+      replayMode,
+      replayPacing,
+    }),
   });
 }
 

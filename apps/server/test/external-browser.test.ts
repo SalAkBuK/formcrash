@@ -9,6 +9,7 @@ import {
   buildBrowserRecorderInitScript,
   PlaywrightExternalBrowserOwner,
 } from '../src/runner/recording/external-browser.js';
+import { executeRecordedStep } from '../src/runner/external/journey-actions.js';
 
 let server: Server;
 let targetUrl: string;
@@ -26,12 +27,32 @@ beforeAll(async () => {
           #transient-option-container button {
             animation: transient-option-shift 20ms infinite alternate;
           }
+          #overlapped-parking {
+            display: block;
+            position: absolute;
+            top: 550px;
+            left: 20px;
+            width: 220px;
+            height: 40px;
+          }
+          #overlapping-sign-out {
+            position: fixed;
+            z-index: 10;
+            left: 0;
+            bottom: 0;
+            width: 280px;
+            height: 100px;
+          }
+          body { min-height: 1400px; }
         </style>
         <body>
           <button id="open">Open form</button>
           <button class="unit-combobox" role="combobox">Search occupied unit...</button>
           <div id="transient-option-container"></div>
           <output id="selected-unit"></output>
+          <a id="overlapped-parking" href="#parking-opened">Parking</a>
+          <button id="overlapping-sign-out" type="button">Sign Out</button>
+          <output id="sign-out-clicks">0</output>
           <label for="_r_1o_-form-item">Visitor Name</label>
           <input id="_r_1o_-form-item" name="visitorName" />
           <label for="secret">Password</label>
@@ -51,6 +72,10 @@ beforeAll(async () => {
             });
             document.querySelector('.unit-combobox').addEventListener('click', () => {
               window.location.hash = 'unit-combobox-opened';
+            });
+            document.querySelector('#overlapping-sign-out').addEventListener('click', () => {
+              const output = document.querySelector('#sign-out-clicks');
+              output.textContent = String(Number(output.textContent) + 1);
             });
             const installTransientOption = (button) => {
               button.addEventListener('click', () => {
@@ -80,6 +105,136 @@ afterAll(async () => {
 });
 
 describe('external browser recorder injection', () => {
+  it('restores the recorded browser environment during replay', async () => {
+    let page: Page | null = null;
+    const owner = new PlaywrightExternalBrowserOwner(undefined, (created) => {
+      page = created;
+    });
+    const session = await owner.launchReplay({
+      targetUrl,
+      headless: true,
+      timeoutMs: 10_000,
+      environment: {
+        viewportWidth: 1234,
+        viewportHeight: 777,
+        deviceScaleFactor: 1.25,
+        locale: 'en-GB',
+        timezoneId: 'Asia/Karachi',
+        userAgent: 'FormCrash recorded environment test',
+        colorScheme: 'dark',
+        browserName: 'chromium',
+        browserVersion: 'test-version',
+      },
+    });
+    await session.navigate(targetUrl);
+    if (page === null) throw new Error('Replay page was not exposed.');
+
+    await expect(
+      (page as Page).evaluate(() => ({
+        width: window.innerWidth,
+        height: window.innerHeight,
+        scale: window.devicePixelRatio,
+        locale: navigator.language,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        userAgent: navigator.userAgent,
+        dark: window.matchMedia('(prefers-color-scheme: dark)').matches,
+      })),
+    ).resolves.toEqual({
+      width: 1234,
+      height: 777,
+      scale: 1.25,
+      locale: 'en-GB',
+      timezone: 'Asia/Karachi',
+      userAgent: 'FormCrash recorded environment test',
+      dark: true,
+    });
+    await session.close();
+  });
+
+  it('detects a live human-verification challenge without attempting to solve it', async () => {
+    let page: Page | null = null;
+    const owner = new PlaywrightExternalBrowserOwner(undefined, (created) => {
+      page = created;
+    });
+    const session = await owner.launchReplay({
+      targetUrl,
+      headless: true,
+      timeoutMs: 10_000,
+    });
+    await session.navigate(targetUrl);
+    if (page === null) throw new Error('Replay page was not exposed.');
+    await (page as Page).evaluate(() => {
+      const challenge = document.createElement('div');
+      challenge.className = 'g-recaptcha';
+      challenge.style.width = '300px';
+      challenge.style.height = '80px';
+      challenge.textContent = 'Verify you are human';
+      document.body.append(challenge);
+    });
+
+    const detection = await session.detectSecurityChallenge?.();
+    expect(detection?.kind).toBe('captcha');
+    expect(detection?.message).toContain('will not solve or evade');
+    await session.close();
+  });
+
+  it('detects a visible same-page session-expired message', async () => {
+    let page: Page | null = null;
+    const owner = new PlaywrightExternalBrowserOwner(undefined, (created) => {
+      page = created;
+    });
+    const session = await owner.launchReplay({
+      targetUrl,
+      headless: true,
+      timeoutMs: 10_000,
+    });
+    await session.navigate(targetUrl);
+    if (page === null) throw new Error('Replay page was not exposed.');
+    await (page as Page).evaluate(() => {
+      const alert = document.createElement('div');
+      alert.setAttribute('role', 'alert');
+      alert.textContent = 'Your session expired. Please sign in again.';
+      document.body.append(alert);
+    });
+
+    const detection = await session.detectAuthenticationRequired?.();
+    expect(detection?.message).toContain('saved session expired');
+    await session.close();
+  });
+
+  it('checks for a challenge and replays direct navigation without page helpers', async () => {
+    const owner = new PlaywrightExternalBrowserOwner();
+    const session = await owner.launchReplay({
+      targetUrl,
+      headless: true,
+      timeoutMs: 10_000,
+    });
+    await session.navigate(targetUrl);
+
+    await expect(
+      executeRecordedStep(
+        session,
+        {
+          id: 'navigate-home',
+          name: 'Navigate to /',
+          type: 'navigate',
+          timestamp: Date.now(),
+          url: targetUrl,
+          locator: null,
+          fingerprint: null,
+          value: null,
+          sensitive: false,
+        },
+        () => '',
+      ),
+    ).resolves.toMatchObject({
+      stepId: 'navigate-home',
+      status: 'verified',
+      strategy: 'navigate',
+    });
+    await session.close();
+  });
+
   it('provides the build helper required by tsx-serialized functions', async () => {
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext();
@@ -332,6 +487,71 @@ describe('external browser recorder injection', () => {
         session.verifyInteraction?.(interaction),
       ).resolves.toMatchObject({ passed: true });
     }
+    await session.close();
+  });
+
+  it('does not click an overlapping control at the recorded pointer coordinates', async () => {
+    let page: Page | null = null;
+    const owner = new PlaywrightExternalBrowserOwner(undefined, (created) => {
+      page = created;
+    });
+    const session = await owner.launchReplay({
+      targetUrl,
+      headless: true,
+      timeoutMs: 2_000,
+      environment: {
+        viewportWidth: 800,
+        viewportHeight: 600,
+        deviceScaleFactor: 1,
+        locale: 'en-US',
+        timezoneId: 'UTC',
+        userAgent: 'FormCrash hit-test regression',
+        colorScheme: 'light',
+        browserName: 'chromium',
+        browserVersion: 'test-version',
+      },
+    });
+    await session.navigate(targetUrl);
+    const interaction = recordedInteractionSchema.parse({
+      id: 'overlapped-parking-interaction',
+      stepId: 'overlapped-parking-step',
+      sequence: 1,
+      pageId: 'page-1',
+      framePath: [],
+      startedAt: Date.now(),
+      durationMs: 0,
+      intent: 'click',
+      pointerType: 'mouse',
+      targetCandidates: [
+        {
+          locator: { strategy: 'role', role: 'link', name: 'Parking' },
+          source: 'accessibility',
+          confidence: 0.9,
+        },
+      ],
+      fingerprint: null,
+      geometry: {
+        x: 20,
+        y: 550,
+        width: 220,
+        height: 40,
+        pointerOffsetX: 88,
+        pointerOffsetY: 26,
+      },
+      postconditions: [],
+      retrySafety: 'side_effect_possible',
+    });
+    const outcome = await session.clickInteraction?.(interaction);
+
+    expect(outcome).toMatchObject({
+      strategy: 'role-hit-tested',
+      recovered: true,
+    });
+    expect(session.currentUrl()).toBe(`${targetUrl}/#parking-opened`);
+    if (page === null) throw new Error('Replay page was not exposed.');
+    await expect(
+      (page as Page).locator('#sign-out-clicks').textContent(),
+    ).resolves.toBe('0');
     await session.close();
   });
 

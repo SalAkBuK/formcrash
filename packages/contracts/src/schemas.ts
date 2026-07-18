@@ -113,6 +113,8 @@ export const traceCaptureStatusSchema = z.enum([
 
 export const replayModeSchema = z.enum(['adaptive', 'strict']);
 
+export const replayPacingSchema = z.enum(['fast', 'recorded', 'deliberate']);
+
 export const replayLocatorSchema = z.discriminatedUnion('strategy', [
   z.object({ strategy: z.literal('data-formcrash'), value: z.string().min(1) }),
   z.object({ strategy: z.literal('data-testid'), value: z.string().min(1) }),
@@ -537,6 +539,7 @@ export const replayResultSchema = z.object({
   startedAt: z.iso.datetime({ offset: true }),
   completedAt: z.iso.datetime({ offset: true }),
   mode: replayModeSchema.optional(),
+  pacing: replayPacingSchema.optional(),
   interactionOutcomes: z.array(replayInteractionOutcomeSchema).optional(),
 });
 
@@ -1134,6 +1137,7 @@ export const runExternalExperimentRequestSchema = z.object({
   variables: ephemeralRuntimeValuesSchema.optional().default({}),
   confirmProduction: z.boolean().optional().default(false),
   replayMode: replayModeSchema.optional().default('adaptive'),
+  replayPacing: replayPacingSchema.optional().default('recorded'),
 });
 
 export const externalNetworkObservationSchema = z.object({
@@ -1849,6 +1853,7 @@ export type RecordingSessionStatus = z.infer<
 export type JourneyCaptureFormat = z.infer<typeof journeyCaptureFormatSchema>;
 export type TraceCaptureStatus = z.infer<typeof traceCaptureStatusSchema>;
 export type ReplayMode = z.infer<typeof replayModeSchema>;
+export type ReplayPacing = z.infer<typeof replayPacingSchema>;
 export type ReplayLocator = z.infer<typeof replayLocatorSchema>;
 export type TargetFingerprint = z.infer<typeof targetFingerprintSchema>;
 export type RecordedTargetCandidate = z.infer<

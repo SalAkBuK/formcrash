@@ -1109,6 +1109,7 @@ select {
 .experiment-builder input,
 .experiment-builder select,
 .runtime-value-grid input,
+.runtime-value-grid select,
 .discovery-box select,
 .assertion-box input,
 .assertion-box select {
@@ -1118,6 +1119,21 @@ select {
   padding: 0.68rem 0.72rem;
   background: #090d0f;
   color: var(--text);
+}
+
+.guided-value-override {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: #0d1214;
+}
+
+.guided-value-override small {
+  overflow-wrap: anywhere;
+  color: var(--muted);
 }
 
 .hook-grid,

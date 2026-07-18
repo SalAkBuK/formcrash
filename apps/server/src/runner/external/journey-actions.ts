@@ -11,6 +11,10 @@ import {
   InteractionResolutionError,
   type ReplayBrowserSession,
 } from '../recording/external-browser.js';
+import {
+  assertNoVisibleAuthenticationRequirement,
+  assertSavedAuthenticationActive,
+} from './authentication-redirect.js';
 
 export async function executeRecordedStep(
   session: ReplayBrowserSession,
@@ -21,6 +25,12 @@ export async function executeRecordedStep(
     readonly mode?: ReplayMode;
   },
 ): Promise<ReplayInteractionOutcome> {
+  assertSavedAuthenticationActive(step.url, session.currentUrl());
+  await assertNoVisibleAuthenticationRequirement(session);
+  const securityChallenge = await session.detectSecurityChallenge?.();
+  if (securityChallenge !== undefined && securityChallenge !== null) {
+    throw new UnsupportedSecurityChallengeError(securityChallenge.message);
+  }
   const mode = options?.mode ?? 'adaptive';
   const interaction = options?.interaction;
   if (step.type === 'navigate') {
@@ -174,6 +184,13 @@ export async function executeRecordedStep(
     observedState: verification.observed,
     sideEffectObserved,
   });
+}
+
+export class UnsupportedSecurityChallengeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnsupportedSecurityChallengeError';
+  }
 }
 
 export class HybridReplayError extends Error {

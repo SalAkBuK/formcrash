@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import type {
+  AuthCaptureSession,
   CreateExternalExperimentRequest,
   EphemeralRuntimeValues,
   ExternalRunDetail,
@@ -11,13 +12,18 @@ import type {
   RankedRequestCandidate,
   RecordedJourneyStep,
   RequestDiscoveryResult,
+  ReplayPacing,
 } from '@formcrash/contracts';
 
 import {
   createExternalExperiment,
   discoverRequests,
   runExternalExperiment,
+  confirmAuthenticationCapture,
+  getProjectSettings,
+  startAuthenticationCapture,
 } from '../api/external-experiments';
+import { FormCrashApiError } from '../../../lib/api-client';
 import {
   guidedRecipe,
   guidedRecipes,
@@ -45,12 +51,34 @@ import { ExternalRunResult } from './external-run-result';
 
 const noCandidates: readonly RankedRequestCandidate[] = [];
 
+type SafeValueMode =
+  | 'recorded'
+  | 'unique_text'
+  | 'uuid'
+  | 'unique_name'
+  | 'unique_email'
+  | 'unique_phone'
+  | 'custom';
+
+const generatedTemplateByMode: Readonly<
+  Partial<Record<SafeValueMode, string>>
+> = {
+  unique_text: '{{unique.text}}',
+  uuid: '{{run.id}}',
+  unique_name: '{{unique.name}}',
+  unique_email: '{{unique.email}}',
+  unique_phone: '{{unique.phone}}',
+};
+
 interface Props {
   readonly project: Project;
   readonly journeys: readonly PersistedJourney[];
   readonly settings: ProjectExecutionSettings | null;
   readonly onOpenAdvanced: () => void;
   readonly onCompleted: (result: ExternalRunDetail) => void;
+  readonly onAuthenticationRecaptured: (
+    settings: ProjectExecutionSettings,
+  ) => void;
 }
 
 export function GuidedTestPanel({
@@ -59,6 +87,7 @@ export function GuidedTestPanel({
   settings,
   onOpenAdvanced,
   onCompleted,
+  onAuthenticationRecaptured,
 }: Props) {
   const [journeyId, setJourneyId] = useState('');
   const [targetStepId, setTargetStepId] = useState('');
@@ -71,13 +100,27 @@ export function GuidedTestPanel({
   );
   const [candidateIndex, setCandidateIndex] = useState(-1);
   const [recipeId, setRecipeId] = useState<GuidedRecipeId>('duplicate_action');
+  const [replayPacing, setReplayPacing] = useState<ReplayPacing>('recorded');
   const [experimentName, setExperimentName] = useState('');
   const [assertionSelections, setAssertionSelections] = useState<
     readonly RecommendationSelection[]
   >([]);
   const [result, setResult] = useState<ExternalRunDetail | null>(null);
-  const [busy, setBusy] = useState<'analyze' | 'run' | null>(null);
+  const [busy, setBusy] = useState<
+    'analyze' | 'run' | 'auth-start' | 'auth-confirm' | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
+  const [authenticationRequired, setAuthenticationRequired] = useState(false);
+  const [authCapture, setAuthCapture] = useState<AuthCaptureSession | null>(
+    null,
+  );
+  const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const [stepValueModes, setStepValueModes] = useState<
+    Readonly<Record<string, SafeValueMode>>
+  >({});
+  const [customStepValues, setCustomStepValues] = useState<
+    Readonly<Record<string, string>>
+  >({});
 
   const journey = useMemo(
     () => journeys.find((item) => item.id === journeyId) ?? null,
@@ -102,9 +145,38 @@ export function GuidedTestPanel({
       ? null
       : recommendationSetForCandidate(discovery, selectedCandidate);
   const assertions = selectedAssertions(assertionSelections);
-  const stepValueOverrides = useMemo(
+  const suggestedStepValueOverrides = useMemo(
     () => (journey === null ? {} : guidedStepValueOverrides(journey)),
     [journey],
+  );
+  const configurableValueSteps = useMemo(
+    () =>
+      journey?.steps.filter(
+        (step) =>
+          step.value?.kind === 'safe' &&
+          (step.type === 'fill' || step.type === 'select'),
+      ) ?? [],
+    [journey],
+  );
+  const stepValueOverrides = useMemo(() => {
+    const overrides: Record<string, string> = {};
+    for (const step of configurableValueSteps) {
+      const mode = stepValueModes[step.id] ?? 'recorded';
+      if (mode === 'recorded') continue;
+      if (mode === 'custom') {
+        const custom = customStepValues[step.id];
+        if (custom !== undefined) overrides[step.id] = custom;
+        continue;
+      }
+      const template = generatedTemplateByMode[mode];
+      if (template !== undefined) overrides[step.id] = template;
+    }
+    return overrides;
+  }, [configurableValueSteps, customStepValues, stepValueModes]);
+  const customStepValueMissing = configurableValueSteps.some(
+    (step) =>
+      stepValueModes[step.id] === 'custom' &&
+      (customStepValues[step.id]?.trim() ?? '') === '',
   );
   const analysis =
     journey === null
@@ -129,6 +201,20 @@ export function GuidedTestPanel({
     if (journeys.some((item) => item.id === journeyId)) return;
     setJourneyId(journeys[0]?.id ?? '');
   }, [journeyId, journeys]);
+
+  useEffect(() => {
+    const modes: Record<string, SafeValueMode> = {};
+    const customValues: Record<string, string> = {};
+    for (const step of configurableValueSteps) {
+      const suggested = suggestedStepValueOverrides[step.id];
+      modes[step.id] = modeForTemplate(suggested);
+      if (step.value?.kind === 'safe') {
+        customValues[step.id] = step.value.value;
+      }
+    }
+    setStepValueModes(modes);
+    setCustomStepValues(customValues);
+  }, [configurableValueSteps, suggestedStepValueOverrides]);
 
   useEffect(() => {
     if (journey === null) {
@@ -190,7 +276,7 @@ export function GuidedTestPanel({
       setDiscovery(discovered);
       setCandidateIndex(initialCandidateIndex(discovered));
     } catch (reason: unknown) {
-      setError(messageOf(reason));
+      handleExecutionFailure(reason);
     } finally {
       setBusy(null);
     }
@@ -228,9 +314,63 @@ export function GuidedTestPanel({
         version.id,
         nonEmptyValues(runtimeValues),
         project.environment !== 'production' || productionConfirmed,
+        'adaptive',
+        replayPacing,
       );
       setResult(completed);
       onCompleted(completed);
+      if (completed.runnerError?.code === 'authentication_required') {
+        setAuthenticationRequired(true);
+        setAuthMessage(completed.runnerError.message);
+      }
+    } catch (reason: unknown) {
+      handleExecutionFailure(reason);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function handleExecutionFailure(reason: unknown): void {
+    if (
+      reason instanceof FormCrashApiError &&
+      reason.code === 'AUTHENTICATION_REQUIRED'
+    ) {
+      setAuthenticationRequired(true);
+      setAuthMessage(reason.message);
+      setError(null);
+      return;
+    }
+    setError(messageOf(reason));
+  }
+
+  async function beginAuthenticationRecovery(): Promise<void> {
+    setBusy('auth-start');
+    setError(null);
+    try {
+      setAuthCapture(await startAuthenticationCapture(project.id));
+    } catch (reason: unknown) {
+      setError(messageOf(reason));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function confirmAuthenticationRecovery(): Promise<void> {
+    if (authCapture === null) return;
+    setBusy('auth-confirm');
+    setError(null);
+    try {
+      const completed = await confirmAuthenticationCapture(
+        project.id,
+        authCapture.id,
+      );
+      setAuthCapture(completed);
+      const refreshed = await getProjectSettings(project.id);
+      onAuthenticationRecaptured(refreshed);
+      setAuthenticationRequired(false);
+      setAuthMessage(
+        'Authentication was saved. Retry request analysis or run the test again.',
+      );
     } catch (reason: unknown) {
       setError(messageOf(reason));
     } finally {
@@ -289,6 +429,42 @@ export function GuidedTestPanel({
       {error !== null ? (
         <div className="state-message state-message-error" role="alert">
           {error}
+        </div>
+      ) : null}
+
+      {authenticationRequired ? (
+        <div className="state-message state-message-error" role="alert">
+          <strong>Authentication interrupted</strong>
+          <p>
+            {authMessage ??
+              'The application requires a new sign-in before FormCrash can continue.'}
+          </p>
+          <div className="recording-actions">
+            <button
+              className="button button-secondary button-compact"
+              disabled={busy !== null}
+              onClick={() => void beginAuthenticationRecovery()}
+              type="button"
+            >
+              {busy === 'auth-start' ? 'Launching sign-inâ€¦' : 'Sign in again'}
+            </button>
+            {authCapture?.status === 'awaiting_confirmation' ? (
+              <button
+                className="button button-primary button-compact"
+                disabled={busy !== null}
+                onClick={() => void confirmAuthenticationRecovery()}
+                type="button"
+              >
+                {busy === 'auth-confirm'
+                  ? 'Saving sessionâ€¦'
+                  : 'I am signed in â€” save session'}
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : authMessage !== null ? (
+        <div className="state-message" role="status">
+          {authMessage}
         </div>
       ) : null}
 
@@ -487,6 +663,86 @@ export function GuidedTestPanel({
               </p>
             )}
 
+            {configurableValueSteps.length > 0 ? (
+              <div className="guided-runtime-inputs">
+                <h4>Values FormCrash will enter</h4>
+                <p className="technical-note">
+                  Recorded values are reused unless you choose a generated or
+                  custom value. Generated values are new for every analysis and
+                  experiment run.
+                </p>
+                <div className="runtime-value-grid">
+                  {configurableValueSteps.map((step) => {
+                    const mode = stepValueModes[step.id] ?? 'recorded';
+                    const recordedValue =
+                      step.value?.kind === 'safe' ? step.value.value : '';
+                    return (
+                      <div className="guided-value-override" key={step.id}>
+                        <label>
+                          {step.name}
+                          <select
+                            aria-label={`${step.name} value source`}
+                            value={mode}
+                            onChange={(event) => {
+                              const nextMode = event.target
+                                .value as SafeValueMode;
+                              setStepValueModes((current) => ({
+                                ...current,
+                                [step.id]: nextMode,
+                              }));
+                            }}
+                          >
+                            <option value="recorded">
+                              Recorded — {boundedValue(recordedValue)}
+                            </option>
+                            <option value="unique_text">
+                              Generated unique code
+                            </option>
+                            <option value="uuid">Generated UUID</option>
+                            <option value="unique_name">
+                              Generated test name
+                            </option>
+                            <option value="unique_email">
+                              Generated email
+                            </option>
+                            <option value="unique_phone">
+                              Generated phone
+                            </option>
+                            <option value="custom">Enter a custom value</option>
+                          </select>
+                        </label>
+                        {mode === 'custom' ? (
+                          <label>
+                            Value for analysis and this test
+                            <input
+                              aria-label={`${step.name} custom value`}
+                              autoComplete="off"
+                              value={customStepValues[step.id] ?? ''}
+                              onChange={(event) =>
+                                setCustomStepValues((current) => ({
+                                  ...current,
+                                  [step.id]: event.target.value,
+                                }))
+                              }
+                            />
+                          </label>
+                        ) : null}
+                        {mode !== 'recorded' && mode !== 'custom' ? (
+                          <small>
+                            Template: {generatedTemplateByMode[mode]}
+                          </small>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="technical-note">
+                  Need a specific format? Choose custom and use a template such
+                  as <code>P-{'{{run.shortId}}'}</code>.
+                </p>
+              </div>
+            ) : null}
+
             {readiness !== null ? (
               <div className="guided-readiness">
                 <div className="section-heading-row compact-heading">
@@ -559,7 +815,8 @@ export function GuidedTestPanel({
                   targetStep === null ||
                   settings === null ||
                   readinessBlocked ||
-                  productionBlocked
+                  productionBlocked ||
+                  customStepValueMissing
                 }
                 onClick={() => void analyze()}
                 type="button"
@@ -695,6 +952,20 @@ export function GuidedTestPanel({
                     onChange={(event) => setExperimentName(event.target.value)}
                   />
                 </label>
+                <label>
+                  Journey pacing
+                  <select
+                    aria-label="Guided replay pacing"
+                    value={replayPacing}
+                    onChange={(event) =>
+                      setReplayPacing(event.target.value as ReplayPacing)
+                    }
+                  >
+                    <option value="recorded">Recorded human pauses</option>
+                    <option value="deliberate">1 second per normal step</option>
+                    <option value="fast">No added pauses</option>
+                  </select>
+                </label>
               </div>
 
               <div className="guided-assertion-list">
@@ -790,7 +1061,8 @@ export function GuidedTestPanel({
                     busy !== null ||
                     experimentName.trim() === '' ||
                     productionBlocked ||
-                    assertions.length === 0
+                    assertions.length === 0 ||
+                    customStepValueMissing
                   }
                   onClick={() => void saveAndRun()}
                   type="button"
@@ -1082,4 +1354,19 @@ function messageOf(reason: unknown): string {
   return reason instanceof Error
     ? reason.message
     : 'The operation could not be completed.';
+}
+
+function modeForTemplate(value: string | undefined): SafeValueMode {
+  if (value === '{{unique.text}}') return 'unique_text';
+  if (value === '{{run.id}}') return 'uuid';
+  if (value === '{{unique.name}}') return 'unique_name';
+  if (value === '{{unique.email}}') return 'unique_email';
+  if (value === '{{unique.phone}}') return 'unique_phone';
+  return 'recorded';
+}
+
+function boundedValue(value: string): string {
+  const normalized = value.replace(/\s+/gu, ' ').trim();
+  if (normalized === '') return '(empty)';
+  return normalized.length <= 36 ? normalized : `${normalized.slice(0, 33)}…`;
 }

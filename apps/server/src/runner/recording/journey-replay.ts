@@ -5,6 +5,7 @@ import {
   type EphemeralRuntimeValues,
   type ReplayInteractionOutcome,
   type ReplayMode,
+  type ReplayPacing,
   type ReplayResult,
 } from '@formcrash/contracts';
 
@@ -15,7 +16,9 @@ import type { ProjectSettingsRepository } from '../../persistence/project-settin
 import { RunEventLog } from '../engine/event-log.js';
 import type { AuthStateStore } from '../external/auth-session.js';
 import {
-  assertSavedAuthenticationActive,
+  authenticationInterruptedBeforeStep,
+  assertNoVisibleAuthenticationRequirement,
+  assertSavedAuthenticationSessionActive,
   SavedAuthenticationExpiredError,
 } from '../external/authentication-redirect.js';
 import { executeHttpHook } from '../external/http-hooks.js';
@@ -38,6 +41,7 @@ import {
   type ExternalBrowserOwner,
   type ReplayBrowserSession,
 } from './external-browser.js';
+import { paceReplayStep } from './replay-pacing.js';
 
 export class JourneyReplayService {
   private readonly browserOwner: ExternalBrowserOwner;
@@ -60,6 +64,7 @@ export class JourneyReplayService {
     ephemeral: EphemeralRuntimeValues = {},
     confirmProduction = false,
     mode: ReplayMode = 'adaptive',
+    pacing: ReplayPacing = 'recorded',
   ): Promise<ReplayResult> {
     const journey = this.repository.getJourney(journeyId);
     if (journey === null) throw new Error('Journey was not found.');
@@ -115,18 +120,34 @@ export class JourneyReplayService {
         targetUrl: project.targetUrl,
         headless: this.config.browserHeadless,
         timeoutMs: this.config.browserTimeoutMs,
+        ...(trace === null ? {} : { environment: trace.environment }),
         ...(storageStatePath === null ? {} : { storageStatePath }),
       });
       await session.navigate(project.targetUrl);
       if (storageStatePath !== null) {
-        assertSavedAuthenticationActive(
+        await assertSavedAuthenticationSessionActive(
           project.targetUrl,
-          session.currentUrl(),
+          session,
         );
       }
       for (const [index, step] of journey.steps.entries()) {
         const interaction = interactions.get(step.id);
+        const previousStep = journey.steps[index - 1];
+        const previousInteraction =
+          previousStep === undefined
+            ? undefined
+            : interactions.get(previousStep.id);
         try {
+          await paceReplayStep({
+            session,
+            pacing,
+            step,
+            ...(interaction === undefined ? {} : { interaction }),
+            ...(previousStep === undefined ? {} : { previousStep }),
+            ...(previousInteraction === undefined
+              ? {}
+              : { previousInteraction }),
+          });
           interactionOutcomes.push(
             await executeRecordedStep(
               session,
@@ -139,6 +160,9 @@ export class JourneyReplayService {
             ),
           );
         } catch (error: unknown) {
+          if (error instanceof SavedAuthenticationExpiredError) {
+            throw authenticationInterruptedBeforeStep(index + 1, step.name);
+          }
           result = replayResultSchema.parse({
             replayId,
             journeyId,
@@ -171,11 +195,13 @@ export class JourneyReplayService {
             startedAt,
             completedAt: new Date().toISOString(),
             mode,
+            pacing,
             interactionOutcomes,
           });
           break;
         }
       }
+      await assertNoVisibleAuthenticationRequirement(session);
       result ??= replayResultSchema.parse({
         replayId,
         journeyId,
@@ -184,6 +210,7 @@ export class JourneyReplayService {
         startedAt,
         completedAt: new Date().toISOString(),
         mode,
+        pacing,
         interactionOutcomes,
       });
     } catch (error: unknown) {
@@ -196,6 +223,7 @@ export class JourneyReplayService {
         startedAt,
         completedAt: new Date().toISOString(),
         mode,
+        pacing,
         interactionOutcomes,
       });
     } finally {
@@ -211,6 +239,7 @@ export class JourneyReplayService {
             startedAt,
             completedAt: new Date().toISOString(),
             mode,
+            pacing,
             interactionOutcomes,
           });
         }

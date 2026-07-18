@@ -11,6 +11,7 @@ import type {
   RecordingSession,
   ReplayLocator,
   ReplayMode,
+  ReplayPacing,
   ReplayResult,
 } from '@formcrash/contracts';
 
@@ -47,6 +48,7 @@ export function ProjectJourneyDashboard() {
   const [journeyName, setJourneyName] = useState('');
   const [replayResult, setReplayResult] = useState<ReplayResult | null>(null);
   const [replayMode, setReplayMode] = useState<ReplayMode>('adaptive');
+  const [replayPacing, setReplayPacing] = useState<ReplayPacing>('recorded');
   const [executionSettings, setExecutionSettings] =
     useState<ProjectExecutionSettings | null>(null);
   const [replayValues, setReplayValues] = useState<
@@ -311,7 +313,8 @@ export function ProjectJourneyDashboard() {
           journey.id,
           nonEmptyValues(replayValues[journey.id] ?? {}),
           selected?.environment !== 'production' || productionReplayConfirmed,
-          ...(replayMode === 'adaptive' ? [] : [replayMode]),
+          replayMode,
+          replayPacing,
         ),
       );
     } catch (reason: unknown) {
@@ -321,6 +324,7 @@ export function ProjectJourneyDashboard() {
       ) {
         setReplayAuthenticationRequired(true);
         setReplayAuthCapture(null);
+        setReplayAuthMessage(reason.message);
       } else {
         setError(messageOf(reason));
       }
@@ -657,6 +661,11 @@ export function ProjectJourneyDashboard() {
                 open-shadow activity is retained in the raw trace when it cannot
                 be represented by a legacy semantic step.
               </p>
+              <p>
+                For an application you own, configure the CAPTCHA provider's
+                official test key, a staging-only bypass, or an allowlisted test
+                account. FormCrash does not solve or evade live challenges.
+              </p>
             </details>
             {recording?.warnings.map((warning) => (
               <div
@@ -865,6 +874,28 @@ export function ProjectJourneyDashboard() {
                 </option>
               </select>
             </label>
+            <label className="journey-name">
+              Replay pacing
+              <select
+                value={replayPacing}
+                onChange={(event) =>
+                  setReplayPacing(event.target.value as ReplayPacing)
+                }
+              >
+                <option value="recorded">
+                  Recorded â€” preserve human pauses, capped at 5 seconds
+                </option>
+                <option value="deliberate">
+                  Deliberate â€” wait 1 second before every action
+                </option>
+                <option value="fast">Fast â€” no added pauses</option>
+              </select>
+            </label>
+            <p className="technical-note">
+              Pacing applies to normal journey steps. Repeated-action tests keep
+              their configured 0, 100, or 300 ms injection interval so they can
+              still expose race conditions.
+            </p>
             {selected.environment === 'production' ? (
               <label className="production-confirmation">
                 <input
@@ -880,11 +911,10 @@ export function ProjectJourneyDashboard() {
             ) : null}
             {replayAuthenticationRequired ? (
               <div className="state-message state-message-error" role="alert">
-                <strong>Saved session expired</strong>
+                <strong>Authentication interrupted</strong>
                 <p>
-                  The browser was redirected to a login page before FormCrash
-                  replayed any journey steps. Sign in again in the browser
-                  FormCrash opens, then save the new session.
+                  {replayAuthMessage ??
+                    'The application required sign-in during replay. The session may have expired, or a preceding journey action may have signed out or redirected the browser.'}
                 </p>
                 <div className="recording-actions">
                   <button
@@ -915,7 +945,7 @@ export function ProjectJourneyDashboard() {
                 ) : null}
               </div>
             ) : null}
-            {replayAuthMessage !== null ? (
+            {!replayAuthenticationRequired && replayAuthMessage !== null ? (
               <div className="state-message" role="status">
                 {replayAuthMessage}
               </div>

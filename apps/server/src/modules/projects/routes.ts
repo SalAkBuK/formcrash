@@ -565,6 +565,7 @@ export function registerProjectRoutes(
             parsed.data.variables,
             parsed.data.confirmProduction,
             parsed.data.replayMode,
+            parsed.data.replayPacing,
           ),
         );
       } catch (error: unknown) {

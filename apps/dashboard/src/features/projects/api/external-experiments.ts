@@ -13,6 +13,8 @@ import {
   type AuthValidationResult,
   type CreateExternalExperimentRequest,
   type EphemeralRuntimeValues,
+  type ReplayMode,
+  type ReplayPacing,
   type ExternalExperimentVersion,
   type ExternalRunDetail,
   type ExternalRunComparisonResponse,
@@ -156,6 +158,8 @@ export function runExternalExperiment(
   experimentVersionId: string,
   variables: EphemeralRuntimeValues,
   confirmProduction: boolean,
+  replayMode: ReplayMode = 'adaptive',
+  replayPacing: ReplayPacing = 'recorded',
 ): Promise<ExternalRunDetail> {
   return requestJson(
     `/api/external-experiments/${experimentVersionId}/runs`,
@@ -163,7 +167,12 @@ export function runExternalExperiment(
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ variables, confirmProduction }),
+      body: JSON.stringify({
+        variables,
+        confirmProduction,
+        replayMode,
+        replayPacing,
+      }),
     },
   );
 }

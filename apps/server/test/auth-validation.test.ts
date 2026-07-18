@@ -73,6 +73,28 @@ describe('authentication validation', () => {
     expect(ownership.activeWorkload).toBeNull();
   });
 
+  it('classifies a visible same-page session-expired state as invalid', async () => {
+    const project = projects.createProject({
+      name: 'Visible expiration target',
+      targetUrl: 'http://localhost:4300/portal',
+      environment: 'local',
+      description: '',
+    });
+    const store = new AuthStateStore(temporary.config.artifactRoot, settings);
+    await saveAuthentication(store, project.id);
+
+    const validation = await new AuthValidationService(
+      temporary.config,
+      projects,
+      store,
+      new BrowserOwnership(),
+      new FakeOwner(project.targetUrl, true),
+    ).validate(project.id);
+
+    expect(validation.status).toBe('invalid');
+    expect(validation.message).toContain('session expired');
+  });
+
   it('stops replay before journey steps when saved authentication redirects to login', async () => {
     const project = projects.createProject({
       name: 'Expired authentication target',
@@ -122,17 +144,148 @@ describe('authentication validation', () => {
     expect(owner.lastSession?.clickCount).toBe(0);
     expect(ownership.activeWorkload).toBeNull();
   });
+
+  it('stops replay before journey steps when the page reports session expiry', async () => {
+    const project = projects.createProject({
+      name: 'Same-page expired authentication target',
+      targetUrl: 'http://localhost:4300/portal',
+      environment: 'local',
+      description: '',
+    });
+    const journey = projects.saveJourney({
+      projectId: project.id,
+      name: 'Same-page authenticated journey',
+      steps: [
+        {
+          id: 'open-profile',
+          name: 'Open profile',
+          type: 'click',
+          timestamp: 0,
+          url: project.targetUrl,
+          locator: { strategy: 'id', value: 'profile' },
+          fingerprint: null,
+          value: null,
+          sensitive: false,
+        },
+      ],
+      metadata: {
+        recordingSessionId: null,
+        recordedAt: new Date(0).toISOString(),
+        warningCount: 0,
+        normalizationRule: 'test',
+      },
+    });
+    const store = new AuthStateStore(temporary.config.artifactRoot, settings);
+    await saveAuthentication(store, project.id);
+    const owner = new FakeOwner(project.targetUrl, true);
+    const ownership = new BrowserOwnership();
+
+    await expect(
+      new JourneyReplayService(
+        temporary.config,
+        projects,
+        ownership,
+        owner,
+        settings,
+        store,
+      ).replay(journey.id),
+    ).rejects.toBeInstanceOf(SavedAuthenticationExpiredError);
+
+    expect(owner.lastSession?.clickCount).toBe(0);
+    expect(ownership.activeWorkload).toBeNull();
+  });
+
+  it('stops before the next locator when a journey redirects to login mid-replay', async () => {
+    const project = projects.createProject({
+      name: 'Mid-replay authentication target',
+      targetUrl: 'http://localhost:4300/parking',
+      environment: 'local',
+      description: '',
+    });
+    const journey = projects.saveJourney({
+      projectId: project.id,
+      name: 'Add parking slot',
+      steps: [
+        {
+          id: 'open-slots',
+          name: 'Open slots',
+          type: 'click',
+          timestamp: 0,
+          url: project.targetUrl,
+          locator: { strategy: 'id', value: 'slots' },
+          fingerprint: null,
+          value: null,
+          sensitive: false,
+        },
+        {
+          id: 'add-slot',
+          name: 'Click Add Slot',
+          type: 'click',
+          timestamp: 1,
+          url: project.targetUrl,
+          locator: { strategy: 'role', role: 'button', name: 'Add Slot' },
+          fingerprint: null,
+          value: null,
+          sensitive: false,
+        },
+      ],
+      metadata: {
+        recordingSessionId: null,
+        recordedAt: new Date(0).toISOString(),
+        warningCount: 0,
+        normalizationRule: 'test',
+      },
+    });
+    const store = new AuthStateStore(temporary.config.artifactRoot, settings);
+    await saveAuthentication(store, project.id);
+    const owner = new FakeOwner(project.targetUrl, false, true);
+    const ownership = new BrowserOwnership();
+
+    const replay = new JourneyReplayService(
+      temporary.config,
+      projects,
+      ownership,
+      owner,
+      settings,
+      store,
+    ).replay(journey.id);
+
+    let replayError: unknown = null;
+    try {
+      await replay;
+    } catch (error: unknown) {
+      replayError = error;
+    }
+    expect(replayError).toBeInstanceOf(SavedAuthenticationExpiredError);
+    if (!(replayError instanceof Error)) {
+      throw new Error('Replay did not return an authentication error.');
+    }
+    expect(replayError.message).toContain('before step 2');
+    expect(replayError.message).toContain('Click Add Slot');
+
+    expect(owner.lastSession?.currentUrl()).toBe('http://localhost:4300/login');
+    expect(owner.lastSession?.clickCount).toBe(1);
+    expect(ownership.activeWorkload).toBeNull();
+  });
 });
 
 class FakeOwner implements ExternalBrowserOwner {
   lastSession: FakeSession | null = null;
 
-  constructor(private readonly current: string) {}
+  constructor(
+    private readonly current: string,
+    private readonly expired = false,
+    private readonly redirectAfterFirstClick = false,
+  ) {}
   launchRecording(): Promise<RecordingBrowserSession> {
     throw new Error('Recording is not used.');
   }
   launchReplay(): Promise<ReplayBrowserSession> {
-    this.lastSession = new FakeSession(this.current);
+    this.lastSession = new FakeSession(
+      this.current,
+      this.expired,
+      this.redirectAfterFirstClick,
+    );
     return Promise.resolve(this.lastSession);
   }
 }
@@ -140,12 +293,19 @@ class FakeOwner implements ExternalBrowserOwner {
 class FakeSession implements ReplayBrowserSession {
   clickCount = 0;
 
-  constructor(private readonly current: string) {}
+  constructor(
+    private current: string,
+    private readonly expired: boolean,
+    private readonly redirectAfterFirstClick: boolean,
+  ) {}
   navigate(): Promise<void> {
     return Promise.resolve();
   }
   click(): Promise<void> {
     this.clickCount += 1;
+    if (this.redirectAfterFirstClick && this.clickCount === 1) {
+      this.current = 'http://localhost:4300/login';
+    }
     return Promise.resolve();
   }
   fill(): Promise<void> {
@@ -179,6 +339,15 @@ class FakeSession implements ReplayBrowserSession {
   }
   inputValue(): Promise<string | null> {
     return Promise.resolve(null);
+  }
+  detectAuthenticationRequired(): Promise<{ message: string } | null> {
+    return Promise.resolve(
+      this.expired
+        ? {
+            message: 'The application reports that the saved session expired.',
+          }
+        : null,
+    );
   }
   currentUrl(): string {
     return this.current;

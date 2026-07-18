@@ -11,6 +11,8 @@ import type {
   ExternalRunWarning,
   ReplayFailure,
   RecordedInteraction,
+  ReplayMode,
+  ReplayPacing,
   RunArtifact,
   OutcomeAggregate,
   OutcomeCheckRunSnapshot,
@@ -40,10 +42,13 @@ import {
   type ExternalBrowserOwner,
   type ReplayBrowserSession,
 } from '../recording/external-browser.js';
+import { paceReplayStep } from '../recording/replay-pacing.js';
 import { evaluateExternalAssertions } from './assertions.js';
 import type { AuthStateStore } from './auth-session.js';
 import {
-  assertSavedAuthenticationActive,
+  authenticationInterruptedBeforeStep,
+  assertNoVisibleAuthenticationRequirement,
+  assertSavedAuthenticationSessionActive,
   SavedAuthenticationExpiredError,
 } from './authentication-redirect.js';
 import { executeHttpHook, HttpHookError } from './http-hooks.js';
@@ -90,6 +95,8 @@ export class ExternalExperimentRunner {
     experimentVersionId: string,
     ephemeral: EphemeralRuntimeValues,
     confirmProduction = false,
+    replayMode: ReplayMode = 'adaptive',
+    replayPacing: ReplayPacing = 'recorded',
   ): Promise<ExternalRunDetail> {
     const experiment = this.repository.getVersion(experimentVersionId);
     if (experiment === null)
@@ -114,10 +121,12 @@ export class ExternalExperimentRunner {
     const journey = experiment.journeySnapshot;
     const traceRecord = this.projects.getRecordingTraceByJourney(journey.id);
     if (traceRecord !== null) this.traceStore.assertIntegrity(traceRecord);
+    const traceManifest = this.projects.getJourneyTraceManifest(journey.id);
     const traceInteractions = new Map(
-      (
-        this.projects.getJourneyTraceManifest(journey.id)?.interactions ?? []
-      ).map((interaction) => [interaction.stepId, interaction]),
+      (traceManifest?.interactions ?? []).map((interaction) => [
+        interaction.stepId,
+        interaction,
+      ]),
     );
     const outcomeCheckSnapshot = this.resolveOutcomeCheckSnapshot(experiment);
     const storedSettings = this.settings.get(project.id);
@@ -190,6 +199,9 @@ export class ExternalExperimentRunner {
           targetUrl: project.targetUrl,
           headless: this.config.browserHeadless,
           timeoutMs: this.config.browserTimeoutMs,
+          ...(traceManifest === null
+            ? {}
+            : { environment: traceManifest.environment }),
           ...(storageStatePath === null ? {} : { storageStatePath }),
         });
       } catch (error: unknown) {
@@ -214,9 +226,9 @@ export class ExternalExperimentRunner {
       events.append('run.running', {});
       await session.navigate(project.targetUrl);
       if (storageStatePath !== null) {
-        assertSavedAuthenticationActive(
+        await assertSavedAuthenticationSessionActive(
           project.targetUrl,
-          session.currentUrl(),
+          session,
         );
       }
 
@@ -235,6 +247,20 @@ export class ExternalExperimentRunner {
       for (const [index, step] of journey.steps
         .slice(0, targetIndex)
         .entries()) {
+        const interaction = traceInteractions.get(step.id);
+        const previousStep = journey.steps[index - 1];
+        const previousInteraction =
+          previousStep === undefined
+            ? undefined
+            : traceInteractions.get(previousStep.id);
+        await paceReplayStep({
+          session,
+          pacing: replayPacing,
+          step,
+          ...(interaction === undefined ? {} : { interaction }),
+          ...(previousStep === undefined ? {} : { previousStep }),
+          ...(previousInteraction === undefined ? {} : { previousInteraction }),
+        });
         await executeWithEvents(
           session,
           step,
@@ -242,9 +268,31 @@ export class ExternalExperimentRunner {
           events,
           runtime,
           outcomeCheckSnapshot,
-          traceInteractions.get(step.id),
+          interaction,
+          replayMode,
         );
       }
+
+      const targetInteraction = traceInteractions.get(target.id);
+      const previousTargetStep = journey.steps[targetIndex - 1];
+      const previousTargetInteraction =
+        previousTargetStep === undefined
+          ? undefined
+          : traceInteractions.get(previousTargetStep.id);
+      await paceReplayStep({
+        session,
+        pacing: replayPacing,
+        step: target,
+        ...(targetInteraction === undefined
+          ? {}
+          : { interaction: targetInteraction }),
+        ...(previousTargetStep === undefined
+          ? {}
+          : { previousStep: previousTargetStep }),
+        ...(previousTargetInteraction === undefined
+          ? {}
+          : { previousInteraction: previousTargetInteraction }),
+      });
 
       const beforeArtifact = await this.capture(
         session,
@@ -302,6 +350,7 @@ export class ExternalExperimentRunner {
         collector,
         experiment.networkMatcher !== null,
       );
+      await assertNoVisibleAuthenticationRequirement(session);
       const afterArtifact = await this.capture(
         session,
         runId,
@@ -323,6 +372,7 @@ export class ExternalExperimentRunner {
             runtime,
             outcomeCheckSnapshot,
             traceInteractions.get(step.id),
+            replayMode,
           );
         }
       } else {
@@ -566,6 +616,7 @@ async function executeWithEvents(
   runtime: ResolvedRuntime,
   outcomeCheckSnapshot: OutcomeCheckRunSnapshot,
   interaction?: RecordedInteraction,
+  replayMode: ReplayMode = 'adaptive',
 ): Promise<void> {
   events.append('journey.step.started', {
     stepId: step.id,
@@ -578,9 +629,15 @@ async function executeWithEvents(
       session,
       step,
       (item) => resolveStepValue(item, runtime),
-      { ...(interaction === undefined ? {} : { interaction }) },
+      {
+        ...(interaction === undefined ? {} : { interaction }),
+        mode: replayMode,
+      },
     );
   } catch (error: unknown) {
+    if (error instanceof SavedAuthenticationExpiredError) {
+      throw authenticationInterruptedBeforeStep(index + 1, step.name);
+    }
     throw new ExternalJourneyStepError(
       step,
       index,

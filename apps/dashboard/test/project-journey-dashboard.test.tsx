@@ -296,7 +296,13 @@ describe('external project journey workflow', () => {
       'Profile journey',
       [step],
     );
-    expect(mocks.replayJourney).toHaveBeenCalledWith(journey.id, {}, true);
+    expect(mocks.replayJourney).toHaveBeenCalledWith(
+      journey.id,
+      {},
+      true,
+      'adaptive',
+      'recorded',
+    );
   });
 
   it('shows the controlled-environment warning and explicit unsupported list', async () => {
@@ -321,7 +327,12 @@ describe('external project journey workflow', () => {
     render(<ProjectJourneyDashboard />);
 
     await user.click(await screen.findByRole('button', { name: 'Replay' }));
-    expect(await screen.findByText('Saved session expired')).toBeVisible();
+    expect(await screen.findByText('Authentication interrupted')).toBeVisible();
+    expect(
+      screen.getByText(
+        'The saved authentication session appears to have expired.',
+      ),
+    ).toBeVisible();
 
     await user.click(screen.getByRole('button', { name: 'Sign in again' }));
     expect(mocks.startAuthenticationCapture).toHaveBeenCalledWith(project.id);

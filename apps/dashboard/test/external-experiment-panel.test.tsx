@@ -9,6 +9,7 @@ import type {
 } from '@formcrash/contracts';
 
 import { ExternalExperimentPanel } from '../src/features/projects/components/external-experiment-panel';
+import { FormCrashApiError } from '../src/lib/api-client';
 
 const mocks = vi.hoisted(() => ({
   clearAuthentication: vi.fn(),
@@ -155,12 +156,29 @@ const version = {
   createdAt: '2026-07-16T00:00:00.000Z',
 };
 
+const awaitingAuthenticationCapture = {
+  id: 'auth-capture-1',
+  projectId: project.id,
+  status: 'awaiting_confirmation' as const,
+  errorMessage: null,
+  startedAt: '2026-07-16T00:05:00.000Z',
+  completedAt: null,
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getExternalArtifactUrl.mockReturnValue(
     'http://localhost:4100/api/external-runs/run-1/artifacts/screen-1',
   );
   mocks.getProjectSettings.mockResolvedValue(settings);
+  mocks.startAuthenticationCapture.mockResolvedValue(
+    awaitingAuthenticationCapture,
+  );
+  mocks.confirmAuthenticationCapture.mockResolvedValue({
+    ...awaitingAuthenticationCapture,
+    status: 'completed',
+    completedAt: '2026-07-16T00:06:00.000Z',
+  });
   mocks.listExternalExperiments.mockResolvedValue([version]);
   mocks.listExternalRuns.mockResolvedValue({
     items: [],
@@ -354,6 +372,121 @@ describe('external experiment dashboard workflow', () => {
     ).toBeVisible();
   });
 
+  it('offers authentication recapture directly in Guided mode after expiry', async () => {
+    const user = userEvent.setup();
+    const refreshedSettings = {
+      ...settings,
+      authentication: {
+        configured: true,
+        available: true,
+        capturedAt: '2026-07-16T00:06:00.000Z',
+        missingReason: null,
+      },
+    };
+    mocks.discoverRequests.mockRejectedValueOnce(
+      new FormCrashApiError(
+        409,
+        'AUTHENTICATION_REQUIRED',
+        'The saved authentication session appears to have expired.',
+      ),
+    );
+    mocks.getProjectSettings
+      .mockResolvedValueOnce(settings)
+      .mockResolvedValueOnce(refreshedSettings);
+
+    render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
+    await user.type(
+      await screen.findByLabelText('Guided SECRET_TOKEN'),
+      'runtime-only',
+    );
+    await user.click(screen.getByRole('button', { name: 'Analyze action' }));
+
+    expect(await screen.findByText('Authentication interrupted')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Sign in again' }));
+    expect(mocks.startAuthenticationCapture).toHaveBeenCalledWith(project.id);
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'I am signed in â€” save session',
+      }),
+    );
+
+    expect(mocks.confirmAuthenticationCapture).toHaveBeenCalledWith(
+      project.id,
+      awaitingAuthenticationCapture.id,
+    );
+    expect(await screen.findByText(/Authentication was saved/)).toBeVisible();
+    expect(screen.getByText('Auth ready')).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Open Advanced mode' }),
+    ).toBeVisible();
+  });
+
+  it('lets Guided analysis replace a recorded parking-slot value', async () => {
+    const user = userEvent.setup();
+    const parkingJourney = {
+      ...journey,
+      id: 'journey-parking',
+      name: 'Add parking slot',
+      steps: [
+        journey.steps[0]!,
+        {
+          id: 'fill-parking-slot',
+          name: 'Fill Parking Slot',
+          type: 'fill' as const,
+          timestamp: 1,
+          url: project.targetUrl,
+          locator: { strategy: 'id' as const, value: 'parking-slot' },
+          fingerprint: {
+            tagName: 'input',
+            inputType: 'text',
+            dataFormcrash: null,
+            dataTestId: null,
+            id: 'parking-slot',
+            role: 'textbox',
+            accessibleName: 'Parking Slot',
+            name: 'parkingSlot',
+            label: 'Parking Slot',
+            text: null,
+            cssPath: '#parking-slot',
+          },
+          value: { kind: 'safe' as const, value: 'TT-101' },
+          sensitive: false,
+        },
+        ...journey.steps.slice(1),
+      ],
+    };
+
+    render(
+      <ExternalExperimentPanel project={project} journeys={[parkingJourney]} />,
+    );
+    await user.type(
+      await screen.findByLabelText('Guided SECRET_TOKEN'),
+      'runtime-only',
+    );
+    await user.selectOptions(
+      screen.getByLabelText('Fill Parking Slot value source'),
+      'custom',
+    );
+    const customValue = screen.getByLabelText('Fill Parking Slot custom value');
+    await user.clear(customValue);
+    await user.type(customValue, 'P-204');
+    await user.click(screen.getByRole('button', { name: 'Analyze action' }));
+
+    await waitFor(() => expect(mocks.discoverRequests).toHaveBeenCalled());
+    expect(mocks.discoverRequests).toHaveBeenCalledWith(
+      parkingJourney.id,
+      'submit-profile',
+      { SECRET_TOKEN: 'runtime-only' },
+      true,
+      expect.anything(),
+    );
+    const serializedDiscoveryCalls = JSON.stringify(
+      mocks.discoverRequests.mock.calls,
+    );
+    expect(serializedDiscoveryCalls).toContain('"fill-name":"{{unique.name}}"');
+    expect(serializedDiscoveryCalls).toContain('"fill-parking-slot":"P-204"');
+  });
+
   it('guides a user from a journey to a recommended test and explains the result', async () => {
     const user = userEvent.setup();
     render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
@@ -502,6 +635,8 @@ describe('external experiment dashboard workflow', () => {
         SECRET_TOKEN: 'runtime-only',
       },
       true,
+      'adaptive',
+      'recorded',
     );
     expect(
       await screen.findByText(
@@ -632,6 +767,8 @@ describe('external experiment dashboard workflow', () => {
         SECRET_TOKEN: 'runtime-only',
       },
       true,
+      'adaptive',
+      'recorded',
     );
   });
 

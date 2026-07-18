@@ -85,6 +85,7 @@ export interface ExternalBrowserOptions {
   readonly timeoutMs: number;
   readonly storageStatePath?: string;
   readonly recordVideoDirectory?: string;
+  readonly environment?: RecordedBrowserEnvironment;
 }
 
 export interface RecordingCallbacks {
@@ -171,6 +172,8 @@ export interface ReplayBrowserSession {
     onSelection: (selection: OutcomeElementSelection) => void,
   ): Promise<void>;
   onClosed?(callback: () => void): void;
+  detectSecurityChallenge?(): Promise<SecurityChallengeDetection | null>;
+  detectAuthenticationRequired?(): Promise<AuthenticationRequirementDetection | null>;
   currentUrl(): string;
   settle(milliseconds: number): Promise<void>;
   close(): Promise<void>;
@@ -214,6 +217,63 @@ export interface SemanticElementSnapshot {
   readonly classification: 'success' | 'error' | 'loading';
   readonly visible: boolean;
 }
+
+export interface SecurityChallengeDetection {
+  readonly kind: 'captcha';
+  readonly message: string;
+}
+
+export interface AuthenticationRequirementDetection {
+  readonly message: string;
+}
+
+const SECURITY_CHALLENGE_DETECTION_SCRIPT = String.raw`(() => {
+  const selectors = [
+    'iframe[src*="recaptcha"]',
+    'iframe[src*="hcaptcha"]',
+    'iframe[src*="challenges.cloudflare.com"]',
+    '.g-recaptcha',
+    '.h-captcha',
+    '[data-sitekey]',
+  ];
+  const challengeElement = selectors
+    .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
+    .find((element) => {
+      if (!(element instanceof HTMLElement)) return true;
+      const style = window.getComputedStyle(element);
+      const box = element.getBoundingClientRect();
+      return style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        Number(style.opacity) !== 0 &&
+        box.width > 0 &&
+        box.height > 0;
+    });
+  const pageText = document.body?.innerText.toLowerCase() ?? '';
+  const challengeText =
+    /(?:verify you are human|i am human|complete the captcha|security challenge)/u.test(pageText);
+  const challengeUrl =
+    /(?:captcha|challenge-platform|challenges\.cloudflare)/u.test(
+      window.location.href.toLowerCase(),
+    );
+  if (challengeElement === undefined && !challengeText && !challengeUrl) {
+    return null;
+  }
+  return {
+    kind: 'captcha',
+    message:
+      'A live CAPTCHA or human-verification challenge is blocking replay. Configure the provider official test mode or an application-owner allowlist; FormCrash will not solve or evade the challenge.',
+  };
+})()`;
+
+const AUTHENTICATION_REQUIREMENT_DETECTION_SCRIPT = String.raw`(() => {
+  const text = document.body?.innerText.toLowerCase().replace(/\s+/gu, ' ').trim() ?? '';
+  const pattern = /(?:your session (?:has )?expired|session (?:has )?expired|session timed out|please sign in again|sign in again to continue|sign in to continue|authentication required)/u;
+  if (!pattern.test(text)) return null;
+  return {
+    message:
+      'The application reports that the saved session expired. Sign in again and recapture authentication before retrying.',
+  };
+})()`;
 
 export type NetworkObservation =
   | {
@@ -348,7 +408,7 @@ class PlaywrightExternalSession
     interaction: RecordedInteraction,
   ): Promise<InteractionTargetResolution> {
     const resolved = await this.resolveInteractionTarget(interaction);
-    const box = await resolved.target.boundingBox();
+    let box = await resolved.target.boundingBox();
     if (box === null) {
       throw new InteractionResolutionError(
         'The recorded target has no clickable geometry.',
@@ -363,6 +423,40 @@ class PlaywrightExternalSession
       interaction.geometry?.pointerOffsetY,
       box.height,
     );
+    if (!(await targetReceivesPointerAt(resolved.target, offsetX, offsetY))) {
+      const attempts = [
+        ...resolved.resolution.attempts,
+        'hit-test: the recorded pointer position is covered by another element',
+      ];
+      try {
+        // A locator click remains trusted browser input, but additionally asks
+        // Playwright to scroll and hit-test the resolved element. This is the
+        // safe path when a sticky footer, menu, or overlay covers the recorded
+        // point; blindly sending page coordinates can click Sign Out or Submit.
+        await resolved.target.click();
+      } catch {
+        throw new InteractionResolutionError(
+          'The recorded target is obscured and could not be clicked safely.',
+          [...attempts, 'actionability: safe locator click failed'],
+        );
+      }
+      return {
+        ...resolved.resolution,
+        strategy: `${resolved.resolution.strategy}-hit-tested`,
+        confidence: Math.min(resolved.resolution.confidence, 0.85),
+        recovered: true,
+        attempts,
+      };
+    }
+    // Re-read geometry immediately before low-level input. Responsive layouts
+    // can move between resolution and dispatch.
+    box = await resolved.target.boundingBox();
+    if (box === null) {
+      throw new InteractionResolutionError(
+        'The recorded target detached before trusted input was dispatched.',
+        resolved.resolution.attempts,
+      );
+    }
     const page =
       'mainFrame' in resolved.scope ? resolved.scope : resolved.scope.page();
     await page.mouse.click(box.x + offsetX, box.y + offsetY);
@@ -656,6 +750,18 @@ class PlaywrightExternalSession
     return this.page.getByText(value, { exact: false }).first().isVisible();
   }
 
+  async detectSecurityChallenge(): Promise<SecurityChallengeDetection | null> {
+    return this.page.evaluate<SecurityChallengeDetection | null>(
+      SECURITY_CHALLENGE_DETECTION_SCRIPT,
+    );
+  }
+
+  async detectAuthenticationRequired(): Promise<AuthenticationRequirementDetection | null> {
+    return this.page.evaluate<AuthenticationRequirementDetection | null>(
+      AUTHENTICATION_REQUIREMENT_DETECTION_SCRIPT,
+    );
+  }
+
   async inputValue(locator: ReplayLocator): Promise<string | null> {
     const target = resolveLocator(this.page, locator);
     if ((await target.count()) === 0) return null;
@@ -920,10 +1026,13 @@ export class PlaywrightExternalBrowserOwner implements ExternalBrowserOwner {
     options: ExternalBrowserOptions,
     callbacks: RecordingCallbacks,
   ): Promise<RecordingBrowserSession> {
-    const browser = await chromium.launch({ headless: options.headless });
+    const browser = await chromium.launch({
+      headless: options.headless,
+      args: options.headless ? [] : ['--start-maximized'],
+    });
     try {
       const context = await browser.newContext({
-        viewport: { width: 1440, height: 900 },
+        viewport: options.headless ? { width: 1440, height: 900 } : null,
         ...(options.storageStatePath === undefined
           ? {}
           : { storageState: options.storageStatePath }),
@@ -932,7 +1041,9 @@ export class PlaywrightExternalBrowserOwner implements ExternalBrowserOwner {
           : {
               recordVideo: {
                 dir: options.recordVideoDirectory,
-                size: { width: 1440, height: 900 },
+                ...(options.headless
+                  ? { size: { width: 1440, height: 900 } }
+                  : {}),
               },
             }),
       });
@@ -1025,13 +1136,33 @@ export class PlaywrightExternalBrowserOwner implements ExternalBrowserOwner {
   async launchReplay(
     options: ExternalBrowserOptions,
   ): Promise<ReplayBrowserSession> {
-    const browser = await chromium.launch({ headless: options.headless });
+    const browser = await chromium.launch({
+      headless: options.headless,
+      args: options.headless ? [] : ['--start-maximized'],
+    });
     try {
-      const context = await browser.newContext(
-        options.storageStatePath === undefined
+      const environment = options.environment;
+      const context = await browser.newContext({
+        viewport:
+          environment === undefined
+            ? { width: 1440, height: 900 }
+            : {
+                width: environment.viewportWidth,
+                height: environment.viewportHeight,
+              },
+        ...(environment === undefined
           ? {}
-          : { storageState: options.storageStatePath },
-      );
+          : {
+              deviceScaleFactor: environment.deviceScaleFactor,
+              locale: environment.locale,
+              timezoneId: environment.timezoneId,
+              userAgent: environment.userAgent,
+              colorScheme: environment.colorScheme,
+            }),
+        ...(options.storageStatePath === undefined
+          ? {}
+          : { storageState: options.storageStatePath }),
+      });
       const page = await context.newPage();
       this.onReplayPageCreated?.(page);
       return new PlaywrightExternalSession(
@@ -1133,6 +1264,29 @@ function clampOffset(value: number | null | undefined, extent: number): number {
     return extent / 2;
   }
   return Math.min(Math.max(value, 1), Math.max(extent - 1, 1));
+}
+
+async function targetReceivesPointerAt(
+  target: Locator,
+  offsetX: number,
+  offsetY: number,
+): Promise<boolean> {
+  return target
+    .evaluate(
+      (element, offset) => {
+        const rect = element.getBoundingClientRect();
+        const root = element.getRootNode();
+        const pointX = rect.left + offset.x;
+        const pointY = rect.top + offset.y;
+        const hit =
+          root instanceof Document || root instanceof ShadowRoot
+            ? root.elementFromPoint(pointX, pointY)
+            : null;
+        return hit !== null && (hit === element || element.contains(hit));
+      },
+      { x: offsetX, y: offsetY },
+    )
+    .catch(() => false);
 }
 
 function describePostcondition(condition: RecordedPostcondition): string {
@@ -1664,7 +1818,7 @@ function installBrowserRecorder(): void {
     if (/captcha|recaptcha|hcaptcha/u.test(identifyingText)) {
       warn(
         'captcha',
-        'CAPTCHA interactions are unsupported and were not recorded.',
+        "CAPTCHA interactions are unsupported and were not recorded. Use the provider's official test mode or an application-owner allowlist for automated testing.",
       );
       return true;
     }

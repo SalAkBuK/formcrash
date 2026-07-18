@@ -70,12 +70,19 @@ export class AuthValidationService {
         project.targetUrl,
         currentUrl,
       );
+      const visibleAuthenticationRequirement =
+        await session.detectAuthenticationRequired?.();
+      const authenticationRequired =
+        redirectedToAuthentication ||
+        (visibleAuthenticationRequirement !== undefined &&
+          visibleAuthenticationRequirement !== null);
       return result(
         projectId,
-        redirectedToAuthentication ? 'invalid' : 'valid',
+        authenticationRequired ? 'invalid' : 'valid',
         currentUrl,
-        redirectedToAuthentication
-          ? 'The saved session was redirected to a login or authentication page.'
+        authenticationRequired
+          ? (visibleAuthenticationRequirement?.message ??
+              'The saved session was redirected to a login or authentication page.')
           : 'The saved browser state reached the configured target without an obvious login redirect.',
         checkedAt,
       );
