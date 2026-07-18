@@ -147,14 +147,17 @@ export function RunDetailView({
         </section>
       ) : null}
 
-      {liveError !== null || connectionStatus === 'disconnected' ? (
+      {!terminal &&
+      (liveError !== null ||
+        connectionStatus === 'reconnecting' ||
+        connectionStatus === 'disconnected') ? (
         <div
           className="state-message state-message-error reconnect-message"
           role="alert"
         >
           <p>
             {liveError ??
-              'Live progress disconnected. Persisted events remain authoritative.'}
+              'Live progress disconnected. Checking persisted run state…'}
           </p>
           <button
             className="button button-secondary button-compact"
