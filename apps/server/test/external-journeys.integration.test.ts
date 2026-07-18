@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import path from 'node:path';
 
@@ -24,7 +24,11 @@ import {
 import { JourneyReplayService } from '../src/runner/recording/journey-replay.js';
 import { RecordingManager } from '../src/runner/recording/recording-manager.js';
 import type { FormCrashDatabase } from '../src/persistence/database.js';
-import { buildSampleRunResult, createTemporaryTestConfig } from './fixtures.js';
+import {
+  buildSampleRunResult,
+  createTemporaryTestConfig,
+  restoreSampleNextEnv,
+} from './fixtures.js';
 
 const SAMPLE_PORT = 4211;
 const SAMPLE_URL = `http://127.0.0.1:${SAMPLE_PORT}/?mode=fixed`;
@@ -36,6 +40,12 @@ const nextCli = path.resolve(
   sampleDirectory,
   'node_modules/next/dist/bin/next',
 );
+const sampleDistDirectoryName = `.next-test-${process.pid}-${SAMPLE_PORT}`;
+const sampleDistDirectory = path.resolve(
+  sampleDirectory,
+  sampleDistDirectoryName,
+);
+const sampleNextEnvPath = path.resolve(sampleDirectory, 'next-env.d.ts');
 const externalHtml = readFileSync(
   path.resolve(
     import.meta.dirname,
@@ -73,7 +83,11 @@ beforeAll(async () => {
     [nextCli, 'dev', '--hostname', '127.0.0.1', '--port', String(SAMPLE_PORT)],
     {
       cwd: sampleDirectory,
-      env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1' },
+      env: {
+        ...process.env,
+        NEXT_TELEMETRY_DISABLED: '1',
+        FORMCRASH_NEXT_DIST_DIR: sampleDistDirectoryName,
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
@@ -90,8 +104,10 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(async () => {
-  database.close();
-  await new Promise<void>((resolve) => fixtureServer.close(() => resolve()));
+  database?.close();
+  if (fixtureServer !== undefined) {
+    await new Promise<void>((resolve) => fixtureServer.close(() => resolve()));
+  }
   if (sampleProcess !== null && sampleProcess.exitCode === null) {
     sampleProcess.kill('SIGTERM');
     await Promise.race([
@@ -100,6 +116,13 @@ afterAll(async () => {
     ]);
     if (sampleProcess.exitCode === null) sampleProcess.kill('SIGKILL');
   }
+  rmSync(sampleDistDirectory, {
+    recursive: true,
+    force: true,
+    maxRetries: 3,
+    retryDelay: 100,
+  });
+  restoreSampleNextEnv(sampleNextEnvPath);
   temporary.cleanup();
 }, 10_000);
 

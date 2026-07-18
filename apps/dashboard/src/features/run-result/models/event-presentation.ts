@@ -1,4 +1,8 @@
-import type { RunEventEnvelope, RunStatus } from '@formcrash/contracts';
+import {
+  isTerminalRunStatus,
+  type RunEventEnvelope,
+  type RunStatus,
+} from '@formcrash/contracts';
 
 import { sentenceCase } from '../../../lib/formatters';
 
@@ -142,6 +146,7 @@ export function deriveRunStatus(
   events: readonly RunEventEnvelope[],
   persistedStatus: RunStatus,
 ): RunStatus {
+  if (isTerminalRunStatus(persistedStatus)) return persistedStatus;
   const mapping: Readonly<Record<string, RunStatus>> = {
     'run.created': 'created',
     'run.starting': 'starting',
@@ -156,7 +161,7 @@ export function deriveRunStatus(
     const event = events[index];
     if (event === undefined) continue;
     const status = mapping[event.eventType];
-    if (status !== undefined) return status;
+    if (status !== undefined && !isTerminalRunStatus(status)) return status;
   }
   return persistedStatus;
 }

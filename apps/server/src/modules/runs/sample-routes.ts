@@ -16,6 +16,9 @@ const runListQuerySchema = z.object({
 });
 
 const runParametersSchema = z.object({ runId: z.string().min(1) });
+const runEventsQuerySchema = z.object({
+  afterSequence: z.coerce.number().int().nonnegative().safe().optional(),
+});
 const artifactParametersSchema = runParametersSchema.extend({
   artifactId: z.string().min(1),
 });
@@ -107,13 +110,18 @@ export function registerSampleRunRoutes(
   app.get('/api/runs/:runId/events', (request, reply) => {
     const parsed = runParametersSchema.safeParse(request.params);
     if (!parsed.success) return reply.status(404).send(runNotFound());
+    const query = runEventsQuerySchema.safeParse(request.query);
+    if (!query.success) return reply.status(400).send(invalidLastEventId());
     const header = request.headers['last-event-id'];
     if (Array.isArray(header)) {
       return reply.status(400).send(invalidLastEventId());
     }
     let afterSequence: number;
     try {
-      afterSequence = parseLastEventId(header);
+      afterSequence = Math.max(
+        parseLastEventId(header),
+        query.data.afterSequence ?? 0,
+      );
     } catch {
       return reply.status(400).send(invalidLastEventId());
     }

@@ -12,8 +12,11 @@ export function getRun(runId: string): Promise<PersistedRunDetail> {
   );
 }
 
-export function getRunEventsUrl(runId: string): string {
-  return resolveApiUrl(`/api/runs/${encodeURIComponent(runId)}/events`);
+export function getRunEventsUrl(runId: string, afterSequence = 0): string {
+  const path = `/api/runs/${encodeURIComponent(runId)}/events`;
+  if (afterSequence <= 0) return resolveApiUrl(path);
+  const query = new URLSearchParams({ afterSequence: String(afterSequence) });
+  return resolveApiUrl(`${path}?${query.toString()}`);
 }
 
 export function getArtifactUrl(runId: string, artifactId: string): string {

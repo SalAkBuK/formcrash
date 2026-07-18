@@ -54,6 +54,14 @@ describe('persisted run SSE', () => {
       headers: { 'last-event-id': '2' },
     });
     expect(parseFrames(resumed.body).map((item) => item.id)).toEqual([3, 4]);
+
+    const resumedByQuery = await context.app.inject({
+      method: 'GET',
+      url: '/api/runs/sse-run/events?afterSequence=3',
+    });
+    expect(parseFrames(resumedByQuery.body).map((item) => item.id)).toEqual([
+      4,
+    ]);
   });
 
   it('returns normal errors before opening an event stream', async () => {
@@ -74,6 +82,14 @@ describe('persisted run SSE', () => {
           method: 'GET',
           url: '/api/runs/known-run/events',
           headers: { 'last-event-id': 'invalid' },
+        })
+      ).statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await context.app.inject({
+          method: 'GET',
+          url: '/api/runs/known-run/events?afterSequence=invalid',
         })
       ).statusCode,
     ).toBe(400);

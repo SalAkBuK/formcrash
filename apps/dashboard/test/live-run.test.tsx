@@ -1,4 +1,5 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
+import type { PersistedRunDetail, RunStatus } from '@formcrash/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RunDetailView } from '../src/features/run-result/components/run-detail-view';
@@ -8,8 +9,10 @@ const mocks = vi.hoisted(() => ({ getRun: vi.fn() }));
 
 vi.mock('../src/features/run-result/api/get-run', () => ({
   getRun: mocks.getRun,
-  getRunEventsUrl: (runId: string) =>
-    `http://localhost:4100/api/runs/${runId}/events`,
+  getRunEventsUrl: (runId: string, afterSequence = 0) =>
+    `http://localhost:4100/api/runs/${runId}/events${
+      afterSequence > 0 ? `?afterSequence=${afterSequence}` : ''
+    }`,
   getArtifactUrl: (runId: string, artifactId: string) =>
     `http://localhost:4100/api/runs/${runId}/artifacts/${artifactId}`,
 }));
@@ -68,6 +71,7 @@ describe('live run progress', () => {
   beforeEach(() => {
     FakeEventSource.instances.length = 0;
     mocks.getRun.mockReset();
+    mocks.getRun.mockResolvedValue(activeRun('running'));
     vi.stubGlobal('EventSource', FakeEventSource);
   });
 
@@ -76,14 +80,13 @@ describe('live run progress', () => {
   });
 
   it('opens SSE, orders and deduplicates events, then reloads authoritative terminal state', async () => {
-    const terminal = buildRun('passed', {
+    const terminal = activeRun('passed', {
       events: [
         buildEvent(1, 'journey.step.started', { stepName: 'Submit order' }),
         buildEvent(2, 'mystery.signal'),
         buildEvent(3, 'run.passed'),
       ],
     });
-    mocks.getRun.mockResolvedValue(terminal);
     const { container } = render(
       <RunDetailView initialRun={buildRun('running')} />,
     );
@@ -113,6 +116,7 @@ describe('live run progress', () => {
     expect(timeline[0]).toHaveTextContent('Journey step started');
     expect(timeline[1]).toHaveTextContent('Mystery signal');
 
+    mocks.getRun.mockResolvedValue(terminal);
     act(() => source.emit(buildEvent(3, 'run.passed')));
     expect(source.close).toHaveBeenCalled();
     await waitFor(() =>
@@ -152,10 +156,10 @@ describe('live run progress', () => {
   });
 
   it('reconciles authoritative state when the server closes before terminal UI settles', async () => {
-    mocks.getRun.mockResolvedValue(buildRun('passed'));
     render(<RunDetailView initialRun={buildRun('running')} />);
     const source = FakeEventSource.instances[0]!;
 
+    mocks.getRun.mockResolvedValue(activeRun('passed'));
     act(() => source.disconnect());
 
     await waitFor(() =>
@@ -167,4 +171,101 @@ describe('live run progress', () => {
       }),
     ).toBeVisible();
   });
+
+  it('retries persisted reconciliation and reconnects from the last processed sequence', async () => {
+    let requests = 0;
+    mocks.getRun.mockImplementation(() => {
+      requests += 1;
+      return Promise.resolve(
+        requests < 3 ? activeRun('running') : activeRun('passed'),
+      );
+    });
+    render(<RunDetailView initialRun={buildRun('running')} />);
+    const source = FakeEventSource.instances[0]!;
+    act(() => source.emit(buildEvent(1, 'run.running')));
+    act(() => source.disconnect());
+
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(2), {
+      timeout: 2_000,
+    });
+    expect(FakeEventSource.instances[1]!.url).toBe(
+      'http://localhost:4100/api/runs/run-running/events?afterSequence=1',
+    );
+    expect(
+      await screen.findByRole(
+        'heading',
+        { name: 'Duplicate protection held' },
+        { timeout: 2_000 },
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText('Disconnected')).not.toBeInTheDocument();
+  });
+
+  it('prefers an authoritative terminal snapshot over late active events', async () => {
+    render(<RunDetailView initialRun={buildRun('running')} />);
+    const source = FakeEventSource.instances[0]!;
+    mocks.getRun.mockResolvedValue(
+      activeRun('passed', { events: [buildEvent(3, 'run.passed')] }),
+    );
+
+    act(() => source.emit(buildEvent(3, 'run.passed')));
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Duplicate protection held',
+      }),
+    ).toBeVisible();
+    act(() => source.emit(buildEvent(4, 'run.starting')));
+
+    expect(
+      screen.getByRole('heading', { name: 'Duplicate protection held' }),
+    ).toBeVisible();
+    expect(screen.queryByText('Experiment running')).not.toBeInTheDocument();
+    expect(screen.queryByText('Disconnected')).not.toBeInTheDocument();
+  });
+
+  it('does not let a stale persisted active event regress terminal lifecycle', () => {
+    render(
+      <RunDetailView
+        initialRun={activeRun('passed', {
+          events: [buildEvent(3, 'run.passed'), buildEvent(4, 'run.starting')],
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByRole('heading', { name: 'Duplicate protection held' }),
+    ).toBeVisible();
+    expect(screen.queryByText('Experiment running')).not.toBeInTheDocument();
+    expect(FakeEventSource.instances).toHaveLength(0);
+  });
+
+  it('closes the fetch-subscribe race when persisted state is already terminal', async () => {
+    mocks.getRun.mockResolvedValue(activeRun('passed'));
+    render(<RunDetailView initialRun={buildRun('running')} />);
+    const source = FakeEventSource.instances[0]!;
+
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Duplicate protection held',
+      }),
+    ).toBeVisible();
+    expect(source.close).toHaveBeenCalled();
+    expect(screen.queryByText('Experiment running')).not.toBeInTheDocument();
+  });
 });
+
+function activeRun(
+  status: RunStatus,
+  options: Parameters<typeof buildRun>[1] = {},
+): PersistedRunDetail {
+  const run = buildRun(status, options);
+  return {
+    ...run,
+    runId: 'run-running',
+    events: run.events.map((event) => ({ ...event, runId: 'run-running' })),
+    artifacts: run.artifacts.map((artifact) => ({
+      ...artifact,
+      runId: 'run-running',
+    })),
+  };
+}
