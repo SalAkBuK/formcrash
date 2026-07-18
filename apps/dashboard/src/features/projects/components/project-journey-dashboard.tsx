@@ -15,7 +15,9 @@ import type {
   ReplayResult,
 } from '@formcrash/contracts';
 
+import { StatusBadge } from '../../../components/ui/status-badge';
 import { FormCrashApiError, resolveApiUrl } from '../../../lib/api-client';
+import { formatLocalDateTime, formatCount } from '../../../lib/formatters';
 import {
   confirmAuthenticationCapture,
   getProjectSettings,
@@ -41,6 +43,7 @@ export function ProjectJourneyDashboard() {
   const [projects, setProjects] = useState<readonly Project[]>([]);
   const [selected, setSelected] = useState<Project | null>(null);
   const [journeys, setJourneys] = useState<readonly PersistedJourney[]>([]);
+  const [projectDetailsLoading, setProjectDetailsLoading] = useState(false);
   const [recording, setRecording] = useState<RecordingSession | null>(null);
   const [reviewSteps, setReviewSteps] = useState<
     readonly RecordedJourneyStep[]
@@ -75,20 +78,33 @@ export function ProjectJourneyDashboard() {
 
   useEffect(() => {
     if (selected === null) return;
+    setProjectDetailsLoading(true);
+    setJourneys([]);
+    setExecutionSettings(null);
     setProductionReplayConfirmed(false);
     setReplayAuthenticationRequired(false);
     setReplayAuthCapture(null);
     setReplayAuthMessage(null);
+    let active = true;
     void Promise.all([
       listJourneys(selected.id),
       getProjectSettings(selected.id),
     ])
       .then(([nextJourneys, nextSettings]) => {
+        if (!active) return;
         setJourneys(nextJourneys);
         setExecutionSettings(nextSettings);
         setReplayValues({});
       })
-      .catch((reason: unknown) => setError(messageOf(reason)));
+      .catch((reason: unknown) => {
+        if (active) setError(messageOf(reason));
+      })
+      .finally(() => {
+        if (active) setProjectDetailsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [selected]);
 
   useEffect(() => {
@@ -419,23 +435,25 @@ export function ProjectJourneyDashboard() {
 
   return (
     <main className="dashboard-shell project-workbench">
-      <header className="hero project-hero">
-        <p className="eyebrow">Chunk 6 · External impatient-user experiments</p>
-        <h1>Crash-test your own controlled app.</h1>
-        <p className="hero-statement">
-          Capture an authenticated normal journey, inject runtime data safely,
-          then repeat one real click or submit and preserve the evidence.
-        </p>
-        <p className="safety-notice">
-          <strong>Controlled environments only.</strong> Test only applications
-          you own or are explicitly authorized to test. Localhost and controlled
-          HTTP/HTTPS targets are permitted.
-        </p>
-        <div className="workflow-actions">
+      <header className="project-overview-header">
+        <div className="project-overview-heading">
+          <p className="eyebrow">External projects</p>
+          <h1>Project overview</h1>
+          <p className="hero-statement">
+            Connect a controlled target, record its critical journey, and prove
+            how repeated action changes the browser-visible outcome.
+          </p>
+        </div>
+        <div className="project-overview-actions">
           <Link className="button button-secondary" href="/">
-            Run Bundled Sample
+            Open Sample Checkout
           </Link>
         </div>
+        <p className="safety-notice project-safety-notice">
+          <strong>Controlled environments only.</strong> Test applications you
+          own or are explicitly authorized to test. Production targets require
+          an additional confirmation before replay.
+        </p>
       </header>
 
       {error !== null ? (
@@ -444,13 +462,26 @@ export function ProjectJourneyDashboard() {
         </div>
       ) : null}
 
-      <section className="project-grid" aria-label="Projects">
+      <section
+        className="project-grid project-overview-grid"
+        aria-label="Projects"
+      >
         <form
-          className="panel project-form"
+          className="panel project-form project-create-panel"
           onSubmit={(event) => void submitProject(event)}
         >
-          <p className="eyebrow">New project</p>
-          <h2>Connect a target</h2>
+          <div className="project-panel-heading">
+            <span className="project-panel-index" aria-hidden="true">
+              01
+            </span>
+            <div>
+              <p className="eyebrow">New project</p>
+              <h2>Connect a target</h2>
+            </div>
+          </div>
+          <p className="project-panel-description">
+            Save the application boundary before recording any browser activity.
+          </p>
           <label>
             Project name
             <input
@@ -490,12 +521,20 @@ export function ProjectJourneyDashboard() {
           </button>
         </form>
 
-        <div className="panel">
+        <div className="panel project-targets-panel">
           <div className="section-heading-row">
-            <div>
-              <p className="eyebrow">Projects</p>
-              <h2>Saved targets</h2>
+            <div className="project-panel-heading">
+              <span className="project-panel-index" aria-hidden="true">
+                02
+              </span>
+              <div>
+                <p className="eyebrow">Projects</p>
+                <h2>Saved targets</h2>
+              </div>
             </div>
+            <span className="project-count">
+              {formatCount(projects.length, 'target')}
+            </span>
           </div>
           {deletableProjects.length > 0 ? (
             <div className="project-bulk-actions">
@@ -575,10 +614,22 @@ export function ProjectJourneyDashboard() {
                     }}
                     type="button"
                   >
-                    <strong>{project.name}</strong>
-                    <span>
-                      {project.targetUrl} · {project.environment} ·{' '}
-                      {project.id.slice(0, 8)}
+                    <span className="project-card-heading">
+                      <strong>{project.name}</strong>
+                      <StatusBadge
+                        tone={
+                          project.environment === 'production'
+                            ? 'warning'
+                            : 'neutral'
+                        }
+                      >
+                        {environmentLabel(project.environment)}
+                      </StatusBadge>
+                    </span>
+                    <code>{project.targetUrl}</code>
+                    <span className="project-card-description">
+                      {project.description ||
+                        `Project ${project.id.slice(0, 8)}`}
                     </span>
                   </button>
                   {project.id !== 'project-sample-checkout' ? (
@@ -603,6 +654,60 @@ export function ProjectJourneyDashboard() {
 
       {selected !== null ? (
         <>
+          <section
+            className="panel selected-project-overview"
+            aria-labelledby="selected-project-title"
+          >
+            <div className="selected-project-overview-header">
+              <div>
+                <p className="eyebrow">Selected target</p>
+                <p
+                  className="selected-project-title"
+                  id="selected-project-title"
+                >
+                  {selected.name}
+                </p>
+                <code>{selected.targetUrl}</code>
+              </div>
+              <StatusBadge
+                tone={
+                  selected.environment === 'production' ? 'warning' : 'neutral'
+                }
+              >
+                {environmentLabel(selected.environment)} environment
+              </StatusBadge>
+            </div>
+
+            <dl className="selected-project-facts">
+              <div>
+                <dt>Saved journeys</dt>
+                <dd>
+                  {projectDetailsLoading
+                    ? 'Checking…'
+                    : formatCount(journeys.length, 'journey')}
+                </dd>
+              </div>
+              <div>
+                <dt>Authentication</dt>
+                <dd>{authenticationSummary(executionSettings)}</dd>
+              </div>
+              <div>
+                <dt>Last updated</dt>
+                <dd>{formatLocalDateTime(selected.updatedAt)}</dd>
+              </div>
+            </dl>
+
+            <div className="selected-project-overview-footer">
+              <p>
+                {selected.description ||
+                  'No project description has been saved for this target.'}
+              </p>
+              <a className="button button-primary" href="#recording-workspace">
+                Record a journey
+              </a>
+            </div>
+          </section>
+
           <section className="panel recording-panel" id="recording-workspace">
             <div className="section-heading-row">
               <div>
@@ -1195,6 +1300,22 @@ function messageOf(reason: unknown): string {
   return reason instanceof Error
     ? reason.message
     : 'The operation could not be completed.';
+}
+
+function environmentLabel(environment: Project['environment']): string {
+  if (environment === 'local') return 'Local';
+  if (environment === 'staging') return 'Staging';
+  return 'Production';
+}
+
+function authenticationSummary(
+  settings: ProjectExecutionSettings | null,
+): string {
+  if (settings === null) return 'Checking…';
+  if (settings.authentication.available) return 'Saved state available';
+  if (settings.authentication.configured)
+    return 'Configured, state unavailable';
+  return 'Not configured';
 }
 
 function formValue(form: FormData, name: string): string {

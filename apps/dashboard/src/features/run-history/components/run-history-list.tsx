@@ -29,11 +29,17 @@ export function RunHistoryList({
   onRefresh,
 }: RunHistoryListProps) {
   return (
-    <section className="panel history-panel" aria-labelledby="history-title">
-      <div className="section-heading-row">
+    <section
+      className="panel history-panel run-history-panel"
+      aria-labelledby="history-title"
+    >
+      <div className="run-history-header">
         <div>
           <p className="eyebrow">Durable evidence</p>
-          <h2 id="history-title">Recent runs</h2>
+          <h2 id="history-title">Runs</h2>
+          <p>
+            Persisted outcomes from the bundled duplicate-submission experiment.
+          </p>
         </div>
         <Button
           compact
@@ -56,7 +62,7 @@ export function RunHistoryList({
         </StateMessage>
       ) : null}
       {!loading && error === null && runs.length === 0 ? (
-        <div className="empty-state">
+        <div className="empty-state run-history-empty-state">
           <h3>No runs yet</h3>
           <p>
             Start the seeded experiment. Completed and interrupted runs will
@@ -65,52 +71,84 @@ export function RunHistoryList({
         </div>
       ) : null}
       {runs.length > 0 ? (
-        <ol className="history-list">
-          {runs.map((run) => (
-            <li key={run.runId}>
-              <Link className="history-card" href={`/runs/${run.runId}`}>
-                <div className="history-card-heading">
-                  <StatusBadge
-                    className={`status-${run.status}`}
-                    tone={runStatusTone(run.status)}
-                  >
-                    {sentenceCase(run.status)}
-                  </StatusBadge>
-                  <strong>{sentenceCase(run.mode)} mode</strong>
-                </div>
-                <dl className="history-metrics">
-                  <div>
-                    <dt>Started</dt>
-                    <dd>{formatLocalDateTime(run.startedAt)}</dd>
-                  </div>
-                  <div>
-                    <dt>Duration</dt>
-                    <dd>{formatDuration(run.durationMs)}</dd>
-                  </div>
-                  <div>
-                    <dt>Orders</dt>
-                    <dd>{run.createdOrderCount ?? '—'}</dd>
-                  </div>
-                  <div>
-                    <dt>Assertion</dt>
-                    <dd>
-                      {run.assertionStatus === null
-                        ? 'Not evaluated'
-                        : sentenceCase(run.assertionStatus)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Screenshots</dt>
-                    <dd>{run.screenshotCount}</dd>
-                  </div>
-                </dl>
-              </Link>
-            </li>
-          ))}
-        </ol>
+        <div className="run-history-table-wrap">
+          <table className="run-history-table">
+            <caption className="sr-only">
+              Most recent persisted bundled sample runs
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Result</th>
+                <th scope="col">Run</th>
+                <th scope="col">Started</th>
+                <th scope="col">Duration</th>
+                <th scope="col">Observed outcome</th>
+                <th scope="col">Evidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((run) => (
+                <tr key={run.runId}>
+                  <td data-label="Result">
+                    <StatusBadge
+                      className={`status-${run.status}`}
+                      tone={runStatusTone(run.status)}
+                    >
+                      {sentenceCase(run.status)}
+                    </StatusBadge>
+                  </td>
+                  <td data-label="Run">
+                    <Link
+                      className="run-history-primary-link"
+                      href={`/runs/${run.runId}`}
+                    >
+                      <strong>{sentenceCase(run.mode)} mode</strong>
+                      <code>{run.runId}</code>
+                    </Link>
+                  </td>
+                  <td data-label="Started">
+                    <span>{formatLocalDateTime(run.startedAt)}</span>
+                  </td>
+                  <td data-label="Duration">
+                    <span>{formatDuration(run.durationMs)}</span>
+                  </td>
+                  <td data-label="Observed outcome">
+                    <strong>{runOutcomeSummary(run)}</strong>
+                    <span>{assertionSummary(run)}</span>
+                  </td>
+                  <td data-label="Evidence">
+                    <strong>
+                      {run.screenshotCount}{' '}
+                      {run.screenshotCount === 1 ? 'screenshot' : 'screenshots'}
+                    </strong>
+                    <span>Browser and assertion record</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : null}
     </section>
   );
+}
+
+function runOutcomeSummary(run: PersistedRunSummary): string {
+  if (run.createdOrderCount === null) return 'Order count unavailable';
+  return `${run.createdOrderCount} ${run.createdOrderCount === 1 ? 'order' : 'orders'} created`;
+}
+
+function assertionSummary(run: PersistedRunSummary): string {
+  if (run.assertionStatus === null || run.assertionStatus === 'not_evaluated') {
+    return 'Outcome was not evaluated';
+  }
+  if (run.assertionStatus === 'passed') {
+    return 'No duplicate order was observed';
+  }
+  if (run.assertionStatus === 'failed') {
+    return 'Expected no more than one order';
+  }
+  return 'Outcome evaluation errored';
 }
 
 function runStatusTone(status: PersistedRunSummary['status']): StatusTone {

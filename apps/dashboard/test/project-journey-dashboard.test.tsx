@@ -162,6 +162,34 @@ beforeEach(() => {
 });
 
 describe('external project journey workflow', () => {
+  it('summarizes the selected project from persisted project state', async () => {
+    mocks.listJourneys.mockResolvedValue([journey]);
+    mocks.getProjectSettings.mockResolvedValue({
+      projectId: project.id,
+      variables: [],
+      beforeRunHook: null,
+      afterRunHook: null,
+      authentication: {
+        configured: true,
+        available: true,
+        capturedAt: '2026-07-16T00:06:00.000Z',
+        missingReason: null,
+      },
+      updatedAt: '2026-07-16T00:06:00.000Z',
+    });
+
+    render(<ProjectJourneyDashboard />);
+
+    expect(
+      await screen.findByRole('heading', { name: 'Project overview' }),
+    ).toBeVisible();
+    expect(await screen.findByText('1 journey')).toBeVisible();
+    expect(screen.getByText('Saved state available')).toBeVisible();
+    expect(
+      screen.getByRole('link', { name: 'Record a journey' }),
+    ).toHaveAttribute('href', '#recording-workspace');
+  });
+
   it('selects and bulk deletes multiple projects', async () => {
     const user = userEvent.setup();
     const sample = {
