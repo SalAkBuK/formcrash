@@ -3,6 +3,7 @@ import { createServer, type Server } from 'node:http';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { chromium, type Page } from 'playwright';
+import { recordedInteractionSchema } from '@formcrash/contracts';
 
 import {
   buildBrowserRecorderInitScript,
@@ -17,11 +18,24 @@ beforeAll(async () => {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     response.end(`<!doctype html>
       <html>
+        <style>
+          @keyframes transient-option-shift {
+            from { transform: translateX(0); }
+            to { transform: translateX(2px); }
+          }
+          #transient-option-container button {
+            animation: transient-option-shift 20ms infinite alternate;
+          }
+        </style>
         <body>
           <button id="open">Open form</button>
           <button class="unit-combobox" role="combobox">Search occupied unit...</button>
+          <div id="transient-option-container"></div>
+          <output id="selected-unit"></output>
           <label for="_r_1o_-form-item">Visitor Name</label>
           <input id="_r_1o_-form-item" name="visitorName" />
+          <label for="secret">Password</label>
+          <input id="secret" name="password" type="password" />
           <form id="profile" hidden>
             <label for="name">Name</label>
             <input id="name" name="name" />
@@ -38,6 +52,16 @@ beforeAll(async () => {
             document.querySelector('.unit-combobox').addEventListener('click', () => {
               window.location.hash = 'unit-combobox-opened';
             });
+            const installTransientOption = (button) => {
+              button.addEventListener('click', () => {
+                document.querySelector('#selected-unit').textContent = 'TT-101';
+              });
+            };
+            const transientOption = document.createElement('button');
+            transientOption.type = 'button';
+            transientOption.textContent = 'TT-101AvailableFloor 1';
+            installTransientOption(transientOption);
+            document.querySelector('#transient-option-container').append(transientOption);
           </script>
         </body>
       </html>`);
@@ -227,6 +251,90 @@ describe('external browser recorder injection', () => {
     await session.close();
   });
 
+  it('recovers an exact custom-combobox option that detaches during a trusted click', async () => {
+    let page: Page | null = null;
+    const owner = new PlaywrightExternalBrowserOwner(undefined, (created) => {
+      page = created;
+    });
+    const session = await owner.launchReplay({
+      targetUrl,
+      headless: true,
+      timeoutMs: 1_000,
+    });
+    await session.navigate(targetUrl);
+
+    await session.click({
+      strategy: 'role',
+      role: 'button',
+      name: 'TT-101AvailableFloor 1',
+    });
+
+    if (page === null) throw new Error('Replay page was not exposed.');
+    await expect(
+      (page as Page).locator('#selected-unit').textContent(),
+    ).resolves.toBe('TT-101');
+    await session.close();
+  });
+
+  it('repeats a moving custom option 50 times through trusted input and verifies its post-state', async () => {
+    let page: Page | null = null;
+    const owner = new PlaywrightExternalBrowserOwner(undefined, (created) => {
+      page = created;
+    });
+    const session = await owner.launchReplay({
+      targetUrl,
+      headless: true,
+      timeoutMs: 1_000,
+    });
+    await session.navigate(targetUrl);
+    const interaction = recordedInteractionSchema.parse({
+      id: 'moving-option-interaction',
+      stepId: 'moving-option-step',
+      sequence: 1,
+      pageId: 'page-1',
+      framePath: [],
+      startedAt: Date.now(),
+      durationMs: 0,
+      intent: 'click',
+      pointerType: 'mouse',
+      targetCandidates: [
+        {
+          locator: {
+            strategy: 'role',
+            role: 'button',
+            name: 'TT-101AvailableFloor 1',
+          },
+          source: 'accessibility',
+          confidence: 0.9,
+        },
+      ],
+      fingerprint: null,
+      geometry: null,
+      postconditions: [
+        {
+          kind: 'visible_text',
+          value: 'TT-101',
+          target: { strategy: 'id', value: 'selected-unit' },
+        },
+      ],
+      retrySafety: 'side_effect_possible',
+    });
+    if (page === null || session.clickInteraction === undefined) {
+      throw new Error('Hybrid replay was not exposed.');
+    }
+
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      await (page as Page).locator('#selected-unit').evaluate((element) => {
+        element.textContent = '';
+      });
+      await session.clickInteraction(interaction);
+      await expect(
+        session.verifyInteraction?.(interaction),
+      ).resolves.toMatchObject({ passed: true });
+    }
+    await session.close();
+  });
+
   it('does not record React-generated IDs as stable replay locators', async () => {
     const events: unknown[] = [];
     const owner = new PlaywrightExternalBrowserOwner(async (page) => {
@@ -260,5 +368,28 @@ describe('external browser recorder injection', () => {
         name: 'visitorName',
       },
     });
+  });
+
+  it('never preserves printable key values or codes in the raw trace', async () => {
+    const traceEvents: unknown[] = [];
+    const owner = new PlaywrightExternalBrowserOwner(async (page) => {
+      await page.locator('#secret').pressSequentially('NeverPersistThis');
+    });
+    const session = await owner.launchRecording(
+      { targetUrl, headless: true, timeoutMs: 10_000 },
+      {
+        onEvent: () => undefined,
+        onWarning: () => undefined,
+        onNavigation: () => undefined,
+        onTraceEvent: (event) => traceEvents.push(event),
+      },
+    );
+    await session.close();
+
+    const serialized = JSON.stringify(traceEvents);
+    expect(serialized).not.toContain('NeverPersistThis');
+    expect(serialized).not.toContain('KeyN');
+    expect(serialized).toContain('[REDACTED_CHARACTER]');
+    expect(serialized).toContain('[REDACTED_CODE]');
   });
 });

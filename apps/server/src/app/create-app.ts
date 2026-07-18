@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 
 import type { ServerConfig } from './config.js';
 import { ScreenshotStore } from '../artifacts/screenshot-store.js';
+import { JourneyTraceStore } from '../artifacts/journey-trace-store.js';
 import { RunEventBroker } from '../events/run-event-broker.js';
 import { registerHealthRoute } from '../modules/health/routes.js';
 import { registerSampleRunRoutes } from '../modules/runs/sample-routes.js';
@@ -60,6 +61,10 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   const screenshotStore = new ScreenshotStore(
     options.config.artifactRoot,
     runRepository,
+  );
+  const journeyTraceStore = new JourneyTraceStore(
+    options.config.artifactRoot,
+    projectRepository,
   );
   const runEventBroker = options.runEventBroker ?? new RunEventBroker();
   const browserOwnership = new BrowserOwnership();
@@ -196,6 +201,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
       authStore: authStateStore,
       experiments: externalExperimentRepository,
       screenshots: externalScreenshotStore,
+      traces: journeyTraceStore,
     },
     {
       repository: outcomeCheckRepository,

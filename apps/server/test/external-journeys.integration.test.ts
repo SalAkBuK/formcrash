@@ -146,6 +146,14 @@ describe.sequential('generic Chromium recording and replay', () => {
     const stopped = await manager.stop(started.id);
 
     expect(stopped.status).toBe('completed');
+    expect(stopped).toMatchObject({
+      captureFormat: 'hybrid-v2',
+      traceStatus: 'complete',
+      traceSummary: {
+        videoCaptured: true,
+        truncated: false,
+      },
+    });
     expect(stopped.steps.map((step) => step.type)).toEqual([
       'navigate',
       'click',
@@ -192,6 +200,13 @@ describe.sequential('generic Chromium recording and replay', () => {
     const journey = manager.save(project.id, started.id, {
       name: 'Complete profile',
     });
+    expect(journey).toMatchObject({
+      replayFormat: 'hybrid-v2',
+      trace: {
+        interactionCount: stopped.traceSummary?.interactionCount,
+      },
+    });
+    expect(journey.trace?.checksumSha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(journey.recordingMetadata.normalizationRule).toContain('coalesced');
 
     database.close();

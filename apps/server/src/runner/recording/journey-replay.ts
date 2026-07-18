@@ -3,10 +3,13 @@ import { randomUUID } from 'node:crypto';
 import {
   replayResultSchema,
   type EphemeralRuntimeValues,
+  type ReplayInteractionOutcome,
+  type ReplayMode,
   type ReplayResult,
 } from '@formcrash/contracts';
 
 import type { ServerConfig } from '../../app/config.js';
+import { JourneyTraceStore } from '../../artifacts/journey-trace-store.js';
 import type { ProjectJourneyRepository } from '../../persistence/project-journey-repository.js';
 import type { ProjectSettingsRepository } from '../../persistence/project-settings-repository.js';
 import { RunEventLog } from '../engine/event-log.js';
@@ -16,7 +19,10 @@ import {
   SavedAuthenticationExpiredError,
 } from '../external/authentication-redirect.js';
 import { executeHttpHook } from '../external/http-hooks.js';
-import { executeRecordedStep } from '../external/journey-actions.js';
+import {
+  executeRecordedStep,
+  HybridReplayError,
+} from '../external/journey-actions.js';
 import {
   isStepValueSensitive,
   redactSensitiveText,
@@ -35,6 +41,7 @@ import {
 
 export class JourneyReplayService {
   private readonly browserOwner: ExternalBrowserOwner;
+  private readonly traceStore: JourneyTraceStore;
 
   constructor(
     private readonly config: ServerConfig,
@@ -45,12 +52,14 @@ export class JourneyReplayService {
     private readonly authStore?: AuthStateStore,
   ) {
     this.browserOwner = browserOwner ?? new PlaywrightExternalBrowserOwner();
+    this.traceStore = new JourneyTraceStore(config.artifactRoot, repository);
   }
 
   async replay(
     journeyId: string,
     ephemeral: EphemeralRuntimeValues = {},
     confirmProduction = false,
+    mode: ReplayMode = 'adaptive',
   ): Promise<ReplayResult> {
     const journey = this.repository.getJourney(journeyId);
     if (journey === null) throw new Error('Journey was not found.');
@@ -75,11 +84,21 @@ export class JourneyReplayService {
       hooks: [storedSettings.beforeRunHook, storedSettings.afterRunHook],
     });
     const storageStatePath = this.authStore?.usablePath(project.id) ?? null;
+    const traceRecord = this.repository.getRecordingTraceByJourney(journey.id);
+    if (traceRecord !== null) this.traceStore.assertIntegrity(traceRecord);
+    const trace = this.repository.getJourneyTraceManifest(journey.id);
+    const interactions = new Map(
+      (trace?.interactions ?? []).map((interaction) => [
+        interaction.stepId,
+        interaction,
+      ]),
+    );
     const release = this.ownership.acquire('replay');
     const startedAt = new Date().toISOString();
     const events = new RunEventLog(`replay-${replayId}`);
     let session: ReplayBrowserSession | null = null;
     let result: ReplayResult | null = null;
+    const interactionOutcomes: ReplayInteractionOutcome[] = [];
     try {
       if (storedSettings.beforeRunHook !== null) {
         await executeHttpHook(
@@ -106,9 +125,18 @@ export class JourneyReplayService {
         );
       }
       for (const [index, step] of journey.steps.entries()) {
+        const interaction = interactions.get(step.id);
         try {
-          await executeRecordedStep(session, step, (item) =>
-            resolveStepValue(item, runtime),
+          interactionOutcomes.push(
+            await executeRecordedStep(
+              session,
+              step,
+              (item) => resolveStepValue(item, runtime),
+              {
+                ...(interaction === undefined ? {} : { interaction }),
+                mode,
+              },
+            ),
           );
         } catch (error: unknown) {
           result = replayResultSchema.parse({
@@ -128,9 +156,22 @@ export class JourneyReplayService {
               ),
               currentUrl: safeCurrentUrl(session, runtime),
               locator: step.locator,
+              ...(error instanceof HybridReplayError
+                ? {
+                    pageId: error.pageId,
+                    framePath: error.framePath,
+                    resolutionAttempts: error.resolutionAttempts,
+                    confidence: error.confidence,
+                    expectedState: error.expectedState,
+                    observedState: error.observedState,
+                    sideEffectObserved: error.sideEffectObserved,
+                  }
+                : {}),
             },
             startedAt,
             completedAt: new Date().toISOString(),
+            mode,
+            interactionOutcomes,
           });
           break;
         }
@@ -142,6 +183,8 @@ export class JourneyReplayService {
         failedStep: null,
         startedAt,
         completedAt: new Date().toISOString(),
+        mode,
+        interactionOutcomes,
       });
     } catch (error: unknown) {
       if (error instanceof SavedAuthenticationExpiredError) throw error;
@@ -152,6 +195,8 @@ export class JourneyReplayService {
         failedStep: null,
         startedAt,
         completedAt: new Date().toISOString(),
+        mode,
+        interactionOutcomes,
       });
     } finally {
       if (session !== null) {
@@ -165,6 +210,8 @@ export class JourneyReplayService {
             failedStep: result?.failedStep ?? null,
             startedAt,
             completedAt: new Date().toISOString(),
+            mode,
+            interactionOutcomes,
           });
         }
       }

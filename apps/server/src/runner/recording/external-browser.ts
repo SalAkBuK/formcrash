@@ -12,6 +12,11 @@ import { z } from 'zod';
 
 import {
   replayLocatorSchema,
+  type RecordedBrowserEnvironment,
+  type RecordedPostcondition,
+  type RecordedInteraction,
+  type RecordedTargetCandidate,
+  type RecordedTargetGeometry,
   type OutcomeElementFingerprint,
   type ReplayLocator,
   type TargetFingerprint,
@@ -25,6 +30,32 @@ export interface RawRecordingEvent {
   readonly fingerprint: TargetFingerprint;
   readonly value: string | null;
   readonly sensitive: boolean;
+  readonly pointerType: 'mouse' | 'pen' | 'touch' | null;
+  readonly targetCandidates: readonly RecordedTargetCandidate[];
+  readonly geometry: RecordedTargetGeometry | null;
+  readonly postconditions: readonly RecordedPostcondition[];
+}
+
+export interface RawTraceEvent {
+  readonly kind: 'pointer' | 'keyboard' | 'wheel' | 'focus' | 'paste' | 'drag';
+  readonly timestamp: number;
+  readonly eventType: string;
+  readonly x?: number;
+  readonly y?: number;
+  readonly button?: number;
+  readonly buttons?: number;
+  readonly pointerType?: 'mouse' | 'pen' | 'touch';
+  readonly key?: string;
+  readonly code?: string;
+  readonly redacted?: boolean;
+  readonly deltaX?: number;
+  readonly deltaY?: number;
+}
+
+export interface RecordingEventContext {
+  readonly pageId: string;
+  readonly framePath: readonly string[];
+  readonly topFrame: boolean;
 }
 
 export interface RawNavigationEvent {
@@ -53,16 +84,31 @@ export interface ExternalBrowserOptions {
   readonly headless: boolean;
   readonly timeoutMs: number;
   readonly storageStatePath?: string;
+  readonly recordVideoDirectory?: string;
 }
 
 export interface RecordingCallbacks {
-  readonly onEvent: (event: unknown, topFrame: boolean) => void;
+  readonly onEvent: (
+    event: unknown,
+    topFrame: boolean,
+    context?: RecordingEventContext,
+  ) => void;
   readonly onWarning: (warning: unknown, topFrame: boolean) => void;
-  readonly onNavigation: (url: string, timestamp: number) => void;
+  readonly onNavigation: (
+    url: string,
+    timestamp: number,
+    context?: RecordingEventContext,
+  ) => void;
+  readonly onTraceEvent?: (
+    event: unknown,
+    context: RecordingEventContext,
+  ) => void;
+  readonly onEnvironment?: (environment: RecordedBrowserEnvironment) => void;
 }
 
 export interface RecordingBrowserSession {
   close(): Promise<void>;
+  recordedVideoPaths?(): readonly string[];
 }
 
 export interface ReplayBrowserSession {
@@ -90,6 +136,32 @@ export interface ReplayBrowserSession {
   isDisabled(locator: ReplayLocator): Promise<boolean>;
   textVisible(text: string): Promise<boolean>;
   inputValue(locator: ReplayLocator): Promise<string | null>;
+  clickInteraction?(
+    interaction: RecordedInteraction,
+  ): Promise<InteractionTargetResolution>;
+  fillInteraction?(
+    interaction: RecordedInteraction,
+    value: string,
+  ): Promise<InteractionTargetResolution>;
+  setCheckedInteraction?(
+    interaction: RecordedInteraction,
+    checked: boolean,
+  ): Promise<InteractionTargetResolution>;
+  selectInteraction?(
+    interaction: RecordedInteraction,
+    value: string,
+  ): Promise<InteractionTargetResolution>;
+  submitInteraction?(
+    interaction: RecordedInteraction,
+  ): Promise<InteractionTargetResolution>;
+  navigateInteraction?(
+    interaction: RecordedInteraction,
+    url: string,
+  ): Promise<InteractionTargetResolution>;
+  verifyInteraction?(
+    interaction: RecordedInteraction,
+  ): Promise<InteractionVerification>;
+  sideEffectSequence?(): number;
   findActionControl?(
     locator: ReplayLocator,
     type: 'click' | 'submit',
@@ -102,6 +174,19 @@ export interface ReplayBrowserSession {
   currentUrl(): string;
   settle(milliseconds: number): Promise<void>;
   close(): Promise<void>;
+}
+
+export interface InteractionTargetResolution {
+  readonly strategy: string;
+  readonly confidence: number;
+  readonly recovered: boolean;
+  readonly attempts: readonly string[];
+}
+
+export interface InteractionVerification {
+  readonly passed: boolean;
+  readonly expected: readonly string[];
+  readonly observed: readonly string[];
 }
 
 export interface VisibleMatchCount {
@@ -162,10 +247,12 @@ class PlaywrightExternalSession
   private networkObserver: ((observation: NetworkObservation) => void) | null =
     null;
   private requestSequence = 0;
+  private mutationSequence = 0;
   private screenshotMasks: readonly ReplayLocator[] = [];
   private outcomeSelectionActive = false;
   private closeNotified = false;
   private readonly closeListeners = new Set<() => void>();
+  private videoPaths: string[] = [];
 
   constructor(
     private readonly browser: Browser,
@@ -180,6 +267,9 @@ class PlaywrightExternalSession
     browser.on('disconnected', () => this.notifyClosed());
     page.on('request', (request) => {
       this.requestSequence += 1;
+      if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) {
+        this.mutationSequence += 1;
+      }
       const requestId = `request-${String(this.requestSequence).padStart(4, '0')}`;
       this.activeRequests.set(request, requestId);
       this.networkObserver?.({
@@ -228,7 +318,195 @@ class PlaywrightExternalSession
   }
 
   async click(locator: ReplayLocator): Promise<void> {
-    await resolveLocator(this.page, locator).click();
+    const target = resolveLocator(this.page, locator);
+    try {
+      await target.click();
+    } catch (error: unknown) {
+      if (!isTransientDetachedClick(error)) throw error;
+      const recovered = resolveLocator(this.page, locator);
+      if ((await recovered.count()) !== 1 || !(await recovered.isVisible())) {
+        throw error;
+      }
+      const disabled = await recovered.evaluate(
+        (element) =>
+          (element instanceof HTMLButtonElement && element.disabled) ||
+          element.getAttribute('aria-disabled') === 'true',
+      );
+      if (disabled) {
+        throw new Error('Recorded click target is disabled.', { cause: error });
+      }
+      const box = await recovered.boundingBox();
+      if (box === null) throw error;
+      await this.page.mouse.click(
+        box.x + box.width / 2,
+        box.y + box.height / 2,
+      );
+    }
+  }
+
+  async clickInteraction(
+    interaction: RecordedInteraction,
+  ): Promise<InteractionTargetResolution> {
+    const resolved = await this.resolveInteractionTarget(interaction);
+    const box = await resolved.target.boundingBox();
+    if (box === null) {
+      throw new InteractionResolutionError(
+        'The recorded target has no clickable geometry.',
+        resolved.resolution.attempts,
+      );
+    }
+    const offsetX = clampOffset(
+      interaction.geometry?.pointerOffsetX,
+      box.width,
+    );
+    const offsetY = clampOffset(
+      interaction.geometry?.pointerOffsetY,
+      box.height,
+    );
+    const page =
+      'mainFrame' in resolved.scope ? resolved.scope : resolved.scope.page();
+    await page.mouse.click(box.x + offsetX, box.y + offsetY);
+    return resolved.resolution;
+  }
+
+  async fillInteraction(
+    interaction: RecordedInteraction,
+    value: string,
+  ): Promise<InteractionTargetResolution> {
+    const resolved = await this.resolveInteractionTarget(interaction);
+    await resolved.target.click();
+    const page =
+      'mainFrame' in resolved.scope ? resolved.scope : resolved.scope.page();
+    await page.keyboard.press('ControlOrMeta+A');
+    await page.keyboard.insertText(value);
+    return resolved.resolution;
+  }
+
+  async setCheckedInteraction(
+    interaction: RecordedInteraction,
+    checked: boolean,
+  ): Promise<InteractionTargetResolution> {
+    const resolved = await this.resolveInteractionTarget(interaction);
+    if ((await resolved.target.isChecked()) !== checked) {
+      await resolved.target.click();
+    }
+    return resolved.resolution;
+  }
+
+  async selectInteraction(
+    interaction: RecordedInteraction,
+    value: string,
+  ): Promise<InteractionTargetResolution> {
+    const resolved = await this.resolveInteractionTarget(interaction);
+    await resolved.target.selectOption(value);
+    return resolved.resolution;
+  }
+
+  async submitInteraction(
+    interaction: RecordedInteraction,
+  ): Promise<InteractionTargetResolution> {
+    const resolved = await this.resolveInteractionTarget(interaction);
+    await resolved.target.evaluate((element) => {
+      if (!(element instanceof HTMLFormElement)) {
+        throw new Error('Recorded submit target is no longer a form.');
+      }
+      element.requestSubmit();
+    });
+    return resolved.resolution;
+  }
+
+  async navigateInteraction(
+    interaction: RecordedInteraction,
+    url: string,
+  ): Promise<InteractionTargetResolution> {
+    const scope = this.scopeFor(interaction);
+    await scope.goto(url, { waitUntil: 'load' });
+    return {
+      strategy: interaction.framePath.length === 0 ? 'page' : 'frame-page',
+      confidence: 1,
+      recovered: false,
+      attempts: [],
+    };
+  }
+
+  async verifyInteraction(
+    interaction: RecordedInteraction,
+  ): Promise<InteractionVerification> {
+    if (interaction.postconditions.length === 0) {
+      return { passed: true, expected: [], observed: [] };
+    }
+    const scope = this.scopeFor(interaction);
+    const expected = interaction.postconditions.map(describePostcondition);
+    let observed: string[];
+    const deadline = Date.now() + Math.min(this.timeoutMs, 3_000);
+    do {
+      const results = await Promise.all(
+        interaction.postconditions.map((condition) =>
+          observePostcondition(scope, condition),
+        ),
+      );
+      observed = results.map((item) => item.observed);
+      if (results.every((item) => item.passed)) {
+        return { passed: true, expected, observed };
+      }
+      await this.page.waitForTimeout(50);
+    } while (Date.now() < deadline);
+    return { passed: false, expected, observed };
+  }
+
+  sideEffectSequence(): number {
+    return this.mutationSequence;
+  }
+
+  private scopeFor(interaction: RecordedInteraction): Page | Frame {
+    const pageIndex = Number.parseInt(
+      interaction.pageId.replace(/^page-/u, ''),
+      10,
+    );
+    const page = this.context.pages()[Math.max(pageIndex - 1, 0)] ?? this.page;
+    let frame = page.mainFrame();
+    for (const segment of interaction.framePath) {
+      const index = Number.parseInt(segment.replace(/^frame-/u, ''), 10);
+      frame = frame.childFrames()[index] ?? frame;
+    }
+    return frame === page.mainFrame() ? page : frame;
+  }
+
+  private async resolveInteractionTarget(
+    interaction: RecordedInteraction,
+  ): Promise<{
+    readonly scope: Page | Frame;
+    readonly target: Locator;
+    readonly resolution: InteractionTargetResolution;
+  }> {
+    const scope = this.scopeFor(interaction);
+    const attempts: string[] = [];
+    const candidates = [...interaction.targetCandidates].sort(
+      (left, right) => right.confidence - left.confidence,
+    );
+    for (const [index, candidate] of candidates.entries()) {
+      const target = resolveLocator(scope, candidate.locator);
+      const count = await target.count().catch(() => 0);
+      attempts.push(
+        `${candidate.locator.strategy}: ${count} candidate match(es)`,
+      );
+      if (count !== 1) continue;
+      if (!(await target.isVisible().catch(() => false))) continue;
+      return {
+        scope,
+        target,
+        resolution: {
+          strategy: candidate.locator.strategy,
+          confidence: candidate.confidence,
+          recovered: index > 0,
+          attempts,
+        },
+      };
+    }
+    throw new InteractionResolutionError(
+      'No unique visible target matched the recorded interaction.',
+      attempts,
+    );
   }
 
   async fill(locator: ReplayLocator, value: string): Promise<void> {
@@ -492,6 +770,10 @@ class PlaywrightExternalSession
     if (this.closed) return;
     this.closed = true;
     let contextError: unknown;
+    const videos = this.context
+      .pages()
+      .map((page) => page.video())
+      .filter((video) => video !== null);
     try {
       await this.context.close();
     } catch (error: unknown) {
@@ -508,12 +790,19 @@ class PlaywrightExternalSession
       }
       throw normalizeError(error, 'Chromium could not be closed.');
     }
+    this.videoPaths = (
+      await Promise.all(videos.map((video) => video.path().catch(() => null)))
+    ).filter((videoPath): videoPath is string => videoPath !== null);
     if (contextError !== undefined) {
       throw normalizeError(
         contextError,
         'The browser context could not be closed.',
       );
     }
+  }
+
+  recordedVideoPaths(): readonly string[] {
+    return [...this.videoPaths];
   }
 
   private notifyClosed(): void {
@@ -633,19 +922,45 @@ export class PlaywrightExternalBrowserOwner implements ExternalBrowserOwner {
   ): Promise<RecordingBrowserSession> {
     const browser = await chromium.launch({ headless: options.headless });
     try {
-      const context = await browser.newContext(
-        options.storageStatePath === undefined
-          ? { viewport: { width: 1440, height: 900 } }
+      const context = await browser.newContext({
+        viewport: { width: 1440, height: 900 },
+        ...(options.storageStatePath === undefined
+          ? {}
+          : { storageState: options.storageStatePath }),
+        ...(options.recordVideoDirectory === undefined
+          ? {}
           : {
-              storageState: options.storageStatePath,
-              viewport: { width: 1440, height: 900 },
-            },
-      );
+              recordVideo: {
+                dir: options.recordVideoDirectory,
+                size: { width: 1440, height: 900 },
+              },
+            }),
+      });
       const page = await context.newPage();
+      const pageIds = new WeakMap<Page, string>();
+      let pageSequence = 0;
+      const identifyPage = (candidate: Page): string => {
+        const existing = pageIds.get(candidate);
+        if (existing !== undefined) return existing;
+        pageSequence += 1;
+        const id = `page-${pageSequence}`;
+        pageIds.set(candidate, id);
+        return id;
+      };
+      identifyPage(page);
+      const eventContext = (
+        sourcePage: Page,
+        frame: Frame,
+      ): RecordingEventContext => ({
+        pageId: identifyPage(sourcePage),
+        framePath: framePath(frame),
+        topFrame: frame === sourcePage.mainFrame(),
+      });
       await context.exposeBinding(
         '__formcrashRecord',
-        ({ frame }, payload: unknown) => {
-          callbacks.onEvent(payload, isTopFrame(page, frame));
+        ({ page: sourcePage, frame }, payload: unknown) => {
+          const metadata = eventContext(sourcePage, frame);
+          callbacks.onEvent(payload, metadata.topFrame, metadata);
         },
       );
       await context.exposeBinding(
@@ -654,26 +969,36 @@ export class PlaywrightExternalBrowserOwner implements ExternalBrowserOwner {
           callbacks.onWarning(payload, isTopFrame(page, frame));
         },
       );
+      await context.exposeBinding(
+        '__formcrashTrace',
+        ({ page: sourcePage, frame }, payload: unknown) => {
+          callbacks.onTraceEvent?.(payload, eventContext(sourcePage, frame));
+        },
+      );
       await context.addInitScript({
         content: buildBrowserRecorderInitScript(),
       });
       page.on('framenavigated', (frame) => {
         if (frame === page.mainFrame()) {
-          callbacks.onNavigation(frame.url(), Date.now());
+          callbacks.onNavigation(
+            frame.url(),
+            Date.now(),
+            eventContext(page, frame),
+          );
         }
       });
       context.on('page', (openedPage) => {
         if (openedPage === page) return;
-        callbacks.onWarning(
-          {
-            code: 'new_tab',
-            message: 'New tabs are unsupported and were not recorded.',
-            timestamp: Date.now(),
-            url: page.url(),
-          },
-          true,
-        );
-        void openedPage.close();
+        identifyPage(openedPage);
+        openedPage.on('framenavigated', (frame) => {
+          if (frame === openedPage.mainFrame()) {
+            callbacks.onNavigation(
+              frame.url(),
+              Date.now(),
+              eventContext(openedPage, frame),
+            );
+          }
+        });
       });
       const session = new PlaywrightExternalSession(
         browser,
@@ -682,6 +1007,7 @@ export class PlaywrightExternalBrowserOwner implements ExternalBrowserOwner {
         options.timeoutMs,
       );
       await session.navigate(options.targetUrl);
+      callbacks.onEnvironment?.(await captureBrowserEnvironment(browser, page));
       const recorderReady = await page.evaluate<boolean>(
         'globalThis.__formcrashRecorderReady === true',
       );
@@ -725,7 +1051,47 @@ function isTopFrame(page: Page, frame: Frame): boolean {
   return frame === page.mainFrame();
 }
 
-function resolveLocator(page: Page, locator: ReplayLocator) {
+function framePath(frame: Frame): readonly string[] {
+  const result: string[] = [];
+  let current: Frame | null = frame;
+  while (current.parentFrame() !== null) {
+    const parent = current.parentFrame();
+    if (parent === null) break;
+    const index = parent.childFrames().indexOf(current);
+    result.unshift(`frame-${Math.max(index, 0)}`);
+    current = parent;
+  }
+  return result;
+}
+
+async function captureBrowserEnvironment(
+  browser: Browser,
+  page: Page,
+): Promise<RecordedBrowserEnvironment> {
+  const viewport = page.viewportSize() ?? { width: 1440, height: 900 };
+  const values = await page.evaluate(() => ({
+    deviceScaleFactor: window.devicePixelRatio,
+    locale: navigator.language,
+    timezoneId: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    userAgent: navigator.userAgent,
+    colorScheme: window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? ('dark' as const)
+      : ('light' as const),
+  }));
+  return {
+    viewportWidth: viewport.width,
+    viewportHeight: viewport.height,
+    deviceScaleFactor: values.deviceScaleFactor,
+    locale: values.locale,
+    timezoneId: values.timezoneId,
+    userAgent: values.userAgent,
+    colorScheme: values.colorScheme,
+    browserName: 'chromium',
+    browserVersion: browser.version(),
+  };
+}
+
+function resolveLocator(page: Page | Frame, locator: ReplayLocator) {
   switch (locator.strategy) {
     case 'data-formcrash':
       return page.locator(`[data-formcrash=${JSON.stringify(locator.value)}]`);
@@ -751,6 +1117,89 @@ function resolveLocator(page: Page, locator: ReplayLocator) {
   }
 }
 
+export class InteractionResolutionError extends Error {
+  constructor(
+    message: string,
+    readonly attempts: readonly string[],
+  ) {
+    super(message);
+    this.name = 'InteractionResolutionError';
+  }
+}
+
+function clampOffset(value: number | null | undefined, extent: number): number {
+  if (extent <= 0) return 0;
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return extent / 2;
+  }
+  return Math.min(Math.max(value, 1), Math.max(extent - 1, 1));
+}
+
+function describePostcondition(condition: RecordedPostcondition): string {
+  switch (condition.kind) {
+    case 'url':
+      return `URL is ${condition.value}`;
+    case 'control_value':
+      return `control value is ${condition.value}`;
+    case 'checked':
+      return `checked is ${String(condition.value)}`;
+    case 'aria_attribute':
+      return `${condition.name} is ${condition.value ?? 'absent'}`;
+    case 'visible_text':
+      return `visible text contains ${condition.value}`;
+  }
+}
+
+async function observePostcondition(
+  scope: Page | Frame,
+  condition: RecordedPostcondition,
+): Promise<{ readonly passed: boolean; readonly observed: string }> {
+  if (condition.kind === 'url') {
+    const value = scope.url();
+    return { passed: value === condition.value, observed: `URL is ${value}` };
+  }
+  if (condition.target === null) {
+    return { passed: false, observed: 'postcondition target is missing' };
+  }
+  const target = resolveLocator(scope, condition.target);
+  if ((await target.count().catch(() => 0)) !== 1) {
+    return { passed: false, observed: 'postcondition target is not unique' };
+  }
+  switch (condition.kind) {
+    case 'control_value': {
+      const value = await target.inputValue().catch(() => '');
+      return {
+        passed: value === condition.value,
+        observed: `control value is ${value}`,
+      };
+    }
+    case 'checked': {
+      const value = await target.isChecked().catch(() => false);
+      return {
+        passed: value === condition.value,
+        observed: `checked is ${String(value)}`,
+      };
+    }
+    case 'aria_attribute': {
+      const value = await target.getAttribute(condition.name);
+      return {
+        passed: value === condition.value,
+        observed: `${condition.name} is ${value ?? 'absent'}`,
+      };
+    }
+    case 'visible_text': {
+      const visible = await target.isVisible().catch(() => false);
+      const value = (await target.innerText().catch(() => ''))
+        .replace(/\s+/gu, ' ')
+        .trim();
+      return {
+        passed: visible && value.includes(condition.value),
+        observed: `visible text is ${value}`,
+      };
+    }
+  }
+}
+
 function escapeCss(value: string): string {
   return value.replace(
     /[^a-zA-Z0-9_-]/gu,
@@ -763,7 +1212,7 @@ function escapeRegularExpression(value: string): string {
 }
 
 function resolveRoleTextFallback(
-  page: Page,
+  page: Page | Frame,
   role: string,
   name: string,
 ): Locator {
@@ -973,11 +1422,15 @@ function installBrowserRecorder(): void {
   const bindings = window as typeof window & {
     __formcrashRecord?: Binding;
     __formcrashWarn?: Binding;
+    __formcrashTrace?: Binding;
     __formcrashRecorderReady?: boolean;
   };
 
   const emit = (payload: unknown): void => {
     void bindings.__formcrashRecord?.(payload);
+  };
+  const trace = (payload: unknown): void => {
+    void bindings.__formcrashTrace?.(payload);
   };
   const warn = (code: string, message: string): void => {
     void bindings.__formcrashWarn?.({
@@ -1065,7 +1518,10 @@ function installBrowserRecorder(): void {
     }
     return parts.join(' > ') || element.tagName.toLowerCase();
   };
-  const describe = (element: Element) => {
+  const describe = (
+    element: Element,
+    pointer?: { readonly clientX: number; readonly clientY: number },
+  ) => {
     const dataFormcrash = clean(element.getAttribute('data-formcrash'));
     const dataTestId = clean(element.getAttribute('data-testid'));
     const id = stableId(element.id) ? clean(element.id) : null;
@@ -1093,8 +1549,79 @@ function installBrowserRecorder(): void {
                   : text !== null
                     ? { strategy: 'text', value: text }
                     : { strategy: 'css', value: css };
+    const candidates: Array<{
+      locator: Record<string, string>;
+      source: string;
+      confidence: number;
+    }> = [];
+    const addCandidate = (
+      candidate: Record<string, string> | null,
+      source: string,
+      confidence: number,
+    ): void => {
+      if (
+        candidate !== null &&
+        !candidates.some(
+          (item) => JSON.stringify(item.locator) === JSON.stringify(candidate),
+        )
+      ) {
+        candidates.push({ locator: candidate, source, confidence });
+      }
+    };
+    addCandidate(
+      dataFormcrash === null
+        ? null
+        : { strategy: 'data-formcrash', value: dataFormcrash },
+      'test_attribute',
+      1,
+    );
+    addCandidate(
+      dataTestId === null
+        ? null
+        : { strategy: 'data-testid', value: dataTestId },
+      'test_attribute',
+      0.98,
+    );
+    addCandidate(
+      id === null ? null : { strategy: 'id', value: id },
+      'id',
+      0.94,
+    );
+    addCandidate(
+      role === null || accessibleName === null
+        ? null
+        : { strategy: 'role', role, name: accessibleName },
+      'accessibility',
+      0.9,
+    );
+    addCandidate(
+      name === null ? null : { strategy: 'name', value: name },
+      'name',
+      0.86,
+    );
+    addCandidate(
+      label === null ? null : { strategy: 'label', value: label },
+      'label',
+      0.84,
+    );
+    addCandidate(
+      text === null ? null : { strategy: 'text', value: text },
+      'text',
+      0.72,
+    );
+    addCandidate({ strategy: 'css', value: css }, 'structure', 0.45);
+    const rect = element.getBoundingClientRect();
     return {
       locator,
+      targetCandidates: candidates,
+      geometry: {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        pointerOffsetX: pointer === undefined ? null : pointer.clientX - rect.x,
+        pointerOffsetY: pointer === undefined ? null : pointer.clientY - rect.y,
+      },
       fingerprint: {
         tagName: element.tagName.toLowerCase(),
         inputType:
@@ -1115,14 +1642,14 @@ function installBrowserRecorder(): void {
     if (element.getRootNode() instanceof ShadowRoot) {
       warn(
         'shadow_dom',
-        'Shadow DOM targets are unsupported and were not recorded.',
+        'Shadow DOM target was preserved in the raw trace but cannot be represented as a semantic v1 step.',
       );
       return true;
     }
     if (element instanceof HTMLElement && element.isContentEditable) {
       warn(
         'contenteditable',
-        'Contenteditable editors are unsupported and were not recorded.',
+        'Contenteditable input was preserved in the raw trace but cannot be represented as a semantic v1 step.',
       );
       return true;
     }
@@ -1166,7 +1693,7 @@ function installBrowserRecorder(): void {
       .join(' ')
       .toLowerCase();
     if (
-      /password|passwd|secret|token|credit|card|cvv|cvc|pan|expiry|ssn/u.test(
+      /password|passwd|secret|token|credit|card|cvv|cvc|pan|expiry|ssn|emirates.?id|national.?id|identity|passport/u.test(
         description,
       )
     ) {
@@ -1186,26 +1713,108 @@ function installBrowserRecorder(): void {
     'DOMContentLoaded',
     () => {
       if (document.querySelector('iframe') !== null) {
-        warn('iframe', 'Iframe content is unsupported and was not recorded.');
+        warn(
+          'iframe',
+          'Iframe activity is preserved in the raw trace; semantic replay requires an allowlisted frame origin.',
+        );
       }
     },
     { once: true },
   );
+  const postconditionsFor = (
+    element: Element,
+    isSensitive: boolean,
+    comboboxTextBefore: string | null,
+  ): Array<Record<string, unknown>> => {
+    const conditions: Array<Record<string, unknown>> = [];
+    const ownLocator = describe(element).locator;
+    if (
+      !isSensitive &&
+      (element instanceof HTMLInputElement ||
+        element instanceof HTMLTextAreaElement ||
+        element instanceof HTMLSelectElement)
+    ) {
+      conditions.push({
+        kind: 'control_value',
+        value: element.value.slice(0, 10_000),
+        target: ownLocator,
+      });
+    }
+    if (element instanceof HTMLInputElement) {
+      if (element.type === 'checkbox' || element.type === 'radio') {
+        conditions.push({
+          kind: 'checked',
+          value: element.checked,
+          target: ownLocator,
+        });
+      }
+    }
+    for (const attribute of [
+      'aria-expanded',
+      'aria-selected',
+      'aria-checked',
+    ]) {
+      if (element.hasAttribute(attribute)) {
+        conditions.push({
+          kind: 'aria_attribute',
+          name: attribute,
+          value: clean(element.getAttribute(attribute)),
+          target: ownLocator,
+        });
+      }
+    }
+    const interactionRole = roleFor(element);
+    const optionInteraction =
+      interactionRole === 'option' ||
+      interactionRole === 'menuitem' ||
+      element.closest('[role="listbox"], [role="menu"]') !== null;
+    const possibleCombobox = document.querySelector('[role="combobox"]');
+    const currentComboboxText = clean(possibleCombobox?.textContent);
+    const combobox =
+      optionInteraction || currentComboboxText !== comboboxTextBefore
+        ? possibleCombobox
+        : null;
+    const comboboxText = clean(combobox?.textContent);
+    if (combobox !== null && comboboxText !== null && combobox !== element) {
+      conditions.push({
+        kind: 'visible_text',
+        value: comboboxText,
+        target: describe(combobox).locator,
+      });
+    }
+    return conditions.slice(0, 12);
+  };
   const sendAction = (
     kind: RawRecordingEvent['kind'],
     element: Element,
     value: string | null,
+    pointer?: PointerEvent | MouseEvent,
   ): void => {
     if (unsupported(element)) return;
     const isSensitive = value !== null && sensitive(element, value);
-    emit({
-      kind,
-      timestamp: Date.now(),
-      url: window.location.href,
-      ...describe(element),
-      value: isSensitive ? null : value,
-      sensitive: isSensitive,
-    });
+    const timestamp = Date.now();
+    const description = describe(element, pointer);
+    const comboboxTextBefore = clean(
+      document.querySelector('[role="combobox"]')?.textContent,
+    );
+    const deliver = (): void =>
+      emit({
+        kind,
+        timestamp,
+        url: window.location.href,
+        ...description,
+        value: isSensitive ? null : value,
+        sensitive: isSensitive,
+        pointerType:
+          pointer instanceof PointerEvent ? pointer.pointerType : 'mouse',
+        postconditions: postconditionsFor(
+          element,
+          isSensitive,
+          comboboxTextBefore,
+        ),
+      });
+    if (kind === 'click' || kind === 'submit') queueMicrotask(deliver);
+    else deliver();
   };
   const sendNavigation = (): void => {
     emit({
@@ -1239,14 +1848,6 @@ function installBrowserRecorder(): void {
     (event) => {
       const target = targetOf(event);
       if (target === null || unsupported(target)) return;
-      const anchor = target.closest('a');
-      if (anchor?.target === '_blank') {
-        warn(
-          'new_tab',
-          'New-tab navigation is unsupported and was not recorded.',
-        );
-        return;
-      }
       if (
         target.closest('label') !== null ||
         target instanceof HTMLInputElement ||
@@ -1264,7 +1865,13 @@ function installBrowserRecorder(): void {
       ) {
         return;
       }
-      sendAction('click', target.closest('a, button') ?? target, null);
+      sendAction(
+        'click',
+        target.closest('a, button, [role="option"], [role="menuitem"]') ??
+          target,
+        null,
+        event,
+      );
     },
     true,
   );
@@ -1279,6 +1886,8 @@ function installBrowserRecorder(): void {
         sendAction('fill', target, target.value);
       } else if (target instanceof HTMLTextAreaElement) {
         sendAction('fill', target, target.value);
+      } else if (target instanceof HTMLElement && target.isContentEditable) {
+        sendAction('fill', target, target.textContent ?? '');
       }
     },
     true,
@@ -1316,14 +1925,136 @@ function installBrowserRecorder(): void {
     },
     true,
   );
-  for (const eventName of ['dragstart', 'drop']) {
+  let pointerMoveScheduled = false;
+  let latestPointerMove: PointerEvent | null = null;
+  document.addEventListener(
+    'pointermove',
+    (event) => {
+      latestPointerMove = event;
+      if (pointerMoveScheduled) return;
+      pointerMoveScheduled = true;
+      requestAnimationFrame(() => {
+        pointerMoveScheduled = false;
+        const current = latestPointerMove;
+        if (current === null) return;
+        trace({
+          kind: 'pointer',
+          eventType: 'pointermove',
+          timestamp: Date.now(),
+          x: current.clientX,
+          y: current.clientY,
+          button: current.button,
+          buttons: current.buttons,
+          pointerType: current.pointerType,
+        });
+      });
+    },
+    true,
+  );
+  for (const eventName of ['pointerdown', 'pointerup']) {
     document.addEventListener(
       eventName,
-      () =>
-        warn(
-          'drag_and_drop',
-          'Drag and drop is unsupported and was not recorded.',
-        ),
+      (event) => {
+        if (!(event instanceof PointerEvent)) return;
+        trace({
+          kind: 'pointer',
+          eventType: eventName,
+          timestamp: Date.now(),
+          x: event.clientX,
+          y: event.clientY,
+          button: event.button,
+          buttons: event.buttons,
+          pointerType: event.pointerType,
+        });
+      },
+      true,
+    );
+  }
+  for (const eventName of ['keydown', 'keyup']) {
+    document.addEventListener(
+      eventName,
+      (event) => {
+        if (!(event instanceof KeyboardEvent)) return;
+        const target = targetOf(event);
+        const mustRedact =
+          target !== null && sensitive(target, 'redacted-probe-value');
+        trace({
+          kind: 'keyboard',
+          eventType: eventName,
+          timestamp: Date.now(),
+          key:
+            mustRedact || event.key.length === 1
+              ? '[REDACTED_CHARACTER]'
+              : event.key.slice(0, 100),
+          code:
+            mustRedact || event.key.length === 1
+              ? '[REDACTED_CODE]'
+              : event.code.slice(0, 100),
+          redacted: mustRedact,
+        });
+      },
+      true,
+    );
+  }
+  document.addEventListener(
+    'wheel',
+    (event) =>
+      trace({
+        kind: 'wheel',
+        eventType: 'wheel',
+        timestamp: Date.now(),
+        deltaX: event.deltaX,
+        deltaY: event.deltaY,
+      }),
+    { capture: true, passive: true },
+  );
+  document.addEventListener(
+    'focusin',
+    (event) => {
+      const target = targetOf(event);
+      if (
+        target instanceof HTMLInputElement &&
+        target.type !== 'password' &&
+        sensitive(target, target.value)
+      ) {
+        target.style.setProperty('-webkit-text-security', 'disc');
+        target.setAttribute('data-formcrash-video-masked', 'true');
+      }
+      trace({
+        kind: 'focus',
+        eventType: 'focusin',
+        timestamp: Date.now(),
+      });
+    },
+    true,
+  );
+  document.addEventListener(
+    'paste',
+    () =>
+      trace({
+        kind: 'paste',
+        eventType: 'paste',
+        timestamp: Date.now(),
+        redacted: true,
+      }),
+    true,
+  );
+  for (const eventName of ['dragstart', 'dragend', 'drop']) {
+    document.addEventListener(
+      eventName,
+      () => {
+        trace({
+          kind: 'drag',
+          eventType: eventName,
+          timestamp: Date.now(),
+        });
+        if (eventName === 'dragstart') {
+          warn(
+            'drag_and_drop',
+            'Drag activity is preserved in the raw trace but has no semantic v1 fallback.',
+          );
+        }
+      },
       true,
     );
   }
@@ -1332,4 +2063,12 @@ function installBrowserRecorder(): void {
 
 function normalizeError(error: unknown, fallback: string): Error {
   return error instanceof Error ? error : new Error(fallback, { cause: error });
+}
+
+function isTransientDetachedClick(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (
+    error.message.includes('element was detached from the DOM') ||
+    error.message.includes('element is not stable')
+  );
 }

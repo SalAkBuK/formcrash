@@ -10,8 +10,10 @@ import {
   experimentTypeSchema,
   externalRunResultPresentationSchema,
   journeyActionTypeSchema,
+  hybridTraceManifestSchema,
   outcomeCheckSchema,
   outcomeCaptureResponseSchema,
+  persistedJourneySchema,
   requestDiscoveryResultSchema,
   runArtifactSchema,
   runEventEnvelopeSchema,
@@ -21,6 +23,60 @@ import {
 } from '../src/index.js';
 
 describe('foundational contracts', () => {
+  it('keeps semantic-v1 journeys compatible while validating hybrid-v2 manifests', () => {
+    const legacy = persistedJourneySchema.parse({
+      id: 'journey-legacy',
+      projectId: 'project-1',
+      name: 'Legacy journey',
+      version: 1,
+      steps: [
+        {
+          id: 'step-1',
+          name: 'Navigate',
+          type: 'navigate',
+          timestamp: 1,
+          url: 'http://127.0.0.1:4811',
+          locator: null,
+          fingerprint: null,
+          value: null,
+          sensitive: false,
+        },
+      ],
+      recordingMetadata: {
+        recordingSessionId: null,
+        recordedAt: '2026-07-18T00:00:00.000Z',
+        warningCount: 0,
+        normalizationRule: 'Legacy semantic replay.',
+      },
+      createdAt: '2026-07-18T00:00:00.000Z',
+    });
+    expect(legacy.replayFormat).toBeUndefined();
+
+    expect(
+      hybridTraceManifestSchema.safeParse({
+        formatVersion: 2,
+        environment: {
+          viewportWidth: 1440,
+          viewportHeight: 900,
+          deviceScaleFactor: 1,
+          locale: 'en-US',
+          timezoneId: 'UTC',
+          userAgent: 'contract-test',
+          colorScheme: 'light',
+          browserName: 'chromium',
+          browserVersion: 'test',
+        },
+        interactions: [],
+        eventCount: 0,
+        pageCount: 1,
+        frameCount: 1,
+        redactionVersion: 1,
+        videoCaptured: false,
+        videos: [],
+        truncated: false,
+      }).success,
+    ).toBe(true);
+  });
   it('validates asynchronous sample-run start contracts', () => {
     expect(startSampleRunRequestSchema.parse({ mode: 'vulnerable' })).toEqual({
       mode: 'vulnerable',

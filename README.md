@@ -16,7 +16,8 @@ Priority 0 is the duplicate checkout-submission demonstration described there.
   and never launches browsers or reads the FormCrash database.
 - `apps/server` — Fastify modular monolith that owns health, the hardcoded
   sample-run API, Playwright execution, assertions, SQLite metadata, and
-  filesystem screenshot evidence, and persisted SSE replay/live publication.
+  filesystem screenshot/video and hybrid journey-trace evidence, and persisted
+  SSE replay/live publication.
 - `apps/sample-checkout` — independent Next.js target application implementing
   the bundled vulnerable-versus-fixed checkout demonstration.
 - `packages/contracts` — runtime-validated cross-boundary schemas and inferred
@@ -25,6 +26,10 @@ Priority 0 is the duplicate checkout-submission demonstration described there.
 - `packages/config` — shared strict TypeScript configuration.
 
 There is no runtime OpenAI or other AI dependency.
+
+The recorder/replayer fidelity contract and its explicit browser boundaries are
+documented in
+[`docs/architecture/high-fidelity-replay.md`](docs/architecture/high-fidelity-replay.md).
 
 ## Prerequisites
 

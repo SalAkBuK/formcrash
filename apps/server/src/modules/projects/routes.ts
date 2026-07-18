@@ -16,6 +16,7 @@ import {
   startOutcomeCaptureRequestSchema,
 } from '@formcrash/contracts';
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import { createReadStream } from 'node:fs';
 
 import type { ProjectJourneyRepository } from '../../persistence/project-journey-repository.js';
 import {
@@ -24,6 +25,7 @@ import {
 } from '../../persistence/outcome-check-repository.js';
 import type { ExternalExperimentRepository } from '../../persistence/external-experiment-repository.js';
 import type { ScreenshotStore } from '../../artifacts/screenshot-store.js';
+import type { JourneyTraceStore } from '../../artifacts/journey-trace-store.js';
 import type { AuthStateStore } from '../../runner/external/auth-session.js';
 import { BrowserOwnershipConflictError } from '../../runner/infrastructure/browser-ownership.js';
 import {
@@ -55,6 +57,9 @@ interface RecordingParams extends ProjectParams {
 interface JourneyParams {
   readonly journeyId: string;
 }
+interface JourneyVideoParams extends JourneyParams {
+  readonly videoIndex: string;
+}
 
 interface OutcomeCaptureParams {
   readonly captureId: string;
@@ -73,6 +78,7 @@ export function registerProjectRoutes(
     readonly authStore: AuthStateStore;
     readonly experiments: ExternalExperimentRepository;
     readonly screenshots: ScreenshotStore;
+    readonly traces: JourneyTraceStore;
   },
   outcome: {
     readonly repository: OutcomeCheckRepository;
@@ -117,6 +123,9 @@ export function registerProjectRoutes(
       const artifacts = force
         ? cleanup.experiments.listArtifactsForProject(request.params.projectId)
         : [];
+      const tracePaths = force
+        ? repository.listTracePathsForProject(request.params.projectId)
+        : [];
       if (force) cleanup.authStore.clear(request.params.projectId);
       const result = repository.deleteProject(request.params.projectId, force);
       if (result === 'not_found') return notFound(reply, 'Project');
@@ -138,6 +147,7 @@ export function registerProjectRoutes(
         });
       }
       cleanup.screenshots.remove(artifacts);
+      cleanup.traces.remove(tracePaths);
       return reply.send(
         deleteProjectResponseSchema.parse({
           deletedProjectId: request.params.projectId,
@@ -245,6 +255,26 @@ export function registerProjectRoutes(
       return journey === null
         ? notFound(reply, 'Journey')
         : reply.send(journey);
+    },
+  );
+
+  app.get<{ Params: JourneyVideoParams }>(
+    '/api/journeys/:journeyId/trace/videos/:videoIndex',
+    async (request, reply) => {
+      const manifest = repository.getJourneyTraceManifest(
+        request.params.journeyId,
+      );
+      if (manifest === null) return notFound(reply, 'Journey trace');
+      const index = Number.parseInt(request.params.videoIndex, 10);
+      if (!Number.isInteger(index) || index < 0) {
+        return notFound(reply, 'Journey video');
+      }
+      const videoPath = cleanup.traces.videoPath(manifest, index);
+      if (videoPath === null) return notFound(reply, 'Journey video');
+      return reply
+        .header('Cache-Control', 'no-store')
+        .type('video/webm')
+        .send(createReadStream(videoPath));
     },
   );
 
@@ -534,6 +564,7 @@ export function registerProjectRoutes(
             request.params.journeyId,
             parsed.data.variables,
             parsed.data.confirmProduction,
+            parsed.data.replayMode,
           ),
         );
       } catch (error: unknown) {

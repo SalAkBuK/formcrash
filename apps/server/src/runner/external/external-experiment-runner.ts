@@ -10,6 +10,7 @@ import type {
   ExternalRunnerError,
   ExternalRunWarning,
   ReplayFailure,
+  RecordedInteraction,
   RunArtifact,
   OutcomeAggregate,
   OutcomeCheckRunSnapshot,
@@ -20,6 +21,7 @@ import {
   ScreenshotStore,
   type ScreenshotLabel,
 } from '../../artifacts/screenshot-store.js';
+import { JourneyTraceStore } from '../../artifacts/journey-trace-store.js';
 import type { ServerConfig } from '../../app/config.js';
 import type { ExternalExperimentRepository } from '../../persistence/external-experiment-repository.js';
 import type { ProjectJourneyRepository } from '../../persistence/project-journey-repository.js';
@@ -67,6 +69,7 @@ import { assertProductionConfirmed } from './production-safety.js';
 export class ExternalExperimentRunner {
   private readonly browserOwner: ExternalBrowserOwner;
   private readonly screenshotStore: ScreenshotStore;
+  private readonly traceStore: JourneyTraceStore;
 
   constructor(
     private readonly config: ServerConfig,
@@ -80,6 +83,7 @@ export class ExternalExperimentRunner {
   ) {
     this.browserOwner = browserOwner ?? new PlaywrightExternalBrowserOwner();
     this.screenshotStore = new ScreenshotStore(config.artifactRoot, repository);
+    this.traceStore = new JourneyTraceStore(config.artifactRoot, projects);
   }
 
   async run(
@@ -108,6 +112,13 @@ export class ExternalExperimentRunner {
       'External experiment execution',
     );
     const journey = experiment.journeySnapshot;
+    const traceRecord = this.projects.getRecordingTraceByJourney(journey.id);
+    if (traceRecord !== null) this.traceStore.assertIntegrity(traceRecord);
+    const traceInteractions = new Map(
+      (
+        this.projects.getJourneyTraceManifest(journey.id)?.interactions ?? []
+      ).map((interaction) => [interaction.stepId, interaction]),
+    );
     const outcomeCheckSnapshot = this.resolveOutcomeCheckSnapshot(experiment);
     const storedSettings = this.settings.get(project.id);
     const runId = randomUUID();
@@ -231,6 +242,7 @@ export class ExternalExperimentRunner {
           events,
           runtime,
           outcomeCheckSnapshot,
+          traceInteractions.get(step.id),
         );
       }
 
@@ -310,6 +322,7 @@ export class ExternalExperimentRunner {
             events,
             runtime,
             outcomeCheckSnapshot,
+            traceInteractions.get(step.id),
           );
         }
       } else {
@@ -552,6 +565,7 @@ async function executeWithEvents(
   events: RunEventLog,
   runtime: ResolvedRuntime,
   outcomeCheckSnapshot: OutcomeCheckRunSnapshot,
+  interaction?: RecordedInteraction,
 ): Promise<void> {
   events.append('journey.step.started', {
     stepId: step.id,
@@ -560,8 +574,11 @@ async function executeWithEvents(
     actionType: step.type,
   });
   try {
-    await executeRecordedStep(session, step, (item) =>
-      resolveStepValue(item, runtime),
+    await executeRecordedStep(
+      session,
+      step,
+      (item) => resolveStepValue(item, runtime),
+      { ...(interaction === undefined ? {} : { interaction }) },
     );
   } catch (error: unknown) {
     throw new ExternalJourneyStepError(

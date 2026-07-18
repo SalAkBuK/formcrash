@@ -10,10 +10,11 @@ import type {
   RecordedJourneyStep,
   RecordingSession,
   ReplayLocator,
+  ReplayMode,
   ReplayResult,
 } from '@formcrash/contracts';
 
-import { FormCrashApiError } from '../../../lib/api-client';
+import { FormCrashApiError, resolveApiUrl } from '../../../lib/api-client';
 import {
   confirmAuthenticationCapture,
   getProjectSettings,
@@ -45,6 +46,7 @@ export function ProjectJourneyDashboard() {
   >([]);
   const [journeyName, setJourneyName] = useState('');
   const [replayResult, setReplayResult] = useState<ReplayResult | null>(null);
+  const [replayMode, setReplayMode] = useState<ReplayMode>('adaptive');
   const [executionSettings, setExecutionSettings] =
     useState<ProjectExecutionSettings | null>(null);
   const [replayValues, setReplayValues] = useState<
@@ -309,6 +311,7 @@ export function ProjectJourneyDashboard() {
           journey.id,
           nonEmptyValues(replayValues[journey.id] ?? {}),
           selected?.environment !== 'production' || productionReplayConfirmed,
+          ...(replayMode === 'adaptive' ? [] : [replayMode]),
         ),
       );
     } catch (reason: unknown) {
@@ -629,18 +632,30 @@ export function ProjectJourneyDashboard() {
                 {busy === 'stopping' ? 'Stopping…' : 'Stop recording'}
               </button>
               <span>{recording?.steps.length ?? 0} captured steps</span>
+              {recording?.captureFormat === 'hybrid-v2' ? (
+                <span>
+                  Hybrid trace: {recording.traceStatus ?? 'capturing'}
+                  {recording.traceSummary !== null &&
+                  recording.traceSummary !== undefined
+                    ? ` · ${recording.traceSummary.interactionCount} interactions · ${recording.traceSummary.eventCount} raw events`
+                    : ''}
+                </span>
+              ) : null}
             </div>
             <p className="technical-note">
               A fresh visible Chromium context opens the target. FormCrash
-              captures only same-tab, top-frame actions; the dashboard never
-              records browser events itself.
+              records semantic steps plus a redacted hybrid interaction trace.
+              Replay verifies recorded control, selection, URL, and ARIA state
+              instead of treating a click without an exception as success.
             </p>
             <details className="unsupported-list">
               <summary>Unsupported actions</summary>
               <p>
-                New tabs, iframes, file uploads, CAPTCHA, third-party payment
-                pages, drag and drop, contenteditable editors, and unsupported
-                Shadow DOM targets are reported as warnings and not recorded.
+                CAPTCHA, third-party payment authorization, browser chrome, OS
+                dialogs, closed Shadow DOM, and unallowlisted cross-origin
+                frames remain unsupported. Drag, iframe, contenteditable, and
+                open-shadow activity is retained in the raw trace when it cannot
+                be represented by a legacy semantic step.
               </p>
             </details>
             {recording?.warnings.map((warning) => (
@@ -834,6 +849,22 @@ export function ProjectJourneyDashboard() {
                 <h2>Reproducible normal paths</h2>
               </div>
             </div>
+            <label className="journey-name">
+              Replay behavior
+              <select
+                value={replayMode}
+                onChange={(event) =>
+                  setReplayMode(event.target.value as ReplayMode)
+                }
+              >
+                <option value="adaptive">
+                  Adaptive — recover safely and verify state
+                </option>
+                <option value="strict">
+                  Strict — use the recorded strategy
+                </option>
+              </select>
+            </label>
             {selected.environment === 'production' ? (
               <label className="production-confirmation">
                 <input
@@ -920,7 +951,50 @@ export function ProjectJourneyDashboard() {
                         </code>
                       </dd>
                     </div>
+                    <div>
+                      <dt>Frame</dt>
+                      <dd>
+                        <code>
+                          {replayResult.failedStep.pageId ?? 'page-1'}
+                          {(replayResult.failedStep.framePath ?? []).length > 0
+                            ? ` / ${replayResult.failedStep.framePath?.join(' / ')}`
+                            : ''}
+                        </code>
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Side effect observed</dt>
+                      <dd>
+                        {replayResult.failedStep.sideEffectObserved === true
+                          ? 'Yes — FormCrash did not retry'
+                          : 'No'}
+                      </dd>
+                    </div>
                   </dl>
+                ) : null}
+                {(replayResult.failedStep?.expectedState?.length ?? 0) > 0 ? (
+                  <div className="technical-note">
+                    <strong>State verification</strong>
+                    <p>
+                      Expected:{' '}
+                      {replayResult.failedStep?.expectedState?.join('; ')}
+                    </p>
+                    <p>
+                      Observed:{' '}
+                      {replayResult.failedStep?.observedState?.join('; ') ||
+                        'Nothing verifiable'}
+                    </p>
+                  </div>
+                ) : null}
+                {(replayResult.interactionOutcomes?.length ?? 0) > 0 ? (
+                  <p className="technical-note">
+                    {replayResult.interactionOutcomes
+                      ?.map(
+                        (outcome) =>
+                          `${outcome.status}: ${outcome.strategy} (${Math.round(outcome.confidence * 100)}%)`,
+                      )
+                      .join(' · ')}
+                  </p>
                 ) : null}
               </div>
             ) : null}
@@ -942,6 +1016,31 @@ export function ProjectJourneyDashboard() {
                         <span>
                           Version {journey.version} · {journey.steps.length}{' '}
                           steps
+                        </span>
+                        {journey.trace?.videoCaptured === true ? (
+                          <details className="unsupported-list">
+                            <summary>Recorded page video</summary>
+                            <video
+                              controls
+                              preload="metadata"
+                              src={resolveApiUrl(
+                                `/api/journeys/${journey.id}/trace/videos/0`,
+                              )}
+                              style={{ width: '100%', maxWidth: 720 }}
+                            >
+                              Recorded Chromium video is unavailable in this
+                              browser.
+                            </video>
+                            <p className="technical-note">
+                              Video is diagnostic evidence. Replay is driven by
+                              the synchronized input and state trace.
+                            </p>
+                          </details>
+                        ) : null}
+                        <span>
+                          {journey.replayFormat === 'hybrid-v2'
+                            ? `Hybrid trace · ${journey.trace?.interactionCount ?? 0} verified interactions`
+                            : 'Legacy semantic replay'}
                         </span>
                         {requirements.length > 0 ? (
                           <div className="runtime-value-grid replay-runtime-grid">
