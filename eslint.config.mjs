@@ -9,6 +9,7 @@ export default tseslint.config(
       '**/dist/**',
       '**/node_modules/**',
       '**/next-env.d.ts',
+      'design/stitch/**/raw/**',
       'var/**',
     ],
   },

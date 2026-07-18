@@ -6,3 +6,4 @@ docs/product/prd.md
 node_modules
 pnpm-lock.yaml
 var
+design/stitch/**/raw/**

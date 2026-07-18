@@ -1,0 +1,442 @@
+<!DOCTYPE html><html class="dark" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>FormCrash | Run Result - Unverified</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&amp;family=JetBrains+Mono&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .mono-scrollbar::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        .mono-scrollbar::-webkit-scrollbar-track {
+            background: #0F141C;
+        }
+        .mono-scrollbar::-webkit-scrollbar-thumb {
+            background: #293647;
+            border-radius: 2px;
+        }
+        .glass-panel {
+            background: rgba(15, 20, 28, 0.7);
+            backdrop-filter: blur(12px);
+        }
+    </style>
+<!-- Tailwind Config Execution -->
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "surface-container-high": "#1d2b3a",
+                    "error-container": "#93000a",
+                    "primary-pressed": "#E99A31",
+                    "tertiary-fixed-dim": "#6dd2fe",
+                    "text-secondary": "#AAB5C4",
+                    "inverse-on-surface": "#243240",
+                    "on-primary-fixed-variant": "#663e00",
+                    "on-background": "#d5e4f7",
+                    "on-secondary-fixed-variant": "#00497a",
+                    "on-tertiary": "#003546",
+                    "on-tertiary-fixed": "#001f2a",
+                    "tertiary": "#b5e6ff",
+                    "tertiary-fixed": "#bee9ff",
+                    "surface-container-lowest": "#020f1d",
+                    "fail-bg": "#2B151A",
+                    "surface-subtle": "#131A24",
+                    "outcome-evidence": "#FFB454",
+                    "warn-bg": "#2A2412",
+                    "primary-fixed": "#ffddb9",
+                    "primary-fixed-dim": "#ffb961",
+                    "on-secondary-fixed": "#001d35",
+                    "secondary-fixed-dim": "#9bcaff",
+                    "warn-border": "#6A5726",
+                    "surface-container-highest": "#283645",
+                    "on-primary-fixed": "#2b1700",
+                    "on-error": "#690005",
+                    "border": "#293647",
+                    "secondary": "#9bcaff",
+                    "on-surface": "#d5e4f7",
+                    "primary-hover": "#FFC477",
+                    "text-primary": "#F4F7FB",
+                    "on-error-container": "#ffdad6",
+                    "primary": "#ffd8af",
+                    "surface-raised": "#18212D",
+                    "primary-container": "#ffb454",
+                    "success": "#58D6A3",
+                    "inverse-primary": "#865300",
+                    "surface-container-low": "#0f1d2b",
+                    "on-surface-variant": "#d6c3b1",
+                    "text-muted": "#738195",
+                    "on-primary": "#23180A",
+                    "on-tertiary-fixed-variant": "#004d64",
+                    "pass-bg": "#10271F",
+                    "border-strong": "#3A4A60",
+                    "surface-container": "#13212f",
+                    "tertiary-container": "#69cffa",
+                    "browser-evidence": "#6CB6FF",
+                    "surface-bright": "#2d3a4a",
+                    "inverse-surface": "#d5e4f7",
+                    "surface": "#0F141C",
+                    "warning": "#F4C95D",
+                    "request-evidence": "#B78CFF",
+                    "info": "#6CB6FF",
+                    "fail-border": "#74313A",
+                    "surface-dim": "#061422",
+                    "focus": "#73B7FF",
+                    "secondary-fixed": "#d0e4ff",
+                    "on-primary-container": "#734600",
+                    "on-secondary": "#003256",
+                    "danger": "#FF6B78",
+                    "background": "#0A0D12",
+                    "on-tertiary-container": "#005771",
+                    "danger-strong": "#FF4858",
+                    "outline": "#9f8e7d",
+                    "neutral": "#8A98AA",
+                    "outline-variant": "#524436",
+                    "secondary-container": "#006cb0",
+                    "surface-high": "#1E2937",
+                    "error": "#ffb4ab",
+                    "surface-tint": "#ffb961",
+                    "info-bg": "#102338",
+                    "info-border": "#28557D",
+                    "pass-border": "#285F4C",
+                    "on-secondary-container": "#dae9ff"
+            },
+            "borderRadius": {
+                    "DEFAULT": "4px",
+                    "lg": "8px",
+                    "xl": "12px",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "md": "16px",
+                    "page-inline": "32px",
+                    "sm": "8px",
+                    "content-max": "1440px",
+                    "page-block": "28px",
+                    "xl": "32px",
+                    "xxl": "48px",
+                    "unit": "8px",
+                    "xs": "4px",
+                    "lg": "24px"
+            },
+            "fontFamily": {
+                    "code": ["JetBrains Mono"],
+                    "label-sm": ["Inter"],
+                    "label-md": ["Inter"],
+                    "display": ["Inter"],
+                    "headline-lg": ["Inter"],
+                    "body-md": ["Inter"],
+                    "headline-md": ["Inter"],
+                    "headline-sm": ["Inter"],
+                    "body-lg": ["Inter"],
+                    "body-sm": ["Inter"]
+            },
+            "fontSize": {
+                    "code": ["12.5px", {"lineHeight": "19px", "fontWeight": "400"}],
+                    "label-sm": ["11px", {"lineHeight": "14px", "letterSpacing": "0.06em", "fontWeight": "700"}],
+                    "label-md": ["12px", {"lineHeight": "16px", "letterSpacing": "0.025em", "fontWeight": "650"}],
+                    "display": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.03em", "fontWeight": "700"}],
+                    "headline-lg": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                    "body-md": ["14px", {"lineHeight": "21px", "fontWeight": "400"}],
+                    "headline-md": ["20px", {"lineHeight": "28px", "letterSpacing": "-0.015em", "fontWeight": "650"}],
+                    "headline-sm": ["17px", {"lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "650"}],
+                    "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "body-sm": ["13px", {"lineHeight": "19px", "fontWeight": "400"}]
+            }
+          },
+        },
+      }
+    </script>
+</head>
+<body class="bg-background text-text-primary font-body-md overflow-hidden selection:bg-primary selection:text-on-primary">
+<!-- Shell Layout -->
+<div class="flex h-screen w-full">
+<!-- SideNavBar (Authority: JSON) -->
+<aside class="h-screen w-64 fixed left-0 top-0 flex flex-col py-page-block px-md bg-surface dark:bg-surface border-r border-border dark:border-border z-50">
+<div class="flex items-center gap-3 mb-10 px-2">
+<div class="w-8 h-8 rounded bg-primary flex items-center justify-center">
+<span class="material-symbols-outlined text-on-primary text-[20px]" style="font-variation-settings: 'FILL' 1;">biotech</span>
+</div>
+<div>
+<h1 class="font-headline-md text-headline-md font-bold text-primary dark:text-primary leading-none">FormCrash</h1>
+<p class="font-label-sm text-label-sm text-text-muted mt-1 uppercase tracking-widest">Reliability Workbench</p>
+</div>
+</div>
+<nav class="flex-1 space-y-1">
+<!-- Navigation Items -->
+<a class="flex items-center gap-3 px-3 py-2.5 rounded text-text-secondary dark:text-text-secondary hover:bg-surface-subtle dark:hover:bg-surface-subtle transition-colors duration-200 cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="font-label-md text-label-md">Overview</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded text-text-secondary dark:text-text-secondary hover:bg-surface-subtle dark:hover:bg-surface-subtle transition-colors duration-200 cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined">conversion_path</span>
+<span class="font-label-md text-label-md">Journeys</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded text-text-secondary dark:text-text-secondary hover:bg-surface-subtle dark:hover:bg-surface-subtle transition-colors duration-200 cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined">biotech</span>
+<span class="font-label-md text-label-md">Tests</span>
+</a>
+<!-- Active Navigation: Runs (Matching Intent) -->
+<a class="flex items-center gap-3 px-3 py-2.5 rounded bg-surface-container-high dark:bg-surface-container-high text-primary dark:text-primary border-l-2 border-primary transition-colors duration-200 cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">history</span>
+<span class="font-label-md text-label-md">Runs</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded text-text-secondary dark:text-text-secondary hover:bg-surface-subtle dark:hover:bg-surface-subtle transition-colors duration-200 cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined">database</span>
+<span class="font-label-md text-label-md">Test Data</span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded text-text-secondary dark:text-text-secondary hover:bg-surface-subtle dark:hover:bg-surface-subtle transition-colors duration-200 cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-label-md text-label-md">Settings</span>
+</a>
+</nav>
+<div class="mt-auto pt-6 border-t border-border">
+<div class="flex items-center gap-3 px-3 py-2 rounded hover:bg-surface-subtle transition-colors duration-200 cursor-pointer">
+<span class="material-symbols-outlined text-text-muted">swap_horiz</span>
+<span class="font-label-md text-label-md text-text-secondary">Project Switcher</span>
+</div>
+</div>
+</aside>
+<!-- Main Canvas -->
+<main class="flex-1 ml-64 flex flex-col relative overflow-hidden h-screen bg-background">
+<!-- TopAppBar (Authority: JSON) -->
+<header class="h-14 flex items-center justify-between px-page-inline w-full bg-surface-dim dark:bg-surface-dim border-b border-border dark:border-border z-40">
+<div class="flex items-center gap-4">
+<h2 class="font-headline-sm text-headline-sm font-bold text-text-primary dark:text-text-primary">Run #8291-C</h2>
+<div class="flex items-center px-2 py-0.5 rounded bg-surface-container border border-border">
+<span class="font-code text-code text-text-muted">status: </span>
+<span class="font-code text-code text-warning ml-1">unverified</span>
+</div>
+</div>
+<div class="flex items-center gap-6">
+<div class="relative group">
+<input class="bg-surface-raised border border-border rounded-md px-3 py-1.5 text-body-sm w-64 focus:outline-none focus:border-focus focus:ring-1 focus:ring-focus transition-all" placeholder="Search logs..." type="text">
+<span class="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-text-muted text-[18px]">search</span>
+</div>
+<div class="flex items-center gap-4">
+<button class="material-symbols-outlined text-text-muted hover:text-primary transition-all">notifications</button>
+<button class="material-symbols-outlined text-text-muted hover:text-primary transition-all">help_outline</button>
+<div class="w-8 h-8 rounded-full overflow-hidden border border-border cursor-pointer hover:border-primary transition-colors">
+<img class="w-full h-full object-cover" data-alt="A professional user avatar in a minimalist digital art style, featuring a silhouette with a dark primary color palette of deep blue and slate. The lighting is soft and moody, reflecting a high-end developer workbench aesthetic. The background is a clean, dark surface with subtle geometric textures." src="https://lh3.googleusercontent.com/aida-public/AB6AXuC9cLs75FzvU3qwkVUiF3ut0aP3ySmmyBdZ9V3PYeJZ8kZXTxH1Vi3y3HEEYZMKJQsGuacaC5vl-WHTy_066D4eprF38IwCV4PnAsjfZdAHpIt5y_ruPPlqJZl379jDMzVbEUlCTYhWPoHkirUWbgrfV5-R2FkcSPcya5H54iYLBpNLMp_J3UM2_xTDi-F-3EvywHnaoOl6NlNGIK5Mmj6M6Mya1IWvT5SISFgEBaRgM41QhlKseXT9jnTLWEkXQPtpducIl6bFA6c">
+</div>
+</div>
+</div>
+</header>
+<!-- Scrollable Content -->
+<div class="flex-1 overflow-y-auto p-page-inline space-y-lg mono-scrollbar">
+<!-- Amber Banner (Primary Status) -->
+<section class="bg-warn-bg border border-warn-border rounded-lg p-lg flex items-start gap-4 shadow-lg animate-in fade-in slide-in-from-top duration-500">
+<div class="bg-warning/20 p-2 rounded-full">
+<span class="material-symbols-outlined text-warning text-[28px]">warning</span>
+</div>
+<div class="flex-1">
+<h3 class="font-headline-sm text-headline-sm text-warning font-bold">Test completed, but the application outcome was not verified.</h3>
+<p class="font-body-md text-text-secondary mt-2 max-w-2xl">
+                            The execution script finished all steps successfully, but FormCrash could not detect the expected state change in your application. No verification criteria were found for this journey.
+                        </p>
+<div class="mt-6 flex items-center gap-4">
+<button class="px-6 py-2.5 bg-primary text-on-primary rounded font-label-md text-label-md font-bold hover:bg-primary-hover active:scale-95 transition-all flex items-center gap-2">
+                                Configure Outcome Check
+                                <span class="material-symbols-outlined text-[18px]">rule</span>
+</button>
+<button class="px-6 py-2.5 bg-surface-subtle text-text-primary border border-border rounded font-label-md text-label-md font-bold hover:bg-surface-raised transition-all flex items-center gap-2">
+                                View technical evidence
+                                <span class="material-symbols-outlined text-[18px]">list_alt</span>
+</button>
+</div>
+</div>
+</section>
+<!-- Bento Grid Content -->
+<div class="grid grid-cols-12 gap-lg">
+<!-- Evidence Summary -->
+<div class="col-span-12 lg:col-span-8 space-y-lg">
+<!-- Timeline Header -->
+<div class="flex items-center justify-between border-b border-border pb-2">
+<h4 class="font-label-sm text-label-sm uppercase tracking-widest text-text-muted">Execution Timeline</h4>
+<div class="flex gap-4">
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-success"></div>
+<span class="font-label-md text-label-md text-text-secondary">Execution Pass</span>
+</div>
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-warning"></div>
+<span class="font-label-md text-label-md text-text-secondary">Result Unverified</span>
+</div>
+</div>
+</div>
+<!-- Technical Evidence Table (Observed Network Activity) -->
+<div class="bg-surface border border-border rounded-lg overflow-hidden">
+<div class="px-md py-3 bg-surface-container-low border-b border-border flex items-center justify-between">
+<span class="font-label-md text-label-md text-text-primary">Observed Network Activity</span>
+<span class="font-code text-code text-text-muted">14 packets captured</span>
+</div>
+<div class="overflow-x-auto mono-scrollbar">
+<table class="w-full text-left font-code text-code border-collapse">
+<thead>
+<tr class="text-text-muted border-b border-border bg-surface-dim">
+<th class="px-md py-2 font-normal">Method</th>
+<th class="px-md py-2 font-normal">Endpoint</th>
+<th class="px-md py-2 font-normal">Status</th>
+<th class="px-md py-2 font-normal">Size</th>
+<th class="px-md py-2 font-normal">Latency</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-border">
+<tr class="hover:bg-surface-subtle transition-colors group">
+<td class="px-md py-3 text-secondary">POST</td>
+<td class="px-md py-3">/api/v1/transaction/commit</td>
+<td class="px-md py-3"><span class="text-success bg-pass-bg px-1.5 py-0.5 rounded border border-pass-border">200 OK</span></td>
+<td class="px-md py-3 text-text-muted">1.2kb</td>
+<td class="px-md py-3 text-text-muted">142ms</td>
+</tr>
+<tr class="hover:bg-surface-subtle transition-colors">
+<td class="px-md py-3 text-secondary">GET</td>
+<td class="px-md py-3">/api/v1/user/profile</td>
+<td class="px-md py-3"><span class="text-success bg-pass-bg px-1.5 py-0.5 rounded border border-pass-border">200 OK</span></td>
+<td class="px-md py-3 text-text-muted">4.8kb</td>
+<td class="px-md py-3 text-text-muted">89ms</td>
+</tr>
+<tr class="hover:bg-surface-subtle transition-colors">
+<td class="px-md py-3 text-secondary">POST</td>
+<td class="px-md py-3">/api/v1/analytics/event</td>
+<td class="px-md py-3"><span class="text-success bg-pass-bg px-1.5 py-0.5 rounded border border-pass-border">204 NC</span></td>
+<td class="px-md py-3 text-text-muted">0.4kb</td>
+<td class="px-md py-3 text-text-muted">32ms</td>
+</tr>
+<tr class="hover:bg-surface-subtle transition-colors bg-warn-bg/20">
+<td class="px-md py-3 text-secondary">GET</td>
+<td class="px-md py-3">/api/v1/verification/status <span class="ml-2 text-warning font-label-sm italic">[!] Unmapped response</span></td>
+<td class="px-md py-3"><span class="text-warning bg-warn-bg px-1.5 py-0.5 rounded border border-warn-border">200 OK</span></td>
+<td class="px-md py-3 text-text-muted">0.8kb</td>
+<td class="px-md py-3 text-text-muted">210ms</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- Console Logs -->
+<div class="bg-surface-dim border border-border rounded-lg font-code text-code overflow-hidden">
+<div class="px-md py-2 border-b border-border flex items-center justify-between">
+<div class="flex gap-2">
+<div class="w-3 h-3 rounded-full bg-border"></div>
+<div class="w-3 h-3 rounded-full bg-border"></div>
+<div class="w-3 h-3 rounded-full bg-border"></div>
+</div>
+<span class="text-text-muted">Terminal — stdout</span>
+</div>
+<div class="p-md h-48 overflow-y-auto mono-scrollbar bg-black/40">
+<div class="mb-1"><span class="text-text-muted">[09:22:10]</span> <span class="text-success">INFO:</span> Initializing driver: chromium_headless</div>
+<div class="mb-1"><span class="text-text-muted">[09:22:11]</span> <span class="text-success">INFO:</span> Page navigated: https://app.formcrash.test/checkout</div>
+<div class="mb-1"><span class="text-text-muted">[09:22:14]</span> <span class="text-success">INFO:</span> Interaction complete: click("#confirm-order")</div>
+<div class="mb-1"><span class="text-text-muted">[09:22:16]</span> <span class="text-warning">WARN:</span> No verification logic found for state 'order_confirmed'.</div>
+<div class="mb-1"><span class="text-text-muted">[09:22:16]</span> <span class="text-success">INFO:</span> Tearing down driver...</div>
+<div class="mb-1"><span class="text-text-muted">[09:22:17]</span> <span class="text-text-primary">PROCESS EXIT: Code 0</span></div>
+<div class="animate-pulse bg-primary/20 h-4 w-2 mt-2"></div>
+</div>
+</div>
+</div>
+<!-- Sidebar Stats / Context -->
+<div class="col-span-12 lg:col-span-4 space-y-lg">
+<!-- Result Snapshot Card -->
+<div class="bg-surface-raised border border-border rounded-lg p-md">
+<h4 class="font-label-sm text-label-sm text-text-muted uppercase tracking-widest mb-4">Run Snapshot</h4>
+<div class="aspect-video w-full rounded bg-surface border border-border-strong relative overflow-hidden group">
+<img class="w-full h-full object-cover" data-alt="A screenshot of a modern enterprise software dashboard showing a financial summary. The interface is dark, with minimalist UI elements, charts in amber and blue, and clean typography. The image captures the 'unverified' moment with a clear view of a success message on the screen but no further system-level confirmation signals." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDRlBMJFjoKSSoMwWUlwf773UHHzZQMpQKFxhlK38Ufq6fScL9EtVygYf_sbPbPUgmfAJluw7NtlVDaU7D60g1nYWj945RJRGXy5zwoqSazUqNkacPfM1t0hD_AE4EFrrQdYueuYTvw45sm5TWXg-xnFfzoMQA_6zbjk8fsSIvsECI5GIXJr4pX6jR2sSiHkdjFVBF_31V_Eg_eVSpg6FHPoymNDd6PIaDOdlJpY0asgT5TjeaCPmFZtu0Tg3lG-E8DtFLjwxB9z1A">
+<div class="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent flex items-end p-3 opacity-0 group-hover:opacity-100 transition-opacity">
+<span class="font-label-md text-label-md text-white">Last visual frame (T+7.2s)</span>
+</div>
+</div>
+<div class="mt-4 grid grid-cols-2 gap-4">
+<div class="p-3 bg-surface-container rounded">
+<div class="text-text-muted font-label-sm mb-1 uppercase">Duration</div>
+<div class="text-text-primary font-bold">14.2s</div>
+</div>
+<div class="p-3 bg-surface-container rounded">
+<div class="text-text-muted font-label-sm mb-1 uppercase">Failures</div>
+<div class="text-text-primary font-bold">0</div>
+</div>
+</div>
+</div>
+<!-- System Health / Metadata -->
+<div class="bg-surface border border-border rounded-lg p-md">
+<h4 class="font-label-sm text-label-sm text-text-muted uppercase tracking-widest mb-4">Environment</h4>
+<ul class="space-y-3">
+<li class="flex items-center justify-between">
+<span class="text-text-secondary font-body-sm">Target URL</span>
+<span class="font-code text-code text-info">prod-v2.internal</span>
+</li>
+<li class="flex items-center justify-between">
+<span class="text-text-secondary font-body-sm">Browser</span>
+<span class="font-code text-code text-text-primary">Chromium 124</span>
+</li>
+<li class="flex items-center justify-between">
+<span class="text-text-secondary font-body-sm">OS</span>
+<span class="font-code text-code text-text-primary">Linux x64</span>
+</li>
+<li class="flex items-center justify-between">
+<span class="text-text-secondary font-body-sm">Node ID</span>
+<span class="font-code text-code text-text-muted">worker-us-east-44</span>
+</li>
+</ul>
+</div>
+<!-- Suggested Actions -->
+<div class="bg-surface-container-high/40 border border-border-strong rounded-lg p-md">
+<h4 class="font-label-sm text-label-sm text-primary uppercase tracking-widest mb-4">Diagnostic Tips</h4>
+<div class="space-y-4">
+<div class="flex gap-3">
+<span class="material-symbols-outlined text-warning shrink-0">lightbulb</span>
+<p class="font-body-sm text-text-secondary">Add an <code>expect()</code> assertion to verify the 'Order Successful' toast notification.</p>
+</div>
+<div class="flex gap-3">
+<span class="material-symbols-outlined text-warning shrink-0">analytics</span>
+<p class="font-body-sm text-text-secondary">Monitor the <code>POST /api/v1/transaction</code> status code for automatic verification.</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Global Footer / Navigation -->
+<footer class="h-10 bg-surface px-page-inline border-t border-border flex items-center justify-between text-text-muted font-label-sm">
+<div class="flex gap-6">
+<div class="flex items-center gap-1.5">
+<span class="w-2 h-2 rounded-full bg-success"></span>
+<span>Gateway: Operational</span>
+</div>
+<div class="flex items-center gap-1.5">
+<span class="w-2 h-2 rounded-full bg-success"></span>
+<span>API Cluster: 0ms lag</span>
+</div>
+</div>
+<div>v2.4.1-stable</div>
+</footer>
+</main>
+</div>
+<!-- Micro-interaction Scripts -->
+<script>
+        // Simple log auto-scroll simulation
+        const logContainer = document.querySelector('.h-48');
+        if (logContainer) {
+            setInterval(() => {
+                logContainer.scrollTop = logContainer.scrollHeight;
+            }, 5000);
+        }
+
+        // Action button interaction
+        document.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('mousedown', () => {
+                btn.style.transform = 'scale(0.98)';
+            });
+            btn.addEventListener('mouseup', () => {
+                btn.style.transform = 'scale(1)';
+            });
+        });
+    </script>
+</body></html>

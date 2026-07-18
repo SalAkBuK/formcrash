@@ -325,6 +325,8 @@ export function registerExternalExperimentRoutes(
               request.params.experimentVersionId,
               parsed.data.variables,
               parsed.data.confirmProduction,
+              parsed.data.replayMode,
+              parsed.data.replayPacing,
             ),
           ),
         );

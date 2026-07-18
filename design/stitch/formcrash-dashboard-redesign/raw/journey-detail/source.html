@@ -1,0 +1,415 @@
+<!DOCTYPE html><html lang="en" class="dark"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=block" rel="stylesheet"><script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script><script id="tailwind-config">try{
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "surface-container-high": "#1d2b3a",
+                      "error-container": "#93000a",
+                      "primary-pressed": "#E99A31",
+                      "tertiary-fixed-dim": "#6dd2fe",
+                      "text-secondary": "#AAB5C4",
+                      "inverse-on-surface": "#243240",
+                      "on-primary-fixed-variant": "#663e00",
+                      "on-background": "#d5e4f7",
+                      "on-secondary-fixed-variant": "#00497a",
+                      "on-tertiary": "#003546",
+                      "on-tertiary-fixed": "#001f2a",
+                      "tertiary": "#b5e6ff",
+                      "tertiary-fixed": "#bee9ff",
+                      "surface-container-lowest": "#020f1d",
+                      "fail-bg": "#2B151A",
+                      "surface-subtle": "#131A24",
+                      "outcome-evidence": "#FFB454",
+                      "warn-bg": "#2A2412",
+                      "primary-fixed": "#ffddb9",
+                      "primary-fixed-dim": "#ffb961",
+                      "on-secondary-fixed": "#001d35",
+                      "secondary-fixed-dim": "#9bcaff",
+                      "warn-border": "#6A5726",
+                      "surface-container-highest": "#283645",
+                      "on-primary-fixed": "#2b1700",
+                      "on-error": "#690005",
+                      "border": "#293647",
+                      "secondary": "#9bcaff",
+                      "on-surface": "#d5e4f7",
+                      "primary-hover": "#FFC477",
+                      "text-primary": "#F4F7FB",
+                      "on-error-container": "#ffdad6",
+                      "primary": "#ffd8af",
+                      "surface-raised": "#18212D",
+                      "primary-container": "#ffb454",
+                      "success": "#58D6A3",
+                      "inverse-primary": "#865300",
+                      "surface-container-low": "#0f1d2b",
+                      "on-surface-variant": "#d6c3b1",
+                      "text-muted": "#738195",
+                      "on-primary": "#23180A",
+                      "on-tertiary-fixed-variant": "#004d64",
+                      "pass-bg": "#10271F",
+                      "border-strong": "#3A4A60",
+                      "surface-container": "#13212f",
+                      "tertiary-container": "#69cffa",
+                      "browser-evidence": "#6CB6FF",
+                      "surface-bright": "#2d3a4a",
+                      "inverse-surface": "#d5e4f7",
+                      "surface": "#0F141C",
+                      "warning": "#F4C95D",
+                      "request-evidence": "#B78CFF",
+                      "info": "#6CB6FF",
+                      "fail-border": "#74313A",
+                      "surface-variant": "#283645",
+                      "surface-dim": "#061422",
+                      "focus": "#73B7FF",
+                      "secondary-fixed": "#d0e4ff",
+                      "on-primary-container": "#734600",
+                      "on-secondary": "#003256",
+                      "danger": "#FF6B78",
+                      "background": "#0A0D12",
+                      "on-tertiary-container": "#005771",
+                      "danger-strong": "#FF4858",
+                      "outline": "#9f8e7d",
+                      "neutral": "#8A98AA",
+                      "outline-variant": "#524436",
+                      "secondary-container": "#006cb0",
+                      "surface-high": "#1E2937",
+                      "error": "#ffb4ab",
+                      "surface-tint": "#ffb961",
+                      "info-bg": "#102338",
+                      "info-border": "#28557D",
+                      "pass-border": "#285F4C",
+                      "on-secondary-container": "#dae9ff"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "md": "16px",
+                      "page-inline": "32px",
+                      "sm": "8px",
+                      "content-max": "1440px",
+                      "page-block": "28px",
+                      "xl": "32px",
+                      "xxl": "48px",
+                      "unit": "8px",
+                      "xs": "4px",
+                      "lg": "24px"
+              },
+              "fontFamily": {
+                      "code": ["JetBrains Mono"],
+                      "label-sm": ["Inter"],
+                      "label-md": ["Inter"],
+                      "display": ["Inter"],
+                      "headline-lg": ["Inter"],
+                      "body-md": ["Inter"],
+                      "headline-md": ["Inter"],
+                      "headline-sm": ["Inter"],
+                      "body-lg": ["Inter"],
+                      "body-sm": ["Inter"]
+              },
+              "fontSize": {
+                      "code": ["12.5px", {"lineHeight": "19px", "fontWeight": "400"}],
+                      "label-sm": ["11px", {"lineHeight": "14px", "letterSpacing": "0.06em", "fontWeight": "700"}],
+                      "label-md": ["12px", {"lineHeight": "16px", "letterSpacing": "0.025em", "fontWeight": "650"}],
+                      "display": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.03em", "fontWeight": "700"}],
+                      "headline-lg": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                      "body-md": ["14px", {"lineHeight": "21px", "fontWeight": "400"}],
+                      "headline-md": ["20px", {"lineHeight": "28px", "letterSpacing": "-0.015em", "fontWeight": "650"}],
+                      "headline-sm": ["17px", {"lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "650"}],
+                      "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                      "body-sm": ["13px", {"lineHeight": "19px", "fontWeight": "400"}]
+              }
+            },
+          },
+        }
+      }catch(_e){}</script><meta charset="utf-8"></head><body class="bg-background text-on-background min-h-screen">
+<!-- Top Navigation -->
+<header class="fixed top-0 right-0 w-[calc(100%-16rem)] h-14 bg-surface-dim border-b border-border z-30 flex items-center justify-between px-page-inline">
+<div class="flex items-center gap-md">
+<span class="material-symbols-outlined text-text-muted cursor-pointer hover:text-primary transition-colors" data-original-icon="arrow_back">arrow_back</span>
+<div class="flex flex-col">
+<h1 class="font-headline-sm text-headline-sm font-bold text-text-primary">Register Visitor</h1>
+<p class="font-body-sm text-body-sm text-text-muted">Recording-029 • Updated 2h ago</p>
+</div>
+</div>
+<div class="flex items-center gap-lg">
+<div class="relative group">
+<span class="material-symbols-outlined text-text-muted hover:text-primary cursor-pointer transition-colors" data-original-icon="notifications">notifications</span>
+<div class="absolute -top-1 -right-1 w-2 h-2 bg-primary rounded-full"></div>
+</div>
+<span class="material-symbols-outlined text-text-muted hover:text-primary cursor-pointer transition-colors">help_outline</span>
+<div class="w-8 h-8 rounded-full bg-surface-container-high border border-border flex items-center justify-center overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="A clean, minimalist user profile avatar showing a high-contrast geometric icon in amber and black, professionally lit with a soft studio glow, set against a dark textured background." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAPI6OF38y-1SlaGxzTdCtE5Auke-EA7V36sQhI_0qYA55BNPY7aAoMVw-uq0CINq2TKEG_YD22YtpDOn3oFzcIxqRpW-lff-cgIArTrJWjp48YFX6ZtgYVIPZ6Diu3EYyaqhP79tsehfiiJcge_nA4Qes2EJNVI-5eAh8_72qzBrGUOWlnlz9WcFh7nrN2P-btdrbtiQ9Ffhhr0KVkXZg-bNrVcwR4rvxlt4i-axs27rPeqxuE3Bj66LlF0JAQZX-2Mf1-0Lle6iU">
+</div>
+</div>
+</header>
+<!-- Side Navigation -->
+<aside class="h-screen w-64 fixed left-0 top-0 bg-surface border-r border-border flex flex-col py-page-block px-md z-40">
+<div class="flex items-center gap-sm mb-xxl px-sm">
+<div class="w-8 h-8 bg-primary rounded flex items-center justify-center">
+<span class="material-symbols-outlined text-on-primary font-bold">biotech</span>
+</div>
+<div>
+<span class="font-headline-md text-headline-md font-bold text-primary block leading-none">FormCrash</span>
+<span class="text-[10px] uppercase tracking-widest text-text-muted font-bold">Reliability Workbench</span>
+</div>
+</div>
+<nav class="flex-1 space-y-xs">
+<a class="flex items-center gap-md px-sm py-xs rounded text-text-secondary hover:bg-surface-subtle transition-colors group" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="font-label-md text-label-md">Overview</span>
+</a>
+<a class="flex items-center gap-md px-sm py-xs rounded bg-surface-container-high text-primary border-l-2 border-primary group" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">conversion_path</span>
+<span class="font-label-md text-label-md">Journeys</span>
+</a>
+<a class="flex items-center gap-md px-sm py-xs rounded text-text-secondary hover:bg-surface-subtle transition-colors group" href="#">
+<span class="material-symbols-outlined">biotech</span>
+<span class="font-label-md text-label-md">Tests</span>
+</a>
+<a class="flex items-center gap-md px-sm py-xs rounded text-text-secondary hover:bg-surface-subtle transition-colors group" href="#">
+<span class="material-symbols-outlined">history</span>
+<span class="font-label-md text-label-md">Runs</span>
+</a>
+<a class="flex items-center gap-md px-sm py-xs rounded text-text-secondary hover:bg-surface-subtle transition-colors group" href="#">
+<span class="material-symbols-outlined">database</span>
+<span class="font-label-md text-label-md">Test Data</span>
+</a>
+<a class="flex items-center gap-md px-sm py-xs rounded text-text-secondary hover:bg-surface-subtle transition-colors group mt-8" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-label-md text-label-md">Settings</span>
+</a>
+</nav>
+<div class="mt-auto border-t border-border pt-md">
+<div class="flex items-center gap-md px-sm py-xs rounded text-text-secondary hover:bg-surface-subtle cursor-pointer transition-colors active:scale-95">
+<span class="material-symbols-outlined">swap_horiz</span>
+<span class="font-label-md text-label-md">Project Switcher</span>
+</div>
+</div>
+</aside>
+<!-- Main Content Canvas -->
+<main class="ml-64 mt-14 p-page-inline max-w-[content-max] flex gap-lg">
+<!-- Center Column: Timeline -->
+<div class="flex-1 max-w-3xl">
+<div class="mb-lg flex items-center justify-between">
+<div>
+<h2 class="font-headline-md text-headline-md font-bold">Recorded Sequence</h2>
+<p class="font-body-sm text-body-sm text-text-muted">Review each captured interaction step for forensic analysis.</p>
+</div>
+<div class="flex gap-sm">
+<button class="px-md py-sm bg-surface-raised border border-border-strong rounded hover:bg-surface-container-high transition-colors font-label-md text-label-md">Preview</button>
+<button class="px-md py-sm bg-surface-raised border border-border-strong rounded hover:bg-surface-container-high transition-colors font-label-md text-label-md">Re-record</button>
+</div>
+</div>
+<div class="relative">
+<!-- Timeline Vertical Line -->
+<div class="absolute left-6 top-8 bottom-8 w-[2px] timeline-line z-0"></div>
+<div class="space-y-lg relative z-10">
+<!-- Step 1 -->
+<div class="flex gap-lg group">
+<div class="w-12 h-12 rounded-full bg-surface-container border border-border flex items-center justify-center shrink-0">
+<span class="font-code text-code">01</span>
+</div>
+<div class="flex-1 bg-surface-raised border border-border rounded-lg p-md hover:border-border-strong transition-all cursor-pointer">
+<div class="flex justify-between items-start mb-xs">
+<span class="font-label-md text-label-md text-text-primary uppercase tracking-tight">Navigate</span>
+<span class="font-code text-[10px] text-text-muted bg-surface p-1 rounded">240ms</span>
+</div>
+<p class="font-body-sm text-body-sm text-text-secondary">Load <code>/admin/visitors</code> dashboard.</p>
+</div>
+</div>
+<!-- Step 2 -->
+<div class="flex gap-lg group">
+<div class="w-12 h-12 rounded-full bg-surface-container border border-border flex items-center justify-center shrink-0">
+<span class="font-code text-code">02</span>
+</div>
+<div class="flex-1 bg-surface-raised border border-border rounded-lg p-md hover:border-border-strong transition-all cursor-pointer">
+<div class="flex justify-between items-start mb-xs">
+<span class="font-label-md text-label-md text-text-primary uppercase tracking-tight">Click</span>
+<span class="font-code text-[10px] text-text-muted bg-surface p-1 rounded">112ms</span>
+</div>
+<p class="font-body-sm text-body-sm text-text-secondary">Select <span class="text-info">"Add New"</span> primary button.</p>
+</div>
+</div>
+<!-- Step 3 -->
+<div class="flex gap-lg group">
+<div class="w-12 h-12 rounded-full bg-surface-container border border-border flex items-center justify-center shrink-0">
+<span class="font-code text-code">03</span>
+</div>
+<div class="flex-1 bg-surface-raised border border-border rounded-lg p-md hover:border-border-strong transition-all cursor-pointer">
+<div class="flex justify-between items-start mb-xs">
+<span class="font-label-md text-label-md text-text-primary uppercase tracking-tight">Input</span>
+<span class="font-code text-[10px] text-text-muted bg-surface p-1 rounded">1.2s</span>
+</div>
+<div class="flex items-center gap-sm">
+<p class="font-body-sm text-body-sm text-text-secondary">Type <span class="text-tertiary">"John Doe"</span> into <code>#visitor-name</code></p>
+<span class="px-xs py-[2px] bg-secondary/10 border border-secondary/20 text-secondary text-[10px] font-bold rounded">VAR</span>
+</div>
+</div>
+</div>
+<!-- Step 4 -->
+<div class="flex gap-lg group">
+<div class="w-12 h-12 rounded-full bg-surface-container border border-border flex items-center justify-center shrink-0">
+<span class="font-code text-code">04</span>
+</div>
+<div class="flex-1 bg-surface-raised border border-border rounded-lg p-md hover:border-border-strong transition-all cursor-pointer">
+<div class="flex justify-between items-start mb-xs">
+<span class="font-label-md text-label-md text-text-primary uppercase tracking-tight">Input</span>
+<span class="font-code text-[10px] text-text-muted bg-surface p-1 rounded">850ms</span>
+</div>
+<p class="font-body-sm text-body-sm text-text-secondary">Select <span class="text-tertiary">"Contractor"</span> from <code>#visit-type</code> dropdown.</p>
+</div>
+</div>
+<!-- Step 5: HIGHLIGHTED CRITICAL ACTION -->
+<div class="flex gap-lg group relative">
+<div class="absolute -left-2 -top-2 -bottom-2 -right-2 bg-primary/5 rounded-xl border border-primary/20 blur-[1px]"></div>
+<div class="w-12 h-12 rounded-full bg-primary border-4 border-background flex items-center justify-center shrink-0 z-10 glow-amber">
+<span class="font-code text-code text-on-primary font-bold">05</span>
+</div>
+<div class="flex-1 bg-surface-container-high border-2 border-primary rounded-lg p-md relative z-10">
+<div class="flex justify-between items-start mb-sm">
+<div class="flex items-center gap-sm">
+<span class="font-label-md text-label-md text-primary uppercase tracking-wider font-bold">Critical Action</span>
+<span class="material-symbols-outlined text-primary text-sm">stars</span>
+</div>
+<span class="font-code text-[10px] text-primary/70 bg-primary/10 px-sm py-1 rounded">98ms</span>
+</div>
+<h3 class="font-headline-sm text-headline-sm text-text-primary mb-xs">Submit form</h3>
+<p class="font-body-sm text-body-sm text-text-secondary">Execution of the primary transactional intent. Triggers background API persistence.</p>
+<div class="mt-md pt-md border-t border-primary/10 flex gap-md">
+<div class="px-sm py-xs bg-surface-dim border border-border rounded flex items-center gap-xs">
+<span class="material-symbols-outlined text-[14px] text-warning">warning</span>
+<span class="text-[10px] font-bold text-text-muted">Outcome unverified</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Step 6 -->
+<div class="flex gap-lg group">
+<div class="w-12 h-12 rounded-full bg-surface-container border border-border flex items-center justify-center shrink-0">
+<span class="font-code text-code">06</span>
+</div>
+<div class="flex-1 bg-surface-raised border border-border rounded-lg p-md hover:border-border-strong transition-all cursor-pointer opacity-60">
+<div class="flex justify-between items-start mb-xs">
+<span class="font-label-md text-label-md text-text-primary uppercase tracking-tight">Assert</span>
+<span class="font-code text-[10px] text-text-muted bg-surface p-1 rounded">400ms</span>
+</div>
+<p class="font-body-sm text-body-sm text-text-secondary">Verify <code>.success-toast</code> visibility.</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Column: Sidebar Checklist -->
+<div class="w-80 shrink-0 space-y-lg">
+<div class="bg-surface-raised border border-border rounded-lg p-lg">
+<h3 class="font-label-md text-label-md text-text-muted uppercase tracking-widest mb-md">Journey Readiness</h3>
+<ul class="space-y-md">
+<!-- Ready -->
+<li class="flex items-center justify-between">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-success text-md">check_circle</span>
+<span class="font-body-sm text-body-sm text-text-primary">Authentication</span>
+</div>
+<span class="font-label-sm text-label-sm text-success">READY</span>
+</li>
+<!-- Issues -->
+<li class="flex items-center justify-between">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-warning text-md">error</span>
+<span class="font-body-sm text-body-sm text-text-primary">Runtime values</span>
+</div>
+<span class="font-label-sm text-label-sm text-warning">1 REQUIRED</span>
+</li>
+<!-- Critical Action -->
+<li class="flex items-center justify-between">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-primary text-md">flag</span>
+<span class="font-body-sm text-body-sm text-text-primary">Critical Action</span>
+</div>
+<span class="font-label-sm text-label-sm text-text-muted">SUBMIT FORM</span>
+</li>
+<!-- Not Configured -->
+<li class="flex items-center justify-between">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-text-muted text-md">circle_notifications</span>
+<span class="font-body-sm text-body-sm text-text-primary">Outcome Checks</span>
+</div>
+<span class="font-label-sm text-label-sm text-text-muted opacity-50">NOT SET</span>
+</li>
+<!-- Not Configured -->
+<li class="flex items-center justify-between">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-text-muted text-md">cleaning_services</span>
+<span class="font-body-sm text-body-sm text-text-primary">Cleanup</span>
+</div>
+<span class="font-label-sm text-label-sm text-text-muted opacity-50">NOT SET</span>
+</li>
+</ul>
+<div class="mt-xl pt-lg border-t border-border">
+<button class="w-full bg-primary text-on-primary font-bold py-md px-lg rounded flex items-center justify-center gap-sm hover:bg-primary-hover active:scale-[0.98] transition-all">
+<span class="material-symbols-outlined">rule</span>
+<span class="font-label-md text-label-md">Configure outcome</span>
+</button>
+<p class="text-center text-[10px] text-text-muted mt-sm uppercase tracking-tighter">Required before benchmark</p>
+</div>
+</div>
+<!-- Evidence Preview Card -->
+<div class="bg-surface border border-border rounded-lg overflow-hidden">
+<div class="p-md bg-surface-subtle border-b border-border flex items-center justify-between">
+<span class="font-label-md text-label-md text-text-primary">DOM Snapshot</span>
+<span class="material-symbols-outlined text-sm text-text-muted cursor-pointer">open_in_new</span>
+</div>
+<div class="h-48 relative">
+<img class="w-full h-full object-cover grayscale opacity-40 hover:grayscale-0 hover:opacity-100 transition-all duration-500 cursor-zoom-in" data-alt="A high-resolution screenshot of a modern, professional visitor management web form UI. The form uses a clean dark-mode interface with subtle grey borders and amber focus states. Several input fields are filled with placeholder data, and a large primary action button labeled 'Register' is visible in the lower right." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDBOAOscpiAvCFosfPXtU8xo9SDNcbvLrI3n_48KQyHlSgnb90Prx3h9dGqBTcjQVNWz3TrqpYARBxARZ8afr1sWM28V7rsVdwNENNVI5NNlbUZR_tsDMYYhUgEmzIWP7JE-VAAJLeBuJlgzemfh5Xb-jgqrfVoJDWNQAf3P0Oh0C95qIGCHI1HQB-BaQzrgHS68aSxqRS_4umlfx0np8m0isaIlFS4XefHgDhqLkosPQVzTnVuPTzJhQVsGg_rbejahT25iq5cd84">
+<div class="absolute inset-0 pointer-events-none border-[1px] border-primary/20 m-4"></div>
+<div class="absolute bottom-2 left-2 bg-background/80 backdrop-blur px-2 py-1 rounded text-[10px] font-code text-primary">
+                        capture_step_05.png
+                    </div>
+</div>
+</div>
+<!-- Diagnostics -->
+<div class="p-md rounded-lg bg-surface-container-low border border-border-strong">
+<div class="flex items-center gap-sm mb-sm">
+<span class="material-symbols-outlined text-info text-md">terminal</span>
+<h4 class="font-label-md text-label-md text-text-primary">Log Artifacts</h4>
+</div>
+<div class="font-code text-[11px] space-y-1 text-text-muted overflow-hidden">
+<p class="truncate"><span class="text-success">[OK]</span> POST /api/v1/visitors ...</p>
+<p class="truncate"><span class="text-success">[OK]</span> DB: Transaction committed</p>
+<p class="truncate"><span class="text-warning">[WRN]</span> Webhook latency &gt; 500ms</p>
+</div>
+</div>
+</div>
+</main>
+<!-- Floating Atmosphere -->
+<div class="fixed bottom-0 left-0 w-full h-32 pointer-events-none z-0">
+
+</div>
+<script>
+        // Micro-interactions for the timeline items
+        document.querySelectorAll('.timeline-item').forEach(item => {
+            item.addEventListener('mouseenter', () => {
+                item.classList.add('translate-x-1');
+            });
+            item.addEventListener('mouseleave', () => {
+                item.classList.remove('translate-x-1');
+            });
+        });
+
+        // Simple feedback for the primary CTA
+        const cta = document.querySelector('button.bg-primary');
+        if (cta) {
+            cta.addEventListener('click', () => {
+                cta.innerHTML = '<span class="material-symbols-outlined animate-spin">refresh</span> Configuring...';
+                setTimeout(() => {
+                    cta.innerHTML = '<span class="material-symbols-outlined">check</span> Success';
+                    cta.classList.replace('bg-primary', 'bg-success');
+                }, 1500);
+            });
+        }
+    </script>
+</body></html>

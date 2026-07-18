@@ -1,0 +1,9 @@
+{
+  "title": "Test Wizard: Expected Outcome",
+  "screenId": "5831dbcc32e2466bac122f15f54737d4",
+  "projectId": "4677329075423301517",
+  "deviceType": "DESKTOP",
+  "width": 2560,
+  "height": 2352,
+  "files": ["preview.png", "source.html", "assets/generated-image-01.png"]
+}

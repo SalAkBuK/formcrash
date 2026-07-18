@@ -1,0 +1,65 @@
+{
+  "project": {
+    "id": "4677329075423301517",
+    "title": "FormCrash Dashboard Redesign"
+  },
+  "retrievedAt": "2026-07-18",
+  "screens": [
+    {
+      "name": "Design System",
+      "id": "asset-stub-assets_733fe26b6cc44c11bcc9ecfbfd1dcfd0",
+      "assetId": "assets/733fe26b6cc44c11bcc9ecfbfd1dcfd0",
+      "previewUrl": null,
+      "sourceUrl": null,
+      "failure": "Stitch get_screen accepted the asset-stub ID but returned no screen fields, screenshot resource, or generated-code resource. list_design_systems returned the design-system metadata and tokens."
+    },
+    {
+      "name": "Project Overview",
+      "id": "e1304076942b4efdafdba6cdfa113560",
+      "previewUrl": "https://lh3.googleusercontent.com/aida/AP1WRLtKN-Rrtsrc3IzA5ejRqlqUIhexV232OTBL2UwL_gtwiHgylcz51JFjjYswUuw2D1bZCUdb9Ll4lmP7snPMw8U_LKY7l4He5QWpKrdYK_amk5NgoE_lGU2qNKGAiV_HOBwICL3meZpc52-wnb3WMJzR_tjAraDiHK7FOcDtUWemiHd7DmDih1uc52aM77roq6EM8Bj0YsQWmV6hnFnrPPLLWTsecoc5W9hAMz1VtmFK2STL7cTSs9R2Nw",
+      "sourceUrl": "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ7Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpaCiVodG1sXzAwMDY1NmU0MjkzZDU5NWEwNDVhZDYzNjZmMjFlODM1EgsSBxCvgKzGzAEYAZIBIwoKcHJvamVjdF9pZBIVQhM0Njc3MzI5MDc1NDIzMzAxNTE3&filename=&opi=89354086"
+    },
+    {
+      "name": "Journey Detail: Register Visitor",
+      "id": "01d398ffe94e4410b9e5ea49aa026695",
+      "previewUrl": "https://lh3.googleusercontent.com/aida/AP1WRLsbN1K4hXeQeLNinLSEPYNdBY0Npkfyc-qfwpdzHrCVYPNipGRzuh4V0yu3K21eI6QPPOybk8klpJap3maJSLvccvljk7a3u60j8y1mRvqOdwItJM4GQruz1o3Q9uSZFkBs-8swIwp63zFvvuzp2zl3gIF601VYfoVvAayfVbdeFdPIQu3PJHccDXgpUG4UOBpyB4hEdbIYrQ_EKff1QubHFs1B4qHtkPLLwprLWu3-_6LX82CMdcRM7RM",
+      "sourceUrl": "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ7Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpaCiVodG1sXzAwMDY1NmU0Mjk4YmFjZGYwMjNiZjFiMTBmM2QyN2E2EgsSBxCvgKzGzAEYAZIBIwoKcHJvamVjdF9pZBIVQhM0Njc3MzI5MDc1NDIzMzAxNTE3&filename=&opi=89354086"
+    },
+    {
+      "name": "Test Wizard: Expected Outcome",
+      "id": "5831dbcc32e2466bac122f15f54737d4",
+      "previewUrl": "https://lh3.googleusercontent.com/aida/AP1WRLsny02pyPOU_WRfADdBT4mr-abA1W6mI5tOFA-oLoNBZNKP1kTZa4QzJggUfe0KU0TePbwMlfHWNJCJ_RZiJ62C-ZaBrt1sIKrIfllFVcMYXt-AXfLVOdz5j477hpcMTBoHwPwCD9HnUbKD8G_bEZR_UWPCmzBW9ir-CJk_DuNox0T96KTo2NDjHSgpIr-V-SU168ANFMlUSs--Vc1F_8bebVK6bpehdvGhEJLZoltaGBghUU3LV2chnA",
+      "sourceUrl": "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ7Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpaCiVodG1sXzAwMDY1NmU0MjhmNjA3NjEwOTY4OWRmNmZmMjY5MjQ5EgsSBxCvgKzGzAEYAZIBIwoKcHJvamVjdF9pZBIVQhM0Njc3MzI5MDc1NDIzMzAxNTE3&filename=&opi=89354086"
+    },
+    {
+      "name": "Test Wizard: Safety & Data",
+      "id": "b263c97c6f3b485caf3be853a89c3fa9",
+      "previewUrl": "https://lh3.googleusercontent.com/aida/AP1WRLuM0ZNd8yvIycc7U8P8-_dotzWiPTPYGSHdO-0KuqGd_EHrxDjYr6Au7bIOQQTE5kuyMrBAQg0BUZ-tPWT9Nth3Wjqjuhds5S3mCFfmhEjwFMj8IWHXrREn6pN3FZTdYad18CibaGdeKsTjfwxB3Y5ckppIJ_39G6YB13KaVZg02BRmTTFy2EzqzFkus1kGVKuglYNNR49wVSHFcj-KB8WY3WXvOvClNHOetCvOXX3_Y7i1ipzSiy0Psw",
+      "sourceUrl": "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ7Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpaCiVodG1sXzAwMDY1NmU0MjhkYzc3YWIwOTY4OWRmNmZmMjY5MjQ5EgsSBxCvgKzGzAEYAZIBIwoKcHJvamVjdF9pZBIVQhM0Njc3MzI5MDc1NDIzMzAxNTE3&filename=&opi=89354086"
+    },
+    {
+      "name": "Test Wizard: Review & Run",
+      "id": "b8e1bc2e406240a09939489acbe0c708",
+      "previewUrl": "https://lh3.googleusercontent.com/aida/AP1WRLv0UnMTx5bZjn9b6MVyiJ35H1EBDrxbfTgJY6Pj5HYMBiqMHnk8E7iGOv0sCQq59am1GrmmB0baHeNlTaO5REgZO5EwpKXKG8rlKfmkCWuHFba2c09W5mJ_ujza7tnSi12sEK6tXXKCKA1L3hJAztBPITlFVF-dGjObcW2e4xiDDltLANDpL_Edxnx0zzYIwr4y5cBUGzeatIHE93eMLqgCdSdnXUfu-g3SmnWgJi4oBTInhsbAngPauA",
+      "sourceUrl": "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ7Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpaCiVodG1sXzAwMDY1NmU0MjkyNWJhMTQwOTY4OWRmNmZmMjY5MjQ5EgsSBxCvgKzGzAEYAZIBIwoKcHJvamVjdF9pZBIVQhM0Njc3MzI5MDc1NDIzMzAxNTE3&filename=&opi=89354086"
+    },
+    {
+      "name": "Run Result: Vulnerability Reproduced",
+      "id": "c4f276ca822b4b1895bfdd17aa673511",
+      "previewUrl": "https://lh3.googleusercontent.com/aida/AP1WRLtD437TL5PlKmC1oTS930cak26x1g23NrO5IAX823nujzN1W9uDFVCpxK9Z4gupxxwNuhO0o8Tdr12n8KuSZfgFeJoirJn2m3oCvu0BL_GwxIGazREYXZMB5qs0lBR9rCLmto2GfSO2wmK0-c1dTNI6nhfJISZKaEBVw-si9ZHCkenyE6eNMyOrpk7Qy6kYIa2Fn9xeiS7B89wHeyJX9opVXHU6593W0lN151MeIX308m_8yvYZbfvLnQ",
+      "sourceUrl": "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ7Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpaCiVodG1sXzAwMDY1NmU0Mjk1NTI0MGQwOTY4OWRmNmZmMjY5MjQ5EgsSBxCvgKzGzAEYAZIBIwoKcHJvamVjdF9pZBIVQhM0Njc3MzI5MDc1NDIzMzAxNTE3&filename=&opi=89354086"
+    },
+    {
+      "name": "Run Result: Not Configured",
+      "id": "1caafc56960440edb94ed2a2039965b6",
+      "previewUrl": "https://lh3.googleusercontent.com/aida/AP1WRLu3DD_Mi9MKBK8mVNKNg6CNUQilavs7w17PxUUAo1p8dOmkLJJdmk1oB3mLqqowhCE4znnsrcX6OxZbHpPsXRtfBriqJD3jDNcS518esM2r5l6judvjXRKnThHYw5eTMF3YAw3H39QyRznq73AvSjyE6pH9vdAedqn0ahK3ShsndEbwF603amcnt1OZR3JvBpjPl5He_Q92cWQ-HerRRyJmzD_d7UMG6LQLk_8Dy5KybDnKNvM4n17W-AM",
+      "sourceUrl": "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ7Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpaCiVodG1sXzAwMDY1NmU0MjkwZDdkNmQwOTY4OWRmNmZmMjY5MjQ5EgsSBxCvgKzGzAEYAZIBIwoKcHJvamVjdF9pZBIVQhM0Njc3MzI5MDc1NDIzMzAxNTE3&filename=&opi=89354086"
+    },
+    {
+      "name": "Runs List",
+      "id": "a59c1460dfff41988baa3eef37cb172e",
+      "previewUrl": "https://lh3.googleusercontent.com/aida/AP1WRLut__cFaOn9b72dQ5mN0i6voxQH3MPPFNdy9JTDMGjZcao-7SwctI8WCcbkzchY7y_aq6w8xenJ63Rh4Q84b5uvXk0dU3SRXxUtS6o19k6itoQB0K0Jdevj4MLA3sDswgcSoXfMqGbByBo-nuR8zJofQJARqBYmBdMC8u-fSvYuucG5Z9AH1CUVBVwsYDSCYAqFgiApQx2WTiWKGWYPdaiqk7y5EHqW4IYfa5yOt-PuVQjG_w6aAt7fSA4",
+      "sourceUrl": "https://contribution.usercontent.google.com/download?c=CgthaWRhX2NvZGVmeBJ7Eh1hcHBfY29tcGFuaW9uX2dlbmVyYXRlZF9maWxlcxpaCiVodG1sXzAwMDY1NmU0Mjk2ZWJlODQwMjNiZjdmMjk2MzFkYWUxEgsSBxCvgKzGzAEYAZIBIwoKcHJvamVjdF9pZBIVQhM0Njc3MzI5MDc1NDIzMzAxNTE3&filename=&opi=89354086"
+    }
+  ]
+}

@@ -1,20 +1,34 @@
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 
 import {
   controlledTargetUrlSchema,
+  hybridTraceManifestSchema,
+  recordedBrowserEnvironmentSchema,
+  recordedInteractionSchema,
+  recordedPostconditionSchema,
   recordedJourneyStepSchema,
+  recordedTargetCandidateSchema,
+  recordedTargetGeometrySchema,
   recordingWarningSchema,
   replayLocatorSchema,
   targetFingerprintSchema,
+  traceSummarySchema,
+  type HybridTraceManifest,
+  type RecordedBrowserEnvironment,
+  type RecordedInteraction,
+  type RecordedVideoArtifact,
   type PersistedJourney,
   type RecordedJourneyStep,
   type RecordingSession,
   type RecordingWarning,
+  type TraceSummary,
   type SaveRecordedJourneyRequest,
 } from '@formcrash/contracts';
 import { z } from 'zod';
 
 import type { ServerConfig } from '../../app/config.js';
+import { JourneyTraceStore } from '../../artifacts/journey-trace-store.js';
 import type { ProjectJourneyRepository } from '../../persistence/project-journey-repository.js';
 import type { AuthStateStore } from '../external/auth-session.js';
 import type { BrowserOwnership } from '../infrastructure/browser-ownership.js';
@@ -22,6 +36,8 @@ import {
   PlaywrightExternalBrowserOwner,
   type ExternalBrowserOwner,
   type RawRecordingEvent,
+  type RawTraceEvent,
+  type RecordingEventContext,
   type RecordingBrowserSession,
 } from './external-browser.js';
 
@@ -34,6 +50,13 @@ const rawEventSchema = z.discriminatedUnion('kind', [
     fingerprint: targetFingerprintSchema,
     value: z.string().max(10_000).nullable(),
     sensitive: z.boolean(),
+    pointerType: z.enum(['mouse', 'pen', 'touch']).nullable().default(null),
+    targetCandidates: z
+      .array(recordedTargetCandidateSchema)
+      .max(12)
+      .default([]),
+    geometry: recordedTargetGeometrySchema.nullable().default(null),
+    postconditions: z.array(recordedPostconditionSchema).max(12).default([]),
   }),
   z.object({
     kind: z.literal('navigate'),
@@ -49,6 +72,12 @@ interface ActiveRecording {
   readonly releaseOwnership: () => void;
   readonly steps: RecordedJourneyStep[];
   readonly warnings: RecordingWarning[];
+  readonly interactions: RecordedInteraction[];
+  readonly traceEvents: unknown[];
+  readonly pageIds: Set<string>;
+  readonly framePaths: Set<string>;
+  environment: RecordedBrowserEnvironment | null;
+  readonly maximumDurationTimer: NodeJS.Timeout;
 }
 
 interface PendingRecording {
@@ -56,6 +85,11 @@ interface PendingRecording {
   readonly sessionId: string;
   readonly steps: RecordedJourneyStep[];
   readonly warnings: RecordingWarning[];
+  readonly interactions: RecordedInteraction[];
+  readonly traceEvents: unknown[];
+  readonly pageIds: Set<string>;
+  readonly framePaths: Set<string>;
+  environment: RecordedBrowserEnvironment | null;
 }
 
 export class RecordingNotActiveError extends Error {
@@ -67,6 +101,7 @@ export class RecordingNotActiveError extends Error {
 
 export class RecordingManager {
   private readonly browserOwner: ExternalBrowserOwner;
+  private readonly traceStore: JourneyTraceStore;
   private active: ActiveRecording | null = null;
 
   constructor(
@@ -77,6 +112,7 @@ export class RecordingManager {
     private readonly authStore?: AuthStateStore,
   ) {
     this.browserOwner = browserOwner ?? new PlaywrightExternalBrowserOwner();
+    this.traceStore = new JourneyTraceStore(config.artifactRoot, repository);
   }
 
   async start(projectId: string): Promise<RecordingSession> {
@@ -89,6 +125,11 @@ export class RecordingManager {
       sessionId: created.id,
       steps: [],
       warnings: [],
+      interactions: [],
+      traceEvents: [],
+      pageIds: new Set(['page-1']),
+      framePaths: new Set(['']),
+      environment: null,
     };
     this.repository.updateRecordingSession({
       id: created.id,
@@ -102,24 +143,57 @@ export class RecordingManager {
           targetUrl: project.targetUrl,
           headless: this.config.browserHeadless,
           timeoutMs: this.config.browserTimeoutMs,
+          recordVideoDirectory: path.join(
+            this.config.artifactRoot,
+            'journey-traces',
+            created.id,
+            'videos',
+          ),
           ...(storageStatePath === null ? {} : { storageStatePath }),
         },
         {
-          onEvent: (event, topFrame) =>
-            this.captureEvent(pending, event, topFrame),
+          onEvent: (event, topFrame, context) =>
+            this.captureEvent(pending, event, topFrame, context),
           onWarning: (warning, topFrame) =>
             this.captureWarning(pending, warning, topFrame),
-          onNavigation: (url, timestamp) =>
-            this.captureNavigation(pending, url, timestamp, project.targetUrl),
+          onNavigation: (url, timestamp, context) =>
+            this.captureNavigation(
+              pending,
+              url,
+              timestamp,
+              project.targetUrl,
+              context,
+            ),
+          onTraceEvent: (event, context) =>
+            this.captureTraceEvent(pending, event, context),
+          onEnvironment: (environment) => {
+            pending.environment =
+              recordedBrowserEnvironmentSchema.parse(environment);
+          },
         },
       );
-      this.active = { ...pending, browser, releaseOwnership };
+      const maximumDurationTimer = setTimeout(
+        () => {
+          if (this.active?.sessionId === created.id) {
+            void this.stop(created.id).catch(() => undefined);
+          }
+        },
+        30 * 60 * 1_000,
+      );
+      maximumDurationTimer.unref();
+      this.active = {
+        ...pending,
+        browser,
+        releaseOwnership,
+        maximumDurationTimer,
+      };
       return this.repository.updateRecordingSession({
         id: created.id,
         status: 'recording',
       });
     } catch (error: unknown) {
       releaseOwnership();
+      this.traceStore.removeRecording(created.id);
       return this.repository.updateRecordingSession({
         id: created.id,
         status: 'runner_error',
@@ -153,6 +227,7 @@ export class RecordingManager {
       status: 'stopping',
     });
     this.active = null;
+    clearTimeout(active.maximumDurationTimer);
     let cleanupError: unknown;
     try {
       await active.browser.close();
@@ -162,6 +237,32 @@ export class RecordingManager {
       active.releaseOwnership();
     }
     const completedAt = new Date().toISOString();
+    let traceStatus: 'complete' | 'truncated' | 'corrupt';
+    let traceSummary: TraceSummary | null = null;
+    if (cleanupError === undefined) {
+      try {
+        const videos = this.traceStore.describeVideos(
+          active.browser.recordedVideoPaths?.() ?? [],
+        );
+        const manifest = this.traceManifest(active, videos);
+        this.traceStore.persist(sessionId, manifest, active.traceEvents);
+        traceStatus = manifest.truncated ? 'truncated' : 'complete';
+        traceSummary = traceSummarySchema.parse({
+          interactionCount: manifest.interactions.length,
+          eventCount: manifest.eventCount,
+          pageCount: manifest.pageCount,
+          frameCount: manifest.frameCount,
+          videoCaptured: manifest.videoCaptured,
+          truncated: manifest.truncated,
+        });
+      } catch {
+        traceStatus = 'corrupt';
+        this.traceStore.removeRecording(sessionId);
+      }
+    } else {
+      traceStatus = 'corrupt';
+      this.traceStore.removeRecording(sessionId);
+    }
     return this.repository.updateRecordingSession({
       id: sessionId,
       status: cleanupError === undefined ? 'completed' : 'runner_error',
@@ -172,6 +273,8 @@ export class RecordingManager {
           ? null
           : 'Chromium cleanup did not complete successfully.',
       completedAt,
+      traceStatus,
+      traceSummary,
     });
   }
 
@@ -224,16 +327,8 @@ export class RecordingManager {
     pending: PendingRecording,
     input: unknown,
     topFrame: boolean,
+    context?: RecordingEventContext,
   ): void {
-    if (!topFrame) {
-      this.addWarning(pending, {
-        code: 'iframe',
-        message: 'Iframe interactions are unsupported and were not recorded.',
-        timestamp: Date.now(),
-        url: this.projectUrl(pending.projectId),
-      });
-      return;
-    }
     const parsed = rawEventSchema.safeParse(input);
     if (!parsed.success) return;
     if (parsed.data.kind === 'navigate') {
@@ -242,10 +337,31 @@ export class RecordingManager {
         parsed.data.url,
         parsed.data.timestamp,
         this.projectUrl(pending.projectId),
+        context,
       );
       return;
     }
     const event: RawRecordingEvent = parsed.data;
+    if (context !== undefined) {
+      pending.pageIds.add(context.pageId);
+      pending.framePaths.add(
+        `${context.pageId}:${context.framePath.join('/')}`,
+      );
+    }
+    if (
+      !topFrame &&
+      new URL(event.url).origin !==
+        new URL(this.projectUrl(pending.projectId)).origin
+    ) {
+      this.addWarning(pending, {
+        code: 'iframe',
+        message:
+          'Cross-origin iframe interaction was not recorded because the frame origin is not allowlisted.',
+        timestamp: event.timestamp,
+        url: this.projectUrl(pending.projectId),
+      });
+      return;
+    }
     const value = event.sensitive
       ? {
           kind: 'sensitive' as const,
@@ -275,9 +391,19 @@ export class RecordingManager {
       JSON.stringify(previous.locator) === JSON.stringify(step.locator)
     ) {
       pending.steps[pending.steps.length - 1] = { ...step, id: previous.id };
+      pending.interactions[pending.interactions.length - 1] =
+        this.interactionFor(
+          { ...step, id: previous.id },
+          event,
+          pending.interactions.length,
+          context,
+        );
       return;
     }
     pending.steps.push(step);
+    pending.interactions.push(
+      this.interactionFor(step, event, pending.interactions.length, context),
+    );
   }
 
   private captureNavigation(
@@ -285,6 +411,7 @@ export class RecordingManager {
     url: string,
     timestamp: number,
     fallbackUrl: string,
+    context?: RecordingEventContext,
   ): void {
     const parsedUrl = controlledTargetUrlSchema.safeParse(url);
     if (!parsedUrl.success) return;
@@ -321,7 +448,35 @@ export class RecordingManager {
       value: null,
       sensitive: false,
     });
-    if (parsedStep.success) pending.steps.push(parsedStep.data);
+    if (parsedStep.success) {
+      pending.steps.push(parsedStep.data);
+      if (context !== undefined) {
+        pending.pageIds.add(context.pageId);
+        pending.framePaths.add(
+          `${context.pageId}:${context.framePath.join('/')}`,
+        );
+      }
+      pending.interactions.push(
+        recordedInteractionSchema.parse({
+          id: randomUUID(),
+          stepId: parsedStep.data.id,
+          sequence: pending.interactions.length + 1,
+          pageId: context?.pageId ?? 'page-1',
+          framePath: context?.framePath ?? [],
+          startedAt: timestamp,
+          durationMs: 0,
+          intent: 'navigate',
+          pointerType: null,
+          targetCandidates: [],
+          fingerprint: null,
+          geometry: null,
+          postconditions: [
+            { kind: 'url', value: parsedUrl.data, target: null },
+          ],
+          retrySafety: 'side_effect_possible',
+        }),
+      );
+    }
   }
 
   private captureWarning(
@@ -359,6 +514,86 @@ export class RecordingManager {
     return (
       this.repository.getProject(projectId)?.targetUrl ?? 'http://localhost/'
     );
+  }
+
+  private captureTraceEvent(
+    pending: PendingRecording,
+    input: unknown,
+    context: RecordingEventContext,
+  ): void {
+    if (pending.traceEvents.length >= 100_000) return;
+    const event = input as RawTraceEvent;
+    if (
+      typeof event !== 'object' ||
+      event === null ||
+      typeof event.kind !== 'string' ||
+      typeof event.timestamp !== 'number'
+    ) {
+      return;
+    }
+    pending.pageIds.add(context.pageId);
+    pending.framePaths.add(`${context.pageId}:${context.framePath.join('/')}`);
+    pending.traceEvents.push({ ...event, ...context });
+  }
+
+  private interactionFor(
+    step: RecordedJourneyStep,
+    event: RawRecordingEvent,
+    index: number,
+    context?: RecordingEventContext,
+  ): RecordedInteraction {
+    return recordedInteractionSchema.parse({
+      id: randomUUID(),
+      stepId: step.id,
+      sequence: index + 1,
+      pageId: context?.pageId ?? 'page-1',
+      framePath: context?.framePath ?? [],
+      startedAt: event.timestamp,
+      durationMs: 0,
+      intent: event.kind,
+      pointerType: event.pointerType,
+      targetCandidates:
+        event.targetCandidates.length === 0
+          ? [{ locator: event.locator, source: 'structure', confidence: 0.5 }]
+          : event.targetCandidates,
+      fingerprint: event.fingerprint,
+      geometry: event.geometry,
+      postconditions: event.postconditions,
+      retrySafety: ['click', 'submit'].includes(event.kind)
+        ? 'side_effect_possible'
+        : 'safe',
+    });
+  }
+
+  private traceManifest(
+    recording: ActiveRecording,
+    videos: readonly RecordedVideoArtifact[],
+  ): HybridTraceManifest {
+    const environment =
+      recording.environment ??
+      recordedBrowserEnvironmentSchema.parse({
+        viewportWidth: 1440,
+        viewportHeight: 900,
+        deviceScaleFactor: 1,
+        locale: 'en-US',
+        timezoneId: 'UTC',
+        userAgent: 'FormCrash controlled Chromium',
+        colorScheme: 'light',
+        browserName: 'chromium',
+        browserVersion: 'unknown',
+      });
+    return hybridTraceManifestSchema.parse({
+      formatVersion: 2,
+      environment,
+      interactions: recording.interactions,
+      eventCount: recording.traceEvents.length,
+      pageCount: Math.max(recording.pageIds.size, 1),
+      frameCount: Math.max(recording.framePaths.size, 1),
+      redactionVersion: 1,
+      videoCaptured: videos.length > 0,
+      videos,
+      truncated: recording.traceEvents.length >= 100_000,
+    });
   }
 }
 

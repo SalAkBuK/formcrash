@@ -92,6 +92,26 @@ describe('SampleRunDashboard', () => {
     ).toHaveAttribute('href', '/runs/run-failed');
   });
 
+  it('presents persisted runs as outcome-first evidence rows', async () => {
+    mocks.getRecentRuns.mockResolvedValue({
+      items: [buildRunSummary('failed'), buildRunSummary('passed')],
+      limit: 12,
+      offset: 0,
+    });
+
+    render(<SampleRunDashboard />);
+
+    expect(await screen.findByRole('table')).toHaveAccessibleName(
+      'Most recent persisted bundled sample runs',
+    );
+    expect(screen.getByText('2 orders created')).toBeVisible();
+    expect(screen.getByText('Expected no more than one order')).toBeVisible();
+    expect(screen.getByText('No duplicate order was observed')).toBeVisible();
+    expect(
+      screen.getByRole('link', { name: /Fixed mode.*run-passed/ }),
+    ).toHaveAttribute('href', '/runs/run-passed');
+  });
+
   it('renders a recoverable history error and keeps sample execution available', async () => {
     mocks.getRecentRuns.mockRejectedValue(
       new Error('History endpoint failed.'),

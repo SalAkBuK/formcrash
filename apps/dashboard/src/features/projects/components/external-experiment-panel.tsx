@@ -25,6 +25,7 @@ import type {
   ProjectExecutionSettingsInput,
   RankedRequestCandidate,
   RequestDiscoveryResult,
+  ReplayPacing,
   RuntimeVariableDeclarationInput,
 } from '@formcrash/contracts';
 
@@ -101,6 +102,7 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
   const [experimentName, setExperimentName] = useState('Impatient submit');
   const [triggerCount, setTriggerCount] = useState<2 | 3>(2);
   const [intervalMs, setIntervalMs] = useState<0 | 100 | 300>(0);
+  const [replayPacing, setReplayPacing] = useState<ReplayPacing>('recorded');
   const [continueAfterTarget, setContinueAfterTarget] = useState(false);
   const [discovery, setDiscovery] = useState<RequestDiscoveryResult | null>(
     null,
@@ -420,6 +422,8 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
         version.id,
         runtimeValues,
         project.environment !== 'production' || productionConfirmed,
+        'adaptive',
+        replayPacing,
       );
       setResult(completed);
       setRunHistory((await listExternalRuns(project.id)).items);
@@ -490,9 +494,17 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
       .catch((reason: unknown) => setError(messageOf(reason)));
   }
 
+  function handleGuidedAuthenticationRecaptured(
+    refreshed: ProjectExecutionSettings,
+  ): void {
+    setSettingsState(refreshed);
+    setSettings(toSettingsInput(refreshed));
+  }
+
   return (
     <section
       className="external-workbench"
+      id="experiment-workspace"
       aria-label="External experiment configuration"
     >
       <div className="panel test-mode-switcher">
@@ -547,6 +559,7 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
         <>
           <GuidedTestPanel
             journeys={journeys}
+            onAuthenticationRecaptured={handleGuidedAuthenticationRecaptured}
             onCompleted={handleGuidedCompleted}
             onOpenAdvanced={() => setWorkspaceMode('advanced')}
             project={project}
@@ -862,6 +875,19 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
                     <option value={0}>0 ms</option>
                     <option value={100}>100 ms</option>
                     <option value={300}>300 ms</option>
+                  </select>
+                </label>
+                <label>
+                  Journey pacing
+                  <select
+                    value={replayPacing}
+                    onChange={(event) =>
+                      setReplayPacing(event.target.value as ReplayPacing)
+                    }
+                  >
+                    <option value="recorded">Recorded human pauses</option>
+                    <option value="deliberate">1 second per normal step</option>
+                    <option value="fast">No added pauses</option>
                   </select>
                 </label>
                 <label className="inline-check continue-check">

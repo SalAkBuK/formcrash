@@ -3,20 +3,29 @@ import { randomUUID } from 'node:crypto';
 import {
   replayResultSchema,
   type EphemeralRuntimeValues,
+  type ReplayInteractionOutcome,
+  type ReplayMode,
+  type ReplayPacing,
   type ReplayResult,
 } from '@formcrash/contracts';
 
 import type { ServerConfig } from '../../app/config.js';
+import { JourneyTraceStore } from '../../artifacts/journey-trace-store.js';
 import type { ProjectJourneyRepository } from '../../persistence/project-journey-repository.js';
 import type { ProjectSettingsRepository } from '../../persistence/project-settings-repository.js';
 import { RunEventLog } from '../engine/event-log.js';
 import type { AuthStateStore } from '../external/auth-session.js';
 import {
-  assertSavedAuthenticationActive,
+  authenticationInterruptedBeforeStep,
+  assertNoVisibleAuthenticationRequirement,
+  assertSavedAuthenticationSessionActive,
   SavedAuthenticationExpiredError,
 } from '../external/authentication-redirect.js';
 import { executeHttpHook } from '../external/http-hooks.js';
-import { executeRecordedStep } from '../external/journey-actions.js';
+import {
+  executeRecordedStep,
+  HybridReplayError,
+} from '../external/journey-actions.js';
 import {
   isStepValueSensitive,
   redactSensitiveText,
@@ -32,9 +41,11 @@ import {
   type ExternalBrowserOwner,
   type ReplayBrowserSession,
 } from './external-browser.js';
+import { paceReplayStep } from './replay-pacing.js';
 
 export class JourneyReplayService {
   private readonly browserOwner: ExternalBrowserOwner;
+  private readonly traceStore: JourneyTraceStore;
 
   constructor(
     private readonly config: ServerConfig,
@@ -45,12 +56,15 @@ export class JourneyReplayService {
     private readonly authStore?: AuthStateStore,
   ) {
     this.browserOwner = browserOwner ?? new PlaywrightExternalBrowserOwner();
+    this.traceStore = new JourneyTraceStore(config.artifactRoot, repository);
   }
 
   async replay(
     journeyId: string,
     ephemeral: EphemeralRuntimeValues = {},
     confirmProduction = false,
+    mode: ReplayMode = 'adaptive',
+    pacing: ReplayPacing = 'recorded',
   ): Promise<ReplayResult> {
     const journey = this.repository.getJourney(journeyId);
     if (journey === null) throw new Error('Journey was not found.');
@@ -75,11 +89,21 @@ export class JourneyReplayService {
       hooks: [storedSettings.beforeRunHook, storedSettings.afterRunHook],
     });
     const storageStatePath = this.authStore?.usablePath(project.id) ?? null;
+    const traceRecord = this.repository.getRecordingTraceByJourney(journey.id);
+    if (traceRecord !== null) this.traceStore.assertIntegrity(traceRecord);
+    const trace = this.repository.getJourneyTraceManifest(journey.id);
+    const interactions = new Map(
+      (trace?.interactions ?? []).map((interaction) => [
+        interaction.stepId,
+        interaction,
+      ]),
+    );
     const release = this.ownership.acquire('replay');
     const startedAt = new Date().toISOString();
     const events = new RunEventLog(`replay-${replayId}`);
     let session: ReplayBrowserSession | null = null;
     let result: ReplayResult | null = null;
+    const interactionOutcomes: ReplayInteractionOutcome[] = [];
     try {
       if (storedSettings.beforeRunHook !== null) {
         await executeHttpHook(
@@ -96,21 +120,49 @@ export class JourneyReplayService {
         targetUrl: project.targetUrl,
         headless: this.config.browserHeadless,
         timeoutMs: this.config.browserTimeoutMs,
+        ...(trace === null ? {} : { environment: trace.environment }),
         ...(storageStatePath === null ? {} : { storageStatePath }),
       });
       await session.navigate(project.targetUrl);
       if (storageStatePath !== null) {
-        assertSavedAuthenticationActive(
+        await assertSavedAuthenticationSessionActive(
           project.targetUrl,
-          session.currentUrl(),
+          session,
         );
       }
       for (const [index, step] of journey.steps.entries()) {
+        const interaction = interactions.get(step.id);
+        const previousStep = journey.steps[index - 1];
+        const previousInteraction =
+          previousStep === undefined
+            ? undefined
+            : interactions.get(previousStep.id);
         try {
-          await executeRecordedStep(session, step, (item) =>
-            resolveStepValue(item, runtime),
+          await paceReplayStep({
+            session,
+            pacing,
+            step,
+            ...(interaction === undefined ? {} : { interaction }),
+            ...(previousStep === undefined ? {} : { previousStep }),
+            ...(previousInteraction === undefined
+              ? {}
+              : { previousInteraction }),
+          });
+          interactionOutcomes.push(
+            await executeRecordedStep(
+              session,
+              step,
+              (item) => resolveStepValue(item, runtime),
+              {
+                ...(interaction === undefined ? {} : { interaction }),
+                mode,
+              },
+            ),
           );
         } catch (error: unknown) {
+          if (error instanceof SavedAuthenticationExpiredError) {
+            throw authenticationInterruptedBeforeStep(index + 1, step.name);
+          }
           result = replayResultSchema.parse({
             replayId,
             journeyId,
@@ -128,13 +180,28 @@ export class JourneyReplayService {
               ),
               currentUrl: safeCurrentUrl(session, runtime),
               locator: step.locator,
+              ...(error instanceof HybridReplayError
+                ? {
+                    pageId: error.pageId,
+                    framePath: error.framePath,
+                    resolutionAttempts: error.resolutionAttempts,
+                    confidence: error.confidence,
+                    expectedState: error.expectedState,
+                    observedState: error.observedState,
+                    sideEffectObserved: error.sideEffectObserved,
+                  }
+                : {}),
             },
             startedAt,
             completedAt: new Date().toISOString(),
+            mode,
+            pacing,
+            interactionOutcomes,
           });
           break;
         }
       }
+      await assertNoVisibleAuthenticationRequirement(session);
       result ??= replayResultSchema.parse({
         replayId,
         journeyId,
@@ -142,6 +209,9 @@ export class JourneyReplayService {
         failedStep: null,
         startedAt,
         completedAt: new Date().toISOString(),
+        mode,
+        pacing,
+        interactionOutcomes,
       });
     } catch (error: unknown) {
       if (error instanceof SavedAuthenticationExpiredError) throw error;
@@ -152,6 +222,9 @@ export class JourneyReplayService {
         failedStep: null,
         startedAt,
         completedAt: new Date().toISOString(),
+        mode,
+        pacing,
+        interactionOutcomes,
       });
     } finally {
       if (session !== null) {
@@ -165,6 +238,9 @@ export class JourneyReplayService {
             failedStep: result?.failedStep ?? null,
             startedAt,
             completedAt: new Date().toISOString(),
+            mode,
+            pacing,
+            interactionOutcomes,
           });
         }
       }

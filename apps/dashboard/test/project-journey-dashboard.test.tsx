@@ -162,6 +162,34 @@ beforeEach(() => {
 });
 
 describe('external project journey workflow', () => {
+  it('summarizes the selected project from persisted project state', async () => {
+    mocks.listJourneys.mockResolvedValue([journey]);
+    mocks.getProjectSettings.mockResolvedValue({
+      projectId: project.id,
+      variables: [],
+      beforeRunHook: null,
+      afterRunHook: null,
+      authentication: {
+        configured: true,
+        available: true,
+        capturedAt: '2026-07-16T00:06:00.000Z',
+        missingReason: null,
+      },
+      updatedAt: '2026-07-16T00:06:00.000Z',
+    });
+
+    render(<ProjectJourneyDashboard />);
+
+    expect(
+      await screen.findByRole('heading', { name: 'Project overview' }),
+    ).toBeVisible();
+    expect(await screen.findByText('1 journey')).toBeVisible();
+    expect(screen.getByText('Saved state available')).toBeVisible();
+    expect(
+      screen.getByRole('link', { name: 'Record a journey' }),
+    ).toHaveAttribute('href', '#recording-workspace');
+  });
+
   it('selects and bulk deletes multiple projects', async () => {
     const user = userEvent.setup();
     const sample = {
@@ -296,7 +324,13 @@ describe('external project journey workflow', () => {
       'Profile journey',
       [step],
     );
-    expect(mocks.replayJourney).toHaveBeenCalledWith(journey.id, {}, true);
+    expect(mocks.replayJourney).toHaveBeenCalledWith(
+      journey.id,
+      {},
+      true,
+      'adaptive',
+      'recorded',
+    );
   });
 
   it('shows the controlled-environment warning and explicit unsupported list', async () => {
@@ -321,7 +355,12 @@ describe('external project journey workflow', () => {
     render(<ProjectJourneyDashboard />);
 
     await user.click(await screen.findByRole('button', { name: 'Replay' }));
-    expect(await screen.findByText('Saved session expired')).toBeVisible();
+    expect(await screen.findByText('Authentication interrupted')).toBeVisible();
+    expect(
+      screen.getByText(
+        'The saved authentication session appears to have expired.',
+      ),
+    ).toBeVisible();
 
     await user.click(screen.getByRole('button', { name: 'Sign in again' }));
     expect(mocks.startAuthenticationCapture).toHaveBeenCalledWith(project.id);

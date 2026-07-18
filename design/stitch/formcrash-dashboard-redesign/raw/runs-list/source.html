@@ -1,0 +1,464 @@
+<!DOCTYPE html><html class="dark" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>FormCrash | Runs Workbench</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;650;700&amp;family=JetBrains+Mono:wght@400&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&amp;display=swap" rel="stylesheet">
+<style>
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #293647;
+      border-radius: 10px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #3A4A60;
+    }
+    /* Subtle row pulse for "live" runs */
+    @keyframes pulse-subtle {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+    .animate-pulse-subtle {
+      animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+  </style>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "surface-container-high": "#1d2b3a",
+            "error-container": "#93000a",
+            "primary-pressed": "#E99A31",
+            "tertiary-fixed-dim": "#6dd2fe",
+            "text-secondary": "#AAB5C4",
+            "inverse-on-surface": "#243240",
+            "on-primary-fixed-variant": "#663e00",
+            "on-background": "#d5e4f7",
+            "on-secondary-fixed-variant": "#00497a",
+            "on-tertiary": "#003546",
+            "on-tertiary-fixed": "#001f2a",
+            "tertiary": "#b5e6ff",
+            "tertiary-fixed": "#bee9ff",
+            "surface-container-lowest": "#020f1d",
+            "fail-bg": "#2B151A",
+            "surface-subtle": "#131A24",
+            "outcome-evidence": "#FFB454",
+            "warn-bg": "#2A2412",
+            "primary-fixed": "#ffddb9",
+            "primary-fixed-dim": "#ffb961",
+            "on-secondary-fixed": "#001d35",
+            "secondary-fixed-dim": "#9bcaff",
+            "warn-border": "#6A5726",
+            "surface-container-highest": "#283645",
+            "on-primary-fixed": "#2b1700",
+            "on-error": "#690005",
+            "border": "#293647",
+            "secondary": "#9bcaff",
+            "on-surface": "#d5e4f7",
+            "primary-hover": "#FFC477",
+            "text-primary": "#F4F7FB",
+            "on-error-container": "#ffdad6",
+            "primary": "#ffd8af",
+            "surface-raised": "#18212D",
+            "primary-container": "#ffb454",
+            "success": "#58D6A3",
+            "inverse-primary": "#865300",
+            "surface-container-low": "#0f1d2b",
+            "on-surface-variant": "#d6c3b1",
+            "text-muted": "#738195",
+            "on-primary": "#23180A",
+            "on-tertiary-fixed-variant": "#004d64",
+            "pass-bg": "#10271F",
+            "border-strong": "#3A4A60",
+            "surface-container": "#13212f",
+            "tertiary-container": "#69cffa",
+            "browser-evidence": "#6CB6FF",
+            "surface-bright": "#2d3a4a",
+            "inverse-surface": "#d5e4f7",
+            "surface": "#0F141C",
+            "warning": "#F4C95D",
+            "request-evidence": "#B78CFF",
+            "info": "#6CB6FF",
+            "fail-border": "#74313A",
+            "surface-variant": "#283645",
+            "surface-dim": "#061422",
+            "focus": "#73B7FF",
+            "secondary-fixed": "#d0e4ff",
+            "on-primary-container": "#734600",
+            "on-secondary": "#003256",
+            "danger": "#FF6B78",
+            "background": "#0A0D12",
+            "on-tertiary-container": "#005771",
+            "danger-strong": "#FF4858",
+            "outline": "#9f8e7d",
+            "neutral": "#8A98AA",
+            "outline-variant": "#524436",
+            "secondary-container": "#006cb0",
+            "surface-high": "#1E2937",
+            "error": "#ffb4ab",
+            "surface-tint": "#ffb961",
+            "info-bg": "#102338",
+            "info-border": "#28557D",
+            "pass-border": "#285F4C",
+            "on-secondary-container": "#dae9ff"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.25rem",
+            "lg": "0.5rem",
+            "xl": "0.75rem",
+            "full": "9999px"
+          },
+          "spacing": {
+            "md": "16px",
+            "page-inline": "32px",
+            "sm": "8px",
+            "content-max": "1440px",
+            "page-block": "28px",
+            "xl": "32px",
+            "xxl": "48px",
+            "unit": "8px",
+            "xs": "4px",
+            "lg": "24px"
+          },
+          "fontFamily": {
+            "code": ["JetBrains Mono"],
+            "label-sm": ["Inter"],
+            "label-md": ["Inter"],
+            "display": ["Inter"],
+            "headline-lg": ["Inter"],
+            "body-md": ["Inter"],
+            "headline-md": ["Inter"],
+            "headline-sm": ["Inter"],
+            "body-lg": ["Inter"],
+            "body-sm": ["Inter"]
+          },
+          "fontSize": {
+            "code": ["12.5px", {"lineHeight": "19px", "fontWeight": "400"}],
+            "label-sm": ["11px", {"lineHeight": "14px", "letterSpacing": "0.06em", "fontWeight": "700"}],
+            "label-md": ["12px", {"lineHeight": "16px", "letterSpacing": "0.025em", "fontWeight": "650"}],
+            "display": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.03em", "fontWeight": "700"}],
+            "headline-lg": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+            "body-md": ["14px", {"lineHeight": "21px", "fontWeight": "400"}],
+            "headline-md": ["20px", {"lineHeight": "28px", "letterSpacing": "-0.015em", "fontWeight": "650"}],
+            "headline-sm": ["17px", {"lineHeight": "24px", "letterSpacing": "-0.01em", "fontWeight": "650"}],
+            "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+            "body-sm": ["13px", {"lineHeight": "19px", "fontWeight": "400"}]
+          }
+        }
+      }
+    };
+  </script>
+</head>
+<body class="bg-background text-on-background font-body-md selection:bg-primary selection:text-on-primary antialiased">
+<!-- Side Navigation Bar -->
+<aside class="h-screen w-64 fixed left-0 top-0 border-r border-border bg-surface flex flex-col py-page-block px-md z-30">
+<div class="flex items-center gap-3 mb-10 px-xs">
+<div class="w-8 h-8 rounded bg-primary-container flex items-center justify-center">
+<span class="material-symbols-outlined text-on-primary-container" style="font-variation-settings: 'FILL' 1;">biotech</span>
+</div>
+<div>
+<h1 class="font-headline-md text-headline-md font-bold text-primary">FormCrash</h1>
+<p class="font-label-sm text-label-sm text-text-muted uppercase tracking-wider">Reliability Workbench</p>
+</div>
+</div>
+<nav class="flex-1 space-y-1">
+<a class="group flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary hover:bg-surface-subtle transition-colors duration-200 cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined group-hover:text-primary transition-colors">dashboard</span>
+<span class="font-label-md text-label-md">Overview</span>
+</a>
+<a class="group flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary hover:bg-surface-subtle transition-colors duration-200 cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined group-hover:text-primary transition-colors">conversion_path</span>
+<span class="font-label-md text-label-md">Journeys</span>
+</a>
+<a class="group flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary hover:bg-surface-subtle transition-colors duration-200 cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined group-hover:text-primary transition-colors">biotech</span>
+<span class="font-label-md text-label-md">Tests</span>
+</a>
+<!-- ACTIVE TAB: Runs -->
+<a class="flex items-center gap-3 px-3 py-2 rounded-lg bg-surface-container-high text-primary border-l-2 border-primary cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">history</span>
+<span class="font-label-md text-label-md">Runs</span>
+</a>
+<a class="group flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary hover:bg-surface-subtle transition-colors duration-200 cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined group-hover:text-primary transition-colors">database</span>
+<span class="font-label-md text-label-md">Test Data</span>
+</a>
+<a class="group flex items-center gap-3 px-3 py-2 rounded-lg text-text-secondary hover:bg-surface-subtle transition-colors duration-200 cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined group-hover:text-primary transition-colors">settings</span>
+<span class="font-label-md text-label-md">Settings</span>
+</a>
+</nav>
+<div class="mt-auto border-t border-border pt-4">
+<button class="flex items-center justify-between w-full px-3 py-2 rounded-lg text-text-secondary hover:bg-surface-subtle transition-colors duration-200 cursor-pointer">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined">swap_horiz</span>
+<span class="font-label-md text-label-md">Project Switcher</span>
+</div>
+<span class="material-symbols-outlined text-[18px]">expand_more</span>
+</button>
+</div>
+</aside>
+<!-- Top App Bar -->
+<header class="fixed top-0 right-0 w-[calc(100%-16rem)] h-14 border-b border-border bg-surface-dim flex items-center justify-between px-page-inline z-20">
+<div class="flex items-center gap-4">
+<h2 class="font-headline-sm text-headline-sm font-bold text-text-primary">Runs</h2>
+<div class="h-4 w-[1px] bg-border mx-2"></div>
+<nav class="flex gap-4">
+<a class="text-primary font-bold transition-all duration-200 font-body-sm text-body-sm" href="#">All Runs</a>
+<a class="text-text-muted hover:text-primary-hover transition-all duration-200 font-body-sm text-body-sm" href="#">Scheduled</a>
+<a class="text-text-muted hover:text-primary-hover transition-all duration-200 font-body-sm text-body-sm" href="#">Archived</a>
+</nav>
+</div>
+<div class="flex items-center gap-6">
+<div class="relative group">
+<span class="absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-text-muted text-[18px]">search</span>
+<input class="bg-surface-container-low border border-border rounded-md pl-10 pr-4 py-1.5 text-body-sm focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary w-64 transition-all" placeholder="Search workbench..." type="text">
+</div>
+<div class="flex items-center gap-4">
+<button class="text-text-muted hover:text-primary transition-all">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="text-text-muted hover:text-primary transition-all">
+<span class="material-symbols-outlined">help_outline</span>
+</button>
+<div class="w-8 h-8 rounded-full overflow-hidden border border-border">
+<img class="w-full h-full object-cover" data-alt="A professional user profile avatar in a minimalist dark-themed interface. The user is a developer in a high-tech lab setting with soft cyan ambient light. The style is clean, sharp, and corporate modern, consistent with a technical reliability engineering tool's visual identity." src="https://lh3.googleusercontent.com/aida-public/AB6AXuC0G_C4WBSz0GsTbI-N6ZJuv_dJEeNzJ0-qcOw6vLHM2vPNbGjkAiapen5C9UDbCDh8e7cMRe3l6_8yQCDYLVTjW4yzcSVcHbPOSdRf-lTah7w2f7cLBk3X9gJJAkFFfDG9k5LVGSE4YAAMHkh2DGE_bh4UU40gVZun_8ET1yrF8KvdSJcM0KUkhZL-5N0enODmMu70jflU4qTzjLFrQezgnqAszlL8EFHZVnSQwmjf5AOkueUsBnb4ZxeN54vwy5xbs1v0He498-g">
+</div>
+</div>
+</div>
+</header>
+<!-- Main Canvas -->
+<main class="ml-64 mt-14 p-page-inline max-w-content-max mx-auto">
+<!-- Filter Section -->
+<section class="mb-lg">
+<div class="flex flex-col gap-4">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="font-label-md text-label-md text-text-muted uppercase tracking-wider mr-2">Status:</span>
+<div class="flex flex-wrap gap-2">
+<button class="px-3 py-1 rounded-full border border-fail-border bg-fail-bg text-danger font-label-md text-label-md hover:brightness-125 transition-all">Vulnerability</button>
+<button class="px-3 py-1 rounded-full border border-pass-border bg-pass-bg text-success font-label-md text-label-md hover:brightness-125 transition-all">Protected</button>
+<button class="px-3 py-1 rounded-full border border-border bg-surface-raised text-text-secondary font-label-md text-label-md hover:border-primary transition-all">Unverified</button>
+<button class="px-3 py-1 rounded-full border border-warn-border bg-warn-bg text-warning font-label-md text-label-md hover:brightness-125 transition-all">Warning</button>
+</div>
+</div>
+<button class="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary rounded-md font-label-md text-label-md hover:bg-primary-hover active:scale-95 transition-all">
+<span class="material-symbols-outlined text-[18px]">play_arrow</span>
+            Trigger Run
+          </button>
+</div>
+<div class="flex items-center gap-2">
+<span class="font-label-md text-label-md text-text-muted uppercase tracking-wider mr-2">Environment:</span>
+<div class="flex gap-2">
+<button class="px-3 py-1 rounded border border-primary-container bg-primary-container/10 text-primary font-label-md text-label-md">Production</button>
+<button class="px-3 py-1 rounded border border-border bg-surface-raised text-text-muted font-label-md text-label-md hover:border-primary transition-all">Staging</button>
+<button class="px-3 py-1 rounded border border-border bg-surface-raised text-text-muted font-label-md text-label-md hover:border-primary transition-all">Dev-Labs</button>
+</div>
+</div>
+</div>
+</section>
+<!-- Table Canvas -->
+<div class="bg-surface rounded-lg border border-border overflow-hidden shadow-sm">
+<div class="overflow-x-auto custom-scrollbar">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low/50 border-b border-border">
+<th class="px-6 py-4 font-label-md text-label-md text-text-muted uppercase tracking-wider">Result</th>
+<th class="px-6 py-4 font-label-md text-label-md text-text-muted uppercase tracking-wider">Test</th>
+<th class="px-6 py-4 font-label-md text-label-md text-text-muted uppercase tracking-wider">Journey</th>
+<th class="px-6 py-4 font-label-md text-label-md text-text-muted uppercase tracking-wider">Environment</th>
+<th class="px-6 py-4 font-label-md text-label-md text-text-muted uppercase tracking-wider">Requests</th>
+<th class="px-6 py-4 font-label-md text-label-md text-text-muted uppercase tracking-wider">Visible Outcome</th>
+<th class="px-6 py-4 font-label-md text-label-md text-text-muted uppercase tracking-wider">Duration</th>
+<th class="px-6 py-4 font-label-md text-label-md text-text-muted uppercase tracking-wider">Started</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-border">
+<!-- Row 1: Fail -->
+<tr class="hover:bg-surface-subtle transition-colors group cursor-pointer">
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-danger shadow-[0_0_8px_rgba(255,107,120,0.6)] animate-pulse-subtle"></div>
+<span class="font-label-md text-label-md text-danger uppercase">Vulnerability</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex flex-col">
+<span class="text-text-primary font-bold font-body-sm">CORS_BYPASS_ATTEMPT_04</span>
+<span class="text-text-muted text-[11px] font-code">#R-8829-X</span>
+</div>
+</td>
+<td class="px-6 py-4 text-text-secondary font-body-sm">User Authentication Flow</td>
+<td class="px-6 py-4">
+<span class="px-2 py-0.5 rounded bg-surface-container-high border border-border-strong text-text-primary font-code text-[11px]">PRODUCTION</span>
+</td>
+<td class="px-6 py-4 font-code text-code text-info">1,204</td>
+<td class="px-6 py-4">
+<span class="text-error font-body-sm">403 Bypass Detected</span>
+</td>
+<td class="px-6 py-4 font-code text-code text-text-muted">4m 12s</td>
+<td class="px-6 py-4 text-text-muted font-body-sm">2 min ago</td>
+</tr>
+<!-- Row 2: Pass -->
+<tr class="hover:bg-surface-subtle transition-colors group cursor-pointer">
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-success"></div>
+<span class="font-label-md text-label-md text-success uppercase">Protected</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex flex-col">
+<span class="text-text-primary font-bold font-body-sm">SQL_INJECTION_STRESS_T3</span>
+<span class="text-text-muted text-[11px] font-code">#R-8828-A</span>
+</div>
+</td>
+<td class="px-6 py-4 text-text-secondary font-body-sm">Payment Gateway Proxy</td>
+<td class="px-6 py-4">
+<span class="px-2 py-0.5 rounded bg-surface-container-high border border-border-strong text-text-primary font-code text-[11px]">STAGING</span>
+</td>
+<td class="px-6 py-4 font-code text-code text-info">856</td>
+<td class="px-6 py-4">
+<span class="text-success font-body-sm">WAF Block Confirmed</span>
+</td>
+<td class="px-6 py-4 font-code text-code text-text-muted">1m 45s</td>
+<td class="px-6 py-4 text-text-muted font-body-sm">15 min ago</td>
+</tr>
+<!-- Row 3: Unverified -->
+<tr class="hover:bg-surface-subtle transition-colors group cursor-pointer">
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-neutral"></div>
+<span class="font-label-md text-label-md text-text-muted uppercase">Unverified</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex flex-col">
+<span class="text-text-primary font-bold font-body-sm">OAUTH_REDIRECT_VALIDATION</span>
+<span class="text-text-muted text-[11px] font-code">#R-8827-C</span>
+</div>
+</td>
+<td class="px-6 py-4 text-text-secondary font-body-sm">Social SSO Connect</td>
+<td class="px-6 py-4">
+<span class="px-2 py-0.5 rounded bg-surface-container-high border border-border-strong text-text-primary font-code text-[11px]">PRODUCTION</span>
+</td>
+<td class="px-6 py-4 font-code text-code text-info">312</td>
+<td class="px-6 py-4">
+<span class="text-text-muted italic font-body-sm">Inconclusive logs</span>
+</td>
+<td class="px-6 py-4 font-code text-code text-text-muted">32s</td>
+<td class="px-6 py-4 text-text-muted font-body-sm">1 hour ago</td>
+</tr>
+<!-- Row 4: Warn -->
+<tr class="hover:bg-surface-subtle transition-colors group cursor-pointer">
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-warning"></div>
+<span class="font-label-md text-label-md text-warning uppercase">Warning</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex flex-col">
+<span class="text-text-primary font-bold font-body-sm">RATE_LIMIT_EXHAUSTION_V2</span>
+<span class="text-text-muted text-[11px] font-code">#R-8826-K</span>
+</div>
+</td>
+<td class="px-6 py-4 text-text-secondary font-body-sm">API Public Endpoint</td>
+<td class="px-6 py-4">
+<span class="px-2 py-0.5 rounded bg-surface-container-high border border-border-strong text-text-primary font-code text-[11px]">DEV-LABS</span>
+</td>
+<td class="px-6 py-4 font-code text-code text-info">15,000</td>
+<td class="px-6 py-4">
+<span class="text-warning font-body-sm">Latency Spike &gt; 500ms</span>
+</td>
+<td class="px-6 py-4 font-code text-code text-text-muted">12m 04s</td>
+<td class="px-6 py-4 text-text-muted font-body-sm">4 hours ago</td>
+</tr>
+<!-- Row 5: Fail -->
+<tr class="hover:bg-surface-subtle transition-colors group cursor-pointer">
+<td class="px-6 py-4">
+<div class="flex items-center gap-2">
+<div class="w-2 h-2 rounded-full bg-danger"></div>
+<span class="font-label-md text-label-md text-danger uppercase">Vulnerability</span>
+</div>
+</td>
+<td class="px-6 py-4">
+<div class="flex flex-col">
+<span class="text-text-primary font-bold font-body-sm">JWT_FORGERY_ATTACK</span>
+<span class="text-text-muted text-[11px] font-code">#R-8825-Z</span>
+</div>
+</td>
+<td class="px-6 py-4 text-text-secondary font-body-sm">User Authentication Flow</td>
+<td class="px-6 py-4">
+<span class="px-2 py-0.5 rounded bg-surface-container-high border border-border-strong text-text-primary font-code text-[11px]">PRODUCTION</span>
+</td>
+<td class="px-6 py-4 font-code text-code text-info">142</td>
+<td class="px-6 py-4">
+<span class="text-error font-body-sm">Signature Validation Failed</span>
+</td>
+<td class="px-6 py-4 font-code text-code text-text-muted">18s</td>
+<td class="px-6 py-4 text-text-muted font-body-sm">Yesterday</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Table Footer / Pagination -->
+<div class="px-6 py-4 border-t border-border bg-surface-container-low/30 flex items-center justify-between">
+<span class="text-body-sm text-text-muted">Showing <span class="text-text-primary font-bold">1-5</span> of 142 total runs</span>
+<div class="flex items-center gap-2">
+<button class="p-1 rounded border border-border text-text-muted hover:bg-surface-subtle disabled:opacity-30" disabled="">
+<span class="material-symbols-outlined">chevron_left</span>
+</button>
+<div class="flex gap-1">
+<button class="px-3 py-1 rounded bg-primary text-on-primary font-label-md text-label-md">1</button>
+<button class="px-3 py-1 rounded border border-border text-text-secondary hover:bg-surface-subtle font-label-md text-label-md">2</button>
+<button class="px-3 py-1 rounded border border-border text-text-secondary hover:bg-surface-subtle font-label-md text-label-md">3</button>
+<span class="text-text-muted px-1">...</span>
+<button class="px-3 py-1 rounded border border-border text-text-secondary hover:bg-surface-subtle font-label-md text-label-md">28</button>
+</div>
+<button class="p-1 rounded border border-border text-text-muted hover:bg-surface-subtle">
+<span class="material-symbols-outlined">chevron_right</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Background Decorative Elements -->
+<div class="fixed bottom-0 right-0 w-96 h-96 pointer-events-none opacity-20 overflow-hidden">
+
+</div>
+</main>
+<script>
+    // Simple table row click simulation
+    document.querySelectorAll('tbody tr').forEach(row => {
+      row.addEventListener('click', () => {
+        console.log('Navigate to run details for: ' + row.querySelector('.font-bold').innerText);
+        // Visual feedback
+        row.classList.add('bg-surface-container-high');
+        setTimeout(() => row.classList.remove('bg-surface-container-high'), 200);
+      });
+    });
+
+    // Handle filter chip toggles
+    document.querySelectorAll('section button').forEach(button => {
+      if(button.innerText !== 'Trigger Run') {
+        button.addEventListener('click', () => {
+          button.classList.toggle('border-primary');
+          button.classList.toggle('text-primary');
+        });
+      }
+    });
+  </script>
+</body></html>

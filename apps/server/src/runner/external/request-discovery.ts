@@ -22,7 +22,10 @@ import {
   type SemanticElementSnapshot,
 } from '../recording/external-browser.js';
 import type { AuthStateStore } from './auth-session.js';
-import { assertSavedAuthenticationActive } from './authentication-redirect.js';
+import {
+  assertNoVisibleAuthenticationRequirement,
+  assertSavedAuthenticationSessionActive,
+} from './authentication-redirect.js';
 import { executeHttpHook } from './http-hooks.js';
 import { recommendAssertions } from './assertion-recommendation.js';
 import { createGuidedJourneySnapshot } from './guided-journey.js';
@@ -101,6 +104,7 @@ export class RequestDiscoveryService {
       hooks: [storedSettings.beforeRunHook, storedSettings.afterRunHook],
     });
     const storageStatePath = this.authStore.usablePath(project.id);
+    const trace = this.projects.getJourneyTraceManifest(journey.id);
     const release = this.ownership.acquire('request_discovery');
     const events = new RunEventLog(`discovery-${discoveryId}`);
     let session: ReplayBrowserSession | null = null;
@@ -120,6 +124,7 @@ export class RequestDiscoveryService {
         targetUrl: project.targetUrl,
         headless: this.config.browserHeadless,
         timeoutMs: this.config.browserTimeoutMs,
+        ...(trace === null ? {} : { environment: trace.environment }),
         ...(storageStatePath === null ? {} : { storageStatePath }),
       });
       let capture = false;
@@ -129,9 +134,9 @@ export class RequestDiscoveryService {
       });
       await session.navigate(project.targetUrl);
       if (storageStatePath !== null) {
-        assertSavedAuthenticationActive(
+        await assertSavedAuthenticationSessionActive(
           project.targetUrl,
-          session.currentUrl(),
+          session,
         );
       }
       for (const step of journey.steps.slice(0, targetIndex)) {
@@ -153,6 +158,7 @@ export class RequestDiscoveryService {
           ? null
           : await session.isDisabled(targetControlLocator);
       await session.settle(750);
+      await assertNoVisibleAuthenticationRequirement(session);
       capture = false;
       const afterElements = await inspectSemanticElements(session);
       const normalAction = normalActionObservation({

@@ -23,7 +23,8 @@ import type { ProjectSettingsRepository } from '../../persistence/project-settin
 import { RunEventLog } from '../engine/event-log.js';
 import type { AuthStateStore } from '../external/auth-session.js';
 import {
-  assertSavedAuthenticationActive,
+  assertNoVisibleAuthenticationRequirement,
+  assertSavedAuthenticationSessionActive,
   SavedAuthenticationExpiredError,
 } from '../external/authentication-redirect.js';
 import { executeHttpHook } from '../external/http-hooks.js';
@@ -152,10 +153,12 @@ export class OutcomeCaptureManager {
         );
       }
       const storageStatePath = this.authStore.usablePath(project.id);
+      const trace = this.projects.getJourneyTraceManifest(journey.id);
       browser = await this.browserOwner.launchReplay({
         targetUrl: project.targetUrl,
         headless: this.config.browserHeadless,
         timeoutMs: this.config.browserTimeoutMs,
+        ...(trace === null ? {} : { environment: trace.environment }),
         ...(storageStatePath === null ? {} : { storageStatePath }),
       });
       browser.setScreenshotMasks(
@@ -188,9 +191,9 @@ export class OutcomeCaptureManager {
       this.update(id, { status: 'replaying' });
       await browser.navigate(project.targetUrl);
       if (storageStatePath !== null) {
-        assertSavedAuthenticationActive(
+        await assertSavedAuthenticationSessionActive(
           project.targetUrl,
-          browser.currentUrl(),
+          browser,
         );
       }
       for (const step of baselineJourney.steps) {
@@ -199,6 +202,7 @@ export class OutcomeCaptureManager {
         );
       }
       await browser.settle(900);
+      await assertNoVisibleAuthenticationRequirement(browser);
       const finalPathname = pathnameOf(browser.currentUrl());
       if (browser.enterOutcomeSelection === undefined) {
         throw new Error(

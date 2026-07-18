@@ -10,10 +10,14 @@ import type {
   RecordedJourneyStep,
   RecordingSession,
   ReplayLocator,
+  ReplayMode,
+  ReplayPacing,
   ReplayResult,
 } from '@formcrash/contracts';
 
-import { FormCrashApiError } from '../../../lib/api-client';
+import { StatusBadge } from '../../../components/ui/status-badge';
+import { FormCrashApiError, resolveApiUrl } from '../../../lib/api-client';
+import { formatLocalDateTime, formatCount } from '../../../lib/formatters';
 import {
   confirmAuthenticationCapture,
   getProjectSettings,
@@ -39,12 +43,15 @@ export function ProjectJourneyDashboard() {
   const [projects, setProjects] = useState<readonly Project[]>([]);
   const [selected, setSelected] = useState<Project | null>(null);
   const [journeys, setJourneys] = useState<readonly PersistedJourney[]>([]);
+  const [projectDetailsLoading, setProjectDetailsLoading] = useState(false);
   const [recording, setRecording] = useState<RecordingSession | null>(null);
   const [reviewSteps, setReviewSteps] = useState<
     readonly RecordedJourneyStep[]
   >([]);
   const [journeyName, setJourneyName] = useState('');
   const [replayResult, setReplayResult] = useState<ReplayResult | null>(null);
+  const [replayMode, setReplayMode] = useState<ReplayMode>('adaptive');
+  const [replayPacing, setReplayPacing] = useState<ReplayPacing>('recorded');
   const [executionSettings, setExecutionSettings] =
     useState<ProjectExecutionSettings | null>(null);
   const [replayValues, setReplayValues] = useState<
@@ -71,20 +78,33 @@ export function ProjectJourneyDashboard() {
 
   useEffect(() => {
     if (selected === null) return;
+    setProjectDetailsLoading(true);
+    setJourneys([]);
+    setExecutionSettings(null);
     setProductionReplayConfirmed(false);
     setReplayAuthenticationRequired(false);
     setReplayAuthCapture(null);
     setReplayAuthMessage(null);
+    let active = true;
     void Promise.all([
       listJourneys(selected.id),
       getProjectSettings(selected.id),
     ])
       .then(([nextJourneys, nextSettings]) => {
+        if (!active) return;
         setJourneys(nextJourneys);
         setExecutionSettings(nextSettings);
         setReplayValues({});
       })
-      .catch((reason: unknown) => setError(messageOf(reason)));
+      .catch((reason: unknown) => {
+        if (active) setError(messageOf(reason));
+      })
+      .finally(() => {
+        if (active) setProjectDetailsLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [selected]);
 
   useEffect(() => {
@@ -309,6 +329,8 @@ export function ProjectJourneyDashboard() {
           journey.id,
           nonEmptyValues(replayValues[journey.id] ?? {}),
           selected?.environment !== 'production' || productionReplayConfirmed,
+          replayMode,
+          replayPacing,
         ),
       );
     } catch (reason: unknown) {
@@ -318,6 +340,7 @@ export function ProjectJourneyDashboard() {
       ) {
         setReplayAuthenticationRequired(true);
         setReplayAuthCapture(null);
+        setReplayAuthMessage(reason.message);
       } else {
         setError(messageOf(reason));
       }
@@ -412,23 +435,25 @@ export function ProjectJourneyDashboard() {
 
   return (
     <main className="dashboard-shell project-workbench">
-      <header className="hero project-hero">
-        <p className="eyebrow">Chunk 6 · External impatient-user experiments</p>
-        <h1>Crash-test your own controlled app.</h1>
-        <p className="hero-statement">
-          Capture an authenticated normal journey, inject runtime data safely,
-          then repeat one real click or submit and preserve the evidence.
-        </p>
-        <p className="safety-notice">
-          <strong>Controlled environments only.</strong> Test only applications
-          you own or are explicitly authorized to test. Localhost and controlled
-          HTTP/HTTPS targets are permitted.
-        </p>
-        <div className="workflow-actions">
+      <header className="project-overview-header">
+        <div className="project-overview-heading">
+          <p className="eyebrow">External projects</p>
+          <h1>Project overview</h1>
+          <p className="hero-statement">
+            Connect a controlled target, record its critical journey, and prove
+            how repeated action changes the browser-visible outcome.
+          </p>
+        </div>
+        <div className="project-overview-actions">
           <Link className="button button-secondary" href="/">
-            Run Bundled Sample
+            Open Sample Checkout
           </Link>
         </div>
+        <p className="safety-notice project-safety-notice">
+          <strong>Controlled environments only.</strong> Test applications you
+          own or are explicitly authorized to test. Production targets require
+          an additional confirmation before replay.
+        </p>
       </header>
 
       {error !== null ? (
@@ -437,13 +462,26 @@ export function ProjectJourneyDashboard() {
         </div>
       ) : null}
 
-      <section className="project-grid" aria-label="Projects">
+      <section
+        className="project-grid project-overview-grid"
+        aria-label="Projects"
+      >
         <form
-          className="panel project-form"
+          className="panel project-form project-create-panel"
           onSubmit={(event) => void submitProject(event)}
         >
-          <p className="eyebrow">New project</p>
-          <h2>Connect a target</h2>
+          <div className="project-panel-heading">
+            <span className="project-panel-index" aria-hidden="true">
+              01
+            </span>
+            <div>
+              <p className="eyebrow">New project</p>
+              <h2>Connect a target</h2>
+            </div>
+          </div>
+          <p className="project-panel-description">
+            Save the application boundary before recording any browser activity.
+          </p>
           <label>
             Project name
             <input
@@ -483,12 +521,20 @@ export function ProjectJourneyDashboard() {
           </button>
         </form>
 
-        <div className="panel">
+        <div className="panel project-targets-panel">
           <div className="section-heading-row">
-            <div>
-              <p className="eyebrow">Projects</p>
-              <h2>Saved targets</h2>
+            <div className="project-panel-heading">
+              <span className="project-panel-index" aria-hidden="true">
+                02
+              </span>
+              <div>
+                <p className="eyebrow">Projects</p>
+                <h2>Saved targets</h2>
+              </div>
             </div>
+            <span className="project-count">
+              {formatCount(projects.length, 'target')}
+            </span>
           </div>
           {deletableProjects.length > 0 ? (
             <div className="project-bulk-actions">
@@ -568,10 +614,22 @@ export function ProjectJourneyDashboard() {
                     }}
                     type="button"
                   >
-                    <strong>{project.name}</strong>
-                    <span>
-                      {project.targetUrl} · {project.environment} ·{' '}
-                      {project.id.slice(0, 8)}
+                    <span className="project-card-heading">
+                      <strong>{project.name}</strong>
+                      <StatusBadge
+                        tone={
+                          project.environment === 'production'
+                            ? 'warning'
+                            : 'neutral'
+                        }
+                      >
+                        {environmentLabel(project.environment)}
+                      </StatusBadge>
+                    </span>
+                    <code>{project.targetUrl}</code>
+                    <span className="project-card-description">
+                      {project.description ||
+                        `Project ${project.id.slice(0, 8)}`}
                     </span>
                   </button>
                   {project.id !== 'project-sample-checkout' ? (
@@ -596,6 +654,60 @@ export function ProjectJourneyDashboard() {
 
       {selected !== null ? (
         <>
+          <section
+            className="panel selected-project-overview"
+            aria-labelledby="selected-project-title"
+          >
+            <div className="selected-project-overview-header">
+              <div>
+                <p className="eyebrow">Selected target</p>
+                <p
+                  className="selected-project-title"
+                  id="selected-project-title"
+                >
+                  {selected.name}
+                </p>
+                <code>{selected.targetUrl}</code>
+              </div>
+              <StatusBadge
+                tone={
+                  selected.environment === 'production' ? 'warning' : 'neutral'
+                }
+              >
+                {environmentLabel(selected.environment)} environment
+              </StatusBadge>
+            </div>
+
+            <dl className="selected-project-facts">
+              <div>
+                <dt>Saved journeys</dt>
+                <dd>
+                  {projectDetailsLoading
+                    ? 'Checking…'
+                    : formatCount(journeys.length, 'journey')}
+                </dd>
+              </div>
+              <div>
+                <dt>Authentication</dt>
+                <dd>{authenticationSummary(executionSettings)}</dd>
+              </div>
+              <div>
+                <dt>Last updated</dt>
+                <dd>{formatLocalDateTime(selected.updatedAt)}</dd>
+              </div>
+            </dl>
+
+            <div className="selected-project-overview-footer">
+              <p>
+                {selected.description ||
+                  'No project description has been saved for this target.'}
+              </p>
+              <a className="button button-primary" href="#recording-workspace">
+                Record a journey
+              </a>
+            </div>
+          </section>
+
           <section className="panel recording-panel" id="recording-workspace">
             <div className="section-heading-row">
               <div>
@@ -629,18 +741,35 @@ export function ProjectJourneyDashboard() {
                 {busy === 'stopping' ? 'Stopping…' : 'Stop recording'}
               </button>
               <span>{recording?.steps.length ?? 0} captured steps</span>
+              {recording?.captureFormat === 'hybrid-v2' ? (
+                <span>
+                  Hybrid trace: {recording.traceStatus ?? 'capturing'}
+                  {recording.traceSummary !== null &&
+                  recording.traceSummary !== undefined
+                    ? ` · ${recording.traceSummary.interactionCount} interactions · ${recording.traceSummary.eventCount} raw events`
+                    : ''}
+                </span>
+              ) : null}
             </div>
             <p className="technical-note">
               A fresh visible Chromium context opens the target. FormCrash
-              captures only same-tab, top-frame actions; the dashboard never
-              records browser events itself.
+              records semantic steps plus a redacted hybrid interaction trace.
+              Replay verifies recorded control, selection, URL, and ARIA state
+              instead of treating a click without an exception as success.
             </p>
             <details className="unsupported-list">
               <summary>Unsupported actions</summary>
               <p>
-                New tabs, iframes, file uploads, CAPTCHA, third-party payment
-                pages, drag and drop, contenteditable editors, and unsupported
-                Shadow DOM targets are reported as warnings and not recorded.
+                CAPTCHA, third-party payment authorization, browser chrome, OS
+                dialogs, closed Shadow DOM, and unallowlisted cross-origin
+                frames remain unsupported. Drag, iframe, contenteditable, and
+                open-shadow activity is retained in the raw trace when it cannot
+                be represented by a legacy semantic step.
+              </p>
+              <p>
+                For an application you own, configure the CAPTCHA provider's
+                official test key, a staging-only bypass, or an allowlisted test
+                account. FormCrash does not solve or evade live challenges.
               </p>
             </details>
             {recording?.warnings.map((warning) => (
@@ -834,6 +963,44 @@ export function ProjectJourneyDashboard() {
                 <h2>Reproducible normal paths</h2>
               </div>
             </div>
+            <label className="journey-name">
+              Replay behavior
+              <select
+                value={replayMode}
+                onChange={(event) =>
+                  setReplayMode(event.target.value as ReplayMode)
+                }
+              >
+                <option value="adaptive">
+                  Adaptive — recover safely and verify state
+                </option>
+                <option value="strict">
+                  Strict — use the recorded strategy
+                </option>
+              </select>
+            </label>
+            <label className="journey-name">
+              Replay pacing
+              <select
+                value={replayPacing}
+                onChange={(event) =>
+                  setReplayPacing(event.target.value as ReplayPacing)
+                }
+              >
+                <option value="recorded">
+                  Recorded â€” preserve human pauses, capped at 5 seconds
+                </option>
+                <option value="deliberate">
+                  Deliberate â€” wait 1 second before every action
+                </option>
+                <option value="fast">Fast â€” no added pauses</option>
+              </select>
+            </label>
+            <p className="technical-note">
+              Pacing applies to normal journey steps. Repeated-action tests keep
+              their configured 0, 100, or 300 ms injection interval so they can
+              still expose race conditions.
+            </p>
             {selected.environment === 'production' ? (
               <label className="production-confirmation">
                 <input
@@ -849,11 +1016,10 @@ export function ProjectJourneyDashboard() {
             ) : null}
             {replayAuthenticationRequired ? (
               <div className="state-message state-message-error" role="alert">
-                <strong>Saved session expired</strong>
+                <strong>Authentication interrupted</strong>
                 <p>
-                  The browser was redirected to a login page before FormCrash
-                  replayed any journey steps. Sign in again in the browser
-                  FormCrash opens, then save the new session.
+                  {replayAuthMessage ??
+                    'The application required sign-in during replay. The session may have expired, or a preceding journey action may have signed out or redirected the browser.'}
                 </p>
                 <div className="recording-actions">
                   <button
@@ -884,7 +1050,7 @@ export function ProjectJourneyDashboard() {
                 ) : null}
               </div>
             ) : null}
-            {replayAuthMessage !== null ? (
+            {!replayAuthenticationRequired && replayAuthMessage !== null ? (
               <div className="state-message" role="status">
                 {replayAuthMessage}
               </div>
@@ -920,7 +1086,50 @@ export function ProjectJourneyDashboard() {
                         </code>
                       </dd>
                     </div>
+                    <div>
+                      <dt>Frame</dt>
+                      <dd>
+                        <code>
+                          {replayResult.failedStep.pageId ?? 'page-1'}
+                          {(replayResult.failedStep.framePath ?? []).length > 0
+                            ? ` / ${replayResult.failedStep.framePath?.join(' / ')}`
+                            : ''}
+                        </code>
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Side effect observed</dt>
+                      <dd>
+                        {replayResult.failedStep.sideEffectObserved === true
+                          ? 'Yes — FormCrash did not retry'
+                          : 'No'}
+                      </dd>
+                    </div>
                   </dl>
+                ) : null}
+                {(replayResult.failedStep?.expectedState?.length ?? 0) > 0 ? (
+                  <div className="technical-note">
+                    <strong>State verification</strong>
+                    <p>
+                      Expected:{' '}
+                      {replayResult.failedStep?.expectedState?.join('; ')}
+                    </p>
+                    <p>
+                      Observed:{' '}
+                      {replayResult.failedStep?.observedState?.join('; ') ||
+                        'Nothing verifiable'}
+                    </p>
+                  </div>
+                ) : null}
+                {(replayResult.interactionOutcomes?.length ?? 0) > 0 ? (
+                  <p className="technical-note">
+                    {replayResult.interactionOutcomes
+                      ?.map(
+                        (outcome) =>
+                          `${outcome.status}: ${outcome.strategy} (${Math.round(outcome.confidence * 100)}%)`,
+                      )
+                      .join(' · ')}
+                  </p>
                 ) : null}
               </div>
             ) : null}
@@ -942,6 +1151,31 @@ export function ProjectJourneyDashboard() {
                         <span>
                           Version {journey.version} · {journey.steps.length}{' '}
                           steps
+                        </span>
+                        {journey.trace?.videoCaptured === true ? (
+                          <details className="unsupported-list">
+                            <summary>Recorded page video</summary>
+                            <video
+                              controls
+                              preload="metadata"
+                              src={resolveApiUrl(
+                                `/api/journeys/${journey.id}/trace/videos/0`,
+                              )}
+                              style={{ width: '100%', maxWidth: 720 }}
+                            >
+                              Recorded Chromium video is unavailable in this
+                              browser.
+                            </video>
+                            <p className="technical-note">
+                              Video is diagnostic evidence. Replay is driven by
+                              the synchronized input and state trace.
+                            </p>
+                          </details>
+                        ) : null}
+                        <span>
+                          {journey.replayFormat === 'hybrid-v2'
+                            ? `Hybrid trace · ${journey.trace?.interactionCount ?? 0} verified interactions`
+                            : 'Legacy semantic replay'}
                         </span>
                         {requirements.length > 0 ? (
                           <div className="runtime-value-grid replay-runtime-grid">
@@ -1066,6 +1300,22 @@ function messageOf(reason: unknown): string {
   return reason instanceof Error
     ? reason.message
     : 'The operation could not be completed.';
+}
+
+function environmentLabel(environment: Project['environment']): string {
+  if (environment === 'local') return 'Local';
+  if (environment === 'staging') return 'Staging';
+  return 'Production';
+}
+
+function authenticationSummary(
+  settings: ProjectExecutionSettings | null,
+): string {
+  if (settings === null) return 'Checking…';
+  if (settings.authentication.available) return 'Saved state available';
+  if (settings.authentication.configured)
+    return 'Configured, state unavailable';
+  return 'Not configured';
 }
 
 function formValue(form: FormData, name: string): string {

@@ -10,6 +10,9 @@ import type {
   ExternalRunnerError,
   ExternalRunWarning,
   ReplayFailure,
+  RecordedInteraction,
+  ReplayMode,
+  ReplayPacing,
   RunArtifact,
   OutcomeAggregate,
   OutcomeCheckRunSnapshot,
@@ -20,6 +23,7 @@ import {
   ScreenshotStore,
   type ScreenshotLabel,
 } from '../../artifacts/screenshot-store.js';
+import { JourneyTraceStore } from '../../artifacts/journey-trace-store.js';
 import type { ServerConfig } from '../../app/config.js';
 import type { ExternalExperimentRepository } from '../../persistence/external-experiment-repository.js';
 import type { ProjectJourneyRepository } from '../../persistence/project-journey-repository.js';
@@ -38,10 +42,13 @@ import {
   type ExternalBrowserOwner,
   type ReplayBrowserSession,
 } from '../recording/external-browser.js';
+import { paceReplayStep } from '../recording/replay-pacing.js';
 import { evaluateExternalAssertions } from './assertions.js';
 import type { AuthStateStore } from './auth-session.js';
 import {
-  assertSavedAuthenticationActive,
+  authenticationInterruptedBeforeStep,
+  assertNoVisibleAuthenticationRequirement,
+  assertSavedAuthenticationSessionActive,
   SavedAuthenticationExpiredError,
 } from './authentication-redirect.js';
 import { executeHttpHook, HttpHookError } from './http-hooks.js';
@@ -67,6 +74,7 @@ import { assertProductionConfirmed } from './production-safety.js';
 export class ExternalExperimentRunner {
   private readonly browserOwner: ExternalBrowserOwner;
   private readonly screenshotStore: ScreenshotStore;
+  private readonly traceStore: JourneyTraceStore;
 
   constructor(
     private readonly config: ServerConfig,
@@ -80,12 +88,15 @@ export class ExternalExperimentRunner {
   ) {
     this.browserOwner = browserOwner ?? new PlaywrightExternalBrowserOwner();
     this.screenshotStore = new ScreenshotStore(config.artifactRoot, repository);
+    this.traceStore = new JourneyTraceStore(config.artifactRoot, projects);
   }
 
   async run(
     experimentVersionId: string,
     ephemeral: EphemeralRuntimeValues,
     confirmProduction = false,
+    replayMode: ReplayMode = 'adaptive',
+    replayPacing: ReplayPacing = 'recorded',
   ): Promise<ExternalRunDetail> {
     const experiment = this.repository.getVersion(experimentVersionId);
     if (experiment === null)
@@ -108,6 +119,15 @@ export class ExternalExperimentRunner {
       'External experiment execution',
     );
     const journey = experiment.journeySnapshot;
+    const traceRecord = this.projects.getRecordingTraceByJourney(journey.id);
+    if (traceRecord !== null) this.traceStore.assertIntegrity(traceRecord);
+    const traceManifest = this.projects.getJourneyTraceManifest(journey.id);
+    const traceInteractions = new Map(
+      (traceManifest?.interactions ?? []).map((interaction) => [
+        interaction.stepId,
+        interaction,
+      ]),
+    );
     const outcomeCheckSnapshot = this.resolveOutcomeCheckSnapshot(experiment);
     const storedSettings = this.settings.get(project.id);
     const runId = randomUUID();
@@ -179,6 +199,9 @@ export class ExternalExperimentRunner {
           targetUrl: project.targetUrl,
           headless: this.config.browserHeadless,
           timeoutMs: this.config.browserTimeoutMs,
+          ...(traceManifest === null
+            ? {}
+            : { environment: traceManifest.environment }),
           ...(storageStatePath === null ? {} : { storageStatePath }),
         });
       } catch (error: unknown) {
@@ -203,9 +226,9 @@ export class ExternalExperimentRunner {
       events.append('run.running', {});
       await session.navigate(project.targetUrl);
       if (storageStatePath !== null) {
-        assertSavedAuthenticationActive(
+        await assertSavedAuthenticationSessionActive(
           project.targetUrl,
-          session.currentUrl(),
+          session,
         );
       }
 
@@ -224,6 +247,20 @@ export class ExternalExperimentRunner {
       for (const [index, step] of journey.steps
         .slice(0, targetIndex)
         .entries()) {
+        const interaction = traceInteractions.get(step.id);
+        const previousStep = journey.steps[index - 1];
+        const previousInteraction =
+          previousStep === undefined
+            ? undefined
+            : traceInteractions.get(previousStep.id);
+        await paceReplayStep({
+          session,
+          pacing: replayPacing,
+          step,
+          ...(interaction === undefined ? {} : { interaction }),
+          ...(previousStep === undefined ? {} : { previousStep }),
+          ...(previousInteraction === undefined ? {} : { previousInteraction }),
+        });
         await executeWithEvents(
           session,
           step,
@@ -231,8 +268,31 @@ export class ExternalExperimentRunner {
           events,
           runtime,
           outcomeCheckSnapshot,
+          interaction,
+          replayMode,
         );
       }
+
+      const targetInteraction = traceInteractions.get(target.id);
+      const previousTargetStep = journey.steps[targetIndex - 1];
+      const previousTargetInteraction =
+        previousTargetStep === undefined
+          ? undefined
+          : traceInteractions.get(previousTargetStep.id);
+      await paceReplayStep({
+        session,
+        pacing: replayPacing,
+        step: target,
+        ...(targetInteraction === undefined
+          ? {}
+          : { interaction: targetInteraction }),
+        ...(previousTargetStep === undefined
+          ? {}
+          : { previousStep: previousTargetStep }),
+        ...(previousTargetInteraction === undefined
+          ? {}
+          : { previousInteraction: previousTargetInteraction }),
+      });
 
       const beforeArtifact = await this.capture(
         session,
@@ -290,6 +350,7 @@ export class ExternalExperimentRunner {
         collector,
         experiment.networkMatcher !== null,
       );
+      await assertNoVisibleAuthenticationRequirement(session);
       const afterArtifact = await this.capture(
         session,
         runId,
@@ -310,6 +371,8 @@ export class ExternalExperimentRunner {
             events,
             runtime,
             outcomeCheckSnapshot,
+            traceInteractions.get(step.id),
+            replayMode,
           );
         }
       } else {
@@ -552,6 +615,8 @@ async function executeWithEvents(
   events: RunEventLog,
   runtime: ResolvedRuntime,
   outcomeCheckSnapshot: OutcomeCheckRunSnapshot,
+  interaction?: RecordedInteraction,
+  replayMode: ReplayMode = 'adaptive',
 ): Promise<void> {
   events.append('journey.step.started', {
     stepId: step.id,
@@ -560,10 +625,19 @@ async function executeWithEvents(
     actionType: step.type,
   });
   try {
-    await executeRecordedStep(session, step, (item) =>
-      resolveStepValue(item, runtime),
+    await executeRecordedStep(
+      session,
+      step,
+      (item) => resolveStepValue(item, runtime),
+      {
+        ...(interaction === undefined ? {} : { interaction }),
+        mode: replayMode,
+      },
     );
   } catch (error: unknown) {
+    if (error instanceof SavedAuthenticationExpiredError) {
+      throw authenticationInterruptedBeforeStep(index + 1, step.name);
+    }
     throw new ExternalJourneyStepError(
       step,
       index,

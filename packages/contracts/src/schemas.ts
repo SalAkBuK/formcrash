@@ -101,6 +101,20 @@ export const recordingSessionStatusSchema = z.enum([
   'runner_error',
 ]);
 
+export const journeyCaptureFormatSchema = z.enum(['semantic-v1', 'hybrid-v2']);
+
+export const traceCaptureStatusSchema = z.enum([
+  'not_captured',
+  'capturing',
+  'complete',
+  'truncated',
+  'corrupt',
+]);
+
+export const replayModeSchema = z.enum(['adaptive', 'strict']);
+
+export const replayPacingSchema = z.enum(['fast', 'recorded', 'deliberate']);
+
 export const replayLocatorSchema = z.discriminatedUnion('strategy', [
   z.object({ strategy: z.literal('data-formcrash'), value: z.string().min(1) }),
   z.object({ strategy: z.literal('data-testid'), value: z.string().min(1) }),
@@ -128,6 +142,122 @@ export const targetFingerprintSchema = z.object({
   label: z.string().nullable(),
   text: z.string().nullable(),
   cssPath: z.string().min(1),
+});
+
+export const recordedTargetCandidateSchema = z.object({
+  locator: replayLocatorSchema,
+  source: z.enum([
+    'test_attribute',
+    'id',
+    'accessibility',
+    'name',
+    'label',
+    'text',
+    'structure',
+  ]),
+  confidence: z.number().min(0).max(1),
+});
+
+export const recordedTargetGeometrySchema = z.object({
+  x: z.number().finite(),
+  y: z.number().finite(),
+  width: z.number().finite().nonnegative(),
+  height: z.number().finite().nonnegative(),
+  pointerOffsetX: z.number().finite().nullable(),
+  pointerOffsetY: z.number().finite().nullable(),
+});
+
+export const recordedPostconditionSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('url'),
+    value: controlledTargetUrlSchema,
+    target: replayLocatorSchema.nullable().default(null),
+  }),
+  z.object({
+    kind: z.literal('control_value'),
+    value: z.string().max(10_000),
+    target: replayLocatorSchema.nullable().default(null),
+  }),
+  z.object({
+    kind: z.literal('checked'),
+    value: z.boolean(),
+    target: replayLocatorSchema.nullable().default(null),
+  }),
+  z.object({
+    kind: z.literal('aria_attribute'),
+    name: z.string().min(1).max(100),
+    value: z.string().max(1_000).nullable(),
+    target: replayLocatorSchema.nullable().default(null),
+  }),
+  z.object({
+    kind: z.literal('visible_text'),
+    value: z.string().min(1).max(500),
+    target: replayLocatorSchema.nullable().default(null),
+  }),
+]);
+
+export const recordedInteractionSchema = z.object({
+  id: z.string().min(1),
+  stepId: z.string().min(1),
+  sequence: z.number().int().positive(),
+  pageId: z.string().min(1),
+  framePath: z.array(z.string().min(1)).max(20),
+  startedAt: z.number().int().nonnegative(),
+  durationMs: z.number().int().nonnegative(),
+  intent: journeyActionTypeSchema,
+  pointerType: z.enum(['mouse', 'pen', 'touch']).nullable(),
+  targetCandidates: z.array(recordedTargetCandidateSchema).max(12),
+  fingerprint: targetFingerprintSchema.nullable(),
+  geometry: recordedTargetGeometrySchema.nullable(),
+  postconditions: z.array(recordedPostconditionSchema).max(12),
+  retrySafety: z.enum(['safe', 'side_effect_possible']),
+});
+
+export const recordedBrowserEnvironmentSchema = z.object({
+  viewportWidth: z.number().int().positive(),
+  viewportHeight: z.number().int().positive(),
+  deviceScaleFactor: z.number().positive(),
+  locale: z.string().min(1).max(100),
+  timezoneId: z.string().min(1).max(100),
+  userAgent: z.string().min(1).max(1_000),
+  colorScheme: z.enum(['light', 'dark', 'no-preference']),
+  browserName: z.literal('chromium'),
+  browserVersion: z.string().min(1).max(100),
+});
+
+export const recordedVideoArtifactSchema = z.object({
+  pageId: z.string().min(1),
+  relativePath: z.string().min(1).max(2_000),
+  sizeBytes: z.number().int().positive(),
+  checksumSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+});
+
+export const hybridTraceManifestSchema = z.object({
+  formatVersion: z.literal(2),
+  environment: recordedBrowserEnvironmentSchema,
+  interactions: z.array(recordedInteractionSchema).max(100_000),
+  eventCount: z.number().int().nonnegative(),
+  pageCount: z.number().int().positive(),
+  frameCount: z.number().int().positive(),
+  redactionVersion: z.literal(1),
+  videoCaptured: z.boolean(),
+  videos: z.array(recordedVideoArtifactSchema).max(20).optional(),
+  truncated: z.boolean(),
+});
+
+export const traceSummarySchema = z.object({
+  interactionCount: z.number().int().nonnegative(),
+  eventCount: z.number().int().nonnegative(),
+  pageCount: z.number().int().nonnegative(),
+  frameCount: z.number().int().nonnegative(),
+  videoCaptured: z.boolean(),
+  truncated: z.boolean(),
+});
+
+export const journeyTraceReferenceSchema = traceSummarySchema.extend({
+  id: z.string().min(1),
+  checksumSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+  sizeBytes: z.number().int().nonnegative(),
 });
 
 export const recordedValueSchema = z.discriminatedUnion('kind', [
@@ -177,6 +307,9 @@ export const recordingSessionSchema = z.object({
   errorMessage: z.string().nullable(),
   startedAt: z.iso.datetime({ offset: true }),
   completedAt: z.iso.datetime({ offset: true }).nullable(),
+  captureFormat: journeyCaptureFormatSchema.optional(),
+  traceStatus: traceCaptureStatusSchema.optional(),
+  traceSummary: traceSummarySchema.nullable().optional(),
 });
 
 export const startRecordingResponseSchema = recordingSessionSchema;
@@ -201,6 +334,8 @@ export const persistedJourneySchema = z.object({
   steps: z.array(recordedJourneyStepSchema).min(1),
   recordingMetadata: journeyRecordingMetadataSchema,
   createdAt: z.iso.datetime({ offset: true }),
+  replayFormat: journeyCaptureFormatSchema.optional(),
+  trace: journeyTraceReferenceSchema.nullable().optional(),
 });
 
 export const journeyListSchema = z.object({
@@ -380,6 +515,20 @@ export const replayFailureSchema = z.object({
   technicalMessage: z.string().min(1).nullable().default(null),
   currentUrl: controlledTargetUrlSchema.nullable().default(null),
   locator: replayLocatorSchema.nullable().default(null),
+  pageId: z.string().min(1).nullable().optional(),
+  framePath: z.array(z.string().min(1)).max(20).optional(),
+  resolutionAttempts: z.array(z.string().min(1).max(500)).max(20).optional(),
+  confidence: z.number().min(0).max(1).nullable().optional(),
+  expectedState: z.array(z.string().min(1).max(500)).max(20).optional(),
+  observedState: z.array(z.string().min(1).max(500)).max(20).optional(),
+  sideEffectObserved: z.boolean().optional(),
+});
+
+export const replayInteractionOutcomeSchema = z.object({
+  stepId: z.string().min(1),
+  status: z.enum(['verified', 'recovered', 'ambiguous', 'unsupported']),
+  strategy: z.string().min(1).max(160),
+  confidence: z.number().min(0).max(1),
 });
 
 export const replayResultSchema = z.object({
@@ -389,6 +538,9 @@ export const replayResultSchema = z.object({
   failedStep: replayFailureSchema.nullable(),
   startedAt: z.iso.datetime({ offset: true }),
   completedAt: z.iso.datetime({ offset: true }),
+  mode: replayModeSchema.optional(),
+  pacing: replayPacingSchema.optional(),
+  interactionOutcomes: z.array(replayInteractionOutcomeSchema).optional(),
 });
 
 export const runtimeVariableNameSchema = z
@@ -984,6 +1136,8 @@ function sameNetworkMatcher(
 export const runExternalExperimentRequestSchema = z.object({
   variables: ephemeralRuntimeValuesSchema.optional().default({}),
   confirmProduction: z.boolean().optional().default(false),
+  replayMode: replayModeSchema.optional().default('adaptive'),
+  replayPacing: replayPacingSchema.optional().default('recorded'),
 });
 
 export const externalNetworkObservationSchema = z.object({
@@ -1696,8 +1850,27 @@ export type DeleteResourceResponse = z.infer<
 export type RecordingSessionStatus = z.infer<
   typeof recordingSessionStatusSchema
 >;
+export type JourneyCaptureFormat = z.infer<typeof journeyCaptureFormatSchema>;
+export type TraceCaptureStatus = z.infer<typeof traceCaptureStatusSchema>;
+export type ReplayMode = z.infer<typeof replayModeSchema>;
+export type ReplayPacing = z.infer<typeof replayPacingSchema>;
 export type ReplayLocator = z.infer<typeof replayLocatorSchema>;
 export type TargetFingerprint = z.infer<typeof targetFingerprintSchema>;
+export type RecordedTargetCandidate = z.infer<
+  typeof recordedTargetCandidateSchema
+>;
+export type RecordedTargetGeometry = z.infer<
+  typeof recordedTargetGeometrySchema
+>;
+export type RecordedPostcondition = z.infer<typeof recordedPostconditionSchema>;
+export type RecordedInteraction = z.infer<typeof recordedInteractionSchema>;
+export type RecordedBrowserEnvironment = z.infer<
+  typeof recordedBrowserEnvironmentSchema
+>;
+export type RecordedVideoArtifact = z.infer<typeof recordedVideoArtifactSchema>;
+export type HybridTraceManifest = z.infer<typeof hybridTraceManifestSchema>;
+export type TraceSummary = z.infer<typeof traceSummarySchema>;
+export type JourneyTraceReference = z.infer<typeof journeyTraceReferenceSchema>;
 export type RecordedValue = z.infer<typeof recordedValueSchema>;
 export type RecordedJourneyStep = z.infer<typeof recordedJourneyStepSchema>;
 export type RecordingWarningCode = z.infer<typeof recordingWarningCodeSchema>;
@@ -1765,6 +1938,9 @@ export type ExternalOutcomeCheckResult = z.infer<
 >;
 export type ReplayFailure = z.infer<typeof replayFailureSchema>;
 export type ReplayResult = z.infer<typeof replayResultSchema>;
+export type ReplayInteractionOutcome = z.infer<
+  typeof replayInteractionOutcomeSchema
+>;
 export type RuntimeVariableName = z.infer<typeof runtimeVariableNameSchema>;
 export type RuntimeVariableDeclarationInput = z.infer<
   typeof runtimeVariableDeclarationInputSchema
