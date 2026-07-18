@@ -2,13 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 type NavigationItem = Readonly<{
   href: string;
   icon: 'sample' | 'projects' | 'runs';
   label: string;
-  match: (pathname: string) => boolean;
+  match: (pathname: string, hash: string) => boolean;
 }>;
 
 const navigation: readonly NavigationItem[] = [
@@ -16,7 +16,7 @@ const navigation: readonly NavigationItem[] = [
     href: '/',
     icon: 'sample',
     label: 'Sample Checkout',
-    match: (pathname) => pathname === '/',
+    match: (pathname, hash) => pathname === '/' && hash !== '#history-title',
   },
   {
     href: '/projects',
@@ -28,7 +28,9 @@ const navigation: readonly NavigationItem[] = [
     href: '/#history-title',
     icon: 'runs',
     label: 'Runs',
-    match: (pathname) => pathname.startsWith('/runs'),
+    match: (pathname, hash) =>
+      pathname.startsWith('/runs') ||
+      (pathname === '/' && hash === '#history-title'),
   },
 ];
 
@@ -38,7 +40,19 @@ export function ApplicationShell({
   readonly children: ReactNode;
 }) {
   const pathname = usePathname();
+  const [hash, setHash] = useState('');
   const context = routeContext(pathname);
+
+  useEffect(() => {
+    const updateHash = () => setHash(window.location.hash);
+    updateHash();
+    window.addEventListener('hashchange', updateHash);
+    window.addEventListener('popstate', updateHash);
+    return () => {
+      window.removeEventListener('hashchange', updateHash);
+      window.removeEventListener('popstate', updateHash);
+    };
+  }, [pathname]);
 
   return (
     <div className="app-shell">
@@ -46,7 +60,12 @@ export function ApplicationShell({
         Skip to main content
       </a>
       <aside className="app-sidebar" aria-label="Application sidebar">
-        <Link className="app-brand" href="/" aria-label="FormCrash home">
+        <Link
+          className="app-brand"
+          href="/"
+          aria-label="FormCrash home"
+          onClick={() => setHash('')}
+        >
           <span className="app-brand-mark" aria-hidden="true">
             FC
           </span>
@@ -59,13 +78,18 @@ export function ApplicationShell({
         <nav className="app-navigation" aria-label="Primary navigation">
           <p className="app-navigation-label">Workspaces</p>
           {navigation.map((item) => {
-            const active = item.match(pathname);
+            const active = item.match(pathname, hash);
             return (
               <Link
                 className={`app-navigation-link${active ? ' app-navigation-link-active' : ''}`}
                 href={item.href}
                 key={item.label}
                 aria-current={active ? 'page' : undefined}
+                onClick={() =>
+                  setHash(
+                    item.href === '/#history-title' ? '#history-title' : '',
+                  )
+                }
               >
                 <NavigationIcon name={item.icon} />
                 <span>{item.label}</span>

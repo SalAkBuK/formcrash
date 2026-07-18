@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -18,6 +18,27 @@ vi.mock('next/navigation', () => ({
 describe('shared application foundation', () => {
   beforeEach(() => {
     navigation.pathname = '/';
+    window.history.replaceState(null, '', '/');
+  });
+
+  it('marks Runs current when the bundled history anchor is active', async () => {
+    window.history.replaceState(null, '', '/#history-title');
+    render(
+      <ApplicationShell>
+        <main>Run history</main>
+      </ApplicationShell>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Runs' })).toHaveAttribute(
+        'aria-current',
+        'page',
+      ),
+    );
+    expect(
+      screen.getByRole('link', { name: 'Sample Checkout' }),
+    ).not.toHaveAttribute('aria-current');
+    expect(screen.getAllByRole('link', { current: 'page' })).toHaveLength(1);
   });
 
   it('renders the real application routes, one current route, and route context', () => {

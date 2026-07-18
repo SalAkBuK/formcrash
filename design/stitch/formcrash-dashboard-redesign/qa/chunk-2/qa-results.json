@@ -1,0 +1,378 @@
+{
+  "generatedAt": "2026-07-18T17:00:55.283Z",
+  "playwrightVersion": "1.61.1",
+  "browserVersion": "149.0.7827.55",
+  "services": {
+    "dashboard": { "connected": true, "status": 200 },
+    "server": { "connected": true, "status": 200 },
+    "sampleCheckout": { "connected": true, "status": 200 }
+  },
+  "realData": {
+    "projects": [
+      {
+        "id": "829dce01-589e-426d-bc83-64ca27cfeac8",
+        "name": "TOWERDESK",
+        "targetUrl": "https://towerdesk.netlify.app/",
+        "environment": "production"
+      },
+      {
+        "id": "cdefe107-84cd-4bb2-a7ba-6d93f238dc32",
+        "name": "Outcome Walkthrough Fixture",
+        "targetUrl": "http://127.0.0.1:4300/",
+        "environment": "local"
+      },
+      {
+        "id": "project-sample-checkout",
+        "name": "Sample Checkout",
+        "targetUrl": "http://localhost:4200",
+        "environment": "local"
+      }
+    ],
+    "runs": [
+      {
+        "runId": "2071d320-41ee-4a71-ae7a-e4d39088ce83",
+        "mode": "vulnerable",
+        "status": "failed",
+        "assertionStatus": "failed",
+        "screenshotCount": 3
+      },
+      {
+        "runId": "8b2427ee-0bf5-4722-9649-3a2f76590c5e",
+        "mode": "fixed",
+        "status": "passed",
+        "assertionStatus": "passed",
+        "screenshotCount": 3
+      },
+      {
+        "runId": "3b6ddc6e-3f48-4c44-bc88-7af4889c095d",
+        "mode": "fixed",
+        "status": "passed",
+        "assertionStatus": "passed",
+        "screenshotCount": 3
+      },
+      {
+        "runId": "b4e236de-650e-45bf-8424-7f418da9f4de",
+        "mode": "fixed",
+        "status": "passed",
+        "assertionStatus": "passed",
+        "screenshotCount": 3
+      },
+      {
+        "runId": "060b014f-4826-4103-9926-1f4931c317b7",
+        "mode": "vulnerable",
+        "status": "failed",
+        "assertionStatus": "failed",
+        "screenshotCount": 3
+      },
+      {
+        "runId": "04ec2690-65e5-4429-a6f5-75e96068e983",
+        "mode": "fixed",
+        "status": "passed",
+        "assertionStatus": "passed",
+        "screenshotCount": 3
+      },
+      {
+        "runId": "77b813a8-6b95-435c-9c80-df7e40d8ec39",
+        "mode": "vulnerable",
+        "status": "failed",
+        "assertionStatus": "failed",
+        "screenshotCount": 3
+      },
+      {
+        "runId": "98cfad2d-e2bf-4086-aa5f-d3d3b68fddf9",
+        "mode": "fixed",
+        "status": "passed",
+        "assertionStatus": "passed",
+        "screenshotCount": 3
+      },
+      {
+        "runId": "42175cf6-b1f8-43ea-977e-d017bd498783",
+        "mode": "vulnerable",
+        "status": "failed",
+        "assertionStatus": "failed",
+        "screenshotCount": 3
+      },
+      {
+        "runId": "9e774602-e664-482a-9672-8c9972f342d2",
+        "mode": "fixed",
+        "status": "passed",
+        "assertionStatus": "passed",
+        "screenshotCount": 3
+      },
+      {
+        "runId": "ff60439a-b4f5-4c13-a785-19538548e772",
+        "mode": "vulnerable",
+        "status": "failed",
+        "assertionStatus": "failed",
+        "screenshotCount": 3
+      },
+      {
+        "runId": "9f4ec316-d170-4830-adce-391b773d146d",
+        "mode": "fixed",
+        "status": "passed",
+        "assertionStatus": "passed",
+        "screenshotCount": 3
+      }
+    ]
+  },
+  "screenshots": [
+    "project-overview-1440.png",
+    "project-overview-1366.png",
+    "project-overview-1024.png",
+    "project-overview-incomplete-1440.png",
+    "project-overview-latest-result-1440.png",
+    "runs-list-1440.png",
+    "runs-list-1366.png",
+    "runs-list-1024.png",
+    "runs-list-390.png"
+  ],
+  "checks": {
+    "projectOverview": {
+      "renderedProjectNames": [
+        "TOWERDESK",
+        "Outcome Walkthrough Fixture",
+        "Sample Checkout"
+      ],
+      "currentNavigation": ["External Projects"],
+      "primaryAction": {
+        "visible": true,
+        "href": "#recording-workspace",
+        "focusStyle": {
+          "outlineColor": "rgb(244, 201, 93)",
+          "outlineStyle": "solid",
+          "outlineWidth": "3px",
+          "boxShadow": "rgba(115, 183, 255, 0.28) 0px 0px 0px 3px",
+          "keyboardReachable": true,
+          "visible": true
+        }
+      },
+      "contrast": {
+        "title": {
+          "foreground": "rgb(244, 247, 251)",
+          "background": "rgb(10, 13, 18)",
+          "ratio": 18.11
+        },
+        "description": {
+          "foreground": "rgb(170, 181, 196)",
+          "background": "rgb(10, 13, 18)",
+          "ratio": 9.37
+        },
+        "primaryAction": {
+          "foreground": "rgb(35, 24, 10)",
+          "background": "rgb(255, 180, 84)",
+          "ratio": 9.87
+        },
+        "environmentStatus": {
+          "foreground": "rgb(244, 201, 93)",
+          "background": "rgb(42, 36, 18)",
+          "ratio": 9.83
+        }
+      },
+      "guidedAccessible": true,
+      "advancedAccessible": true,
+      "persistedResultButtonCount": 1,
+      "incompleteStateCaptured": true,
+      "overflowChecks": {
+        "1024": {
+          "overflows": false,
+          "scrollWidth": 1024,
+          "clientWidth": 1024
+        },
+        "1366": {
+          "overflows": false,
+          "scrollWidth": 1366,
+          "clientWidth": 1366
+        },
+        "1440": { "overflows": false, "scrollWidth": 1440, "clientWidth": 1440 }
+      },
+      "projectCodeWidths": [
+        {
+          "text": "https://towerdesk.netlify.app/",
+          "clientWidth": 227,
+          "scrollWidth": 227,
+          "overflow": "hidden",
+          "textOverflow": "ellipsis"
+        },
+        {
+          "text": "http://127.0.0.1:4300/",
+          "clientWidth": 227,
+          "scrollWidth": 227,
+          "overflow": "hidden",
+          "textOverflow": "ellipsis"
+        },
+        {
+          "text": "http://localhost:4200",
+          "clientWidth": 302,
+          "scrollWidth": 302,
+          "overflow": "hidden",
+          "textOverflow": "ellipsis"
+        }
+      ],
+      "fakeTerms": [],
+      "mainCount": 1,
+      "nestedMainCount": 0,
+      "skipLink": {
+        "exists": true,
+        "href": "#main-content",
+        "targetExists": true
+      },
+      "headings": [
+        { "level": 1, "text": "Project overview" },
+        { "level": 2, "text": "Connect a target" },
+        { "level": 2, "text": "Saved targets" },
+        { "level": 2, "text": "TOWERDESK" },
+        { "level": 2, "text": "How do you want to test this project?" },
+        {
+          "level": 2,
+          "text": "Test a recorded action without configuring the technical details"
+        },
+        { "level": 3, "text": "Select a normal journey" },
+        { "level": 4, "text": "Values FormCrash will enter" },
+        { "level": 4, "text": "Journey readiness" },
+        { "level": 2, "text": "Reproducible normal paths" }
+      ],
+      "skippedHeadingLevels": [],
+      "unnamedInteractiveCount": 0,
+      "reducedMotionPresent": true,
+      "latestPersistedResultLoaded": true
+    },
+    "runsList": {
+      "renderedRunCount": 12,
+      "persistedRunCount": 12,
+      "firstRunId": "2071d320-41ee-4a71-ae7a-e4d39088ce83",
+      "firstHref": "/runs/2071d320-41ee-4a71-ae7a-e4d39088ce83",
+      "availableStatuses": ["failed", "passed"],
+      "statusTexts": ["FAILED", "PASSED"],
+      "overflowChecks": {
+        "390": { "overflows": false, "scrollWidth": 390, "clientWidth": 390 },
+        "1024": {
+          "overflows": false,
+          "scrollWidth": 1024,
+          "clientWidth": 1024
+        },
+        "1366": {
+          "overflows": false,
+          "scrollWidth": 1366,
+          "clientWidth": 1366
+        },
+        "1440": { "overflows": false, "scrollWidth": 1440, "clientWidth": 1440 }
+      },
+      "responsiveStyles": {
+        "390": {
+          "tableDisplay": "block",
+          "theadDisplay": "none",
+          "rowDisplay": "block",
+          "cellDisplay": "grid"
+        },
+        "1024": {
+          "tableDisplay": "table",
+          "theadDisplay": "table-header-group",
+          "rowDisplay": "table-row",
+          "cellDisplay": "table-cell"
+        },
+        "1366": {
+          "tableDisplay": "table",
+          "theadDisplay": "table-header-group",
+          "rowDisplay": "table-row",
+          "cellDisplay": "table-cell"
+        },
+        "1440": {
+          "tableDisplay": "table",
+          "theadDisplay": "table-header-group",
+          "rowDisplay": "table-row",
+          "cellDisplay": "table-cell"
+        }
+      },
+      "tableHeaders": [
+        { "text": "Result", "scope": "col" },
+        { "text": "Run", "scope": "col" },
+        { "text": "Started", "scope": "col" },
+        { "text": "Duration", "scope": "col" },
+        { "text": "Observed outcome", "scope": "col" },
+        { "text": "Evidence", "scope": "col" }
+      ],
+      "runIdStyle": {
+        "color": "rgb(127, 141, 161)",
+        "fontFamily": "\"JetBrains Mono\", \"Cascadia Code\", Consolas, monospace",
+        "fontSize": "12.5px",
+        "headingFontSize": "13px",
+        "visuallySecondary": true
+      },
+      "resultLinkFocusStyle": {
+        "outlineColor": "rgb(244, 247, 251)",
+        "outlineStyle": "solid",
+        "outlineWidth": "3px",
+        "boxShadow": "rgba(0, 0, 0, 0) 0px 0px 0px 0px",
+        "keyboardReachable": true,
+        "visible": true
+      },
+      "contrast": {
+        "title": {
+          "foreground": "rgb(244, 247, 251)",
+          "background": "rgb(19, 26, 36)",
+          "ratio": 16.27
+        },
+        "tableHeader": {
+          "foreground": "rgb(127, 141, 161)",
+          "background": "rgb(8, 11, 16)",
+          "ratio": 5.84
+        },
+        "outcome": {
+          "foreground": "rgb(244, 247, 251)",
+          "background": "rgb(19, 26, 36)",
+          "ratio": 16.27
+        },
+        "failedStatus": {
+          "foreground": "rgb(127, 141, 161)",
+          "background": "rgb(43, 21, 26)",
+          "ratio": 5.08
+        },
+        "passedStatus": {
+          "foreground": "rgb(127, 141, 161)",
+          "background": "rgb(16, 39, 31)",
+          "ratio": 4.67
+        }
+      },
+      "fakeTerms": [],
+      "mainCount": 1,
+      "nestedMainCount": 0,
+      "skipLink": {
+        "exists": true,
+        "href": "#main-content",
+        "targetExists": true
+      },
+      "headings": [
+        { "level": 1, "text": "FormCrash Lab" },
+        { "level": 2, "text": "Run Sample Experiment" },
+        { "level": 2, "text": "Impatient User" },
+        { "level": 2, "text": "Runs" }
+      ],
+      "skippedHeadingLevels": [],
+      "unnamedInteractiveCount": 0,
+      "reducedMotionPresent": true,
+      "realResultRouteOpened": "http://localhost:3000/runs/2071d320-41ee-4a71-ae7a-e4d39088ce83"
+    },
+    "navigation": {
+      "states": [
+        {
+          "action": "External Projects",
+          "url": "http://localhost:3000/projects",
+          "current": ["External Projects"]
+        },
+        {
+          "action": "Sample Checkout",
+          "url": "http://localhost:3000/",
+          "current": ["Sample Checkout"]
+        },
+        {
+          "action": "Runs",
+          "url": "http://localhost:3000/#history-title",
+          "current": ["Runs"]
+        }
+      ]
+    },
+    "accessibility": {}
+  },
+  "consoleErrors": [],
+  "pageErrors": []
+}
