@@ -1,0 +1,149 @@
+{
+  "generatedAt": "2026-07-18T17:41:20.215Z",
+  "playwrightVersion": "1.61.1",
+  "browserVersion": "149.0.7827.55",
+  "services": {
+    "dashboard": {
+      "connected": true,
+      "status": 200,
+      "startedByHarness": false
+    },
+    "server": {
+      "connected": true,
+      "status": 200,
+      "startedByHarness": false
+    },
+    "sampleCheckout": {
+      "connected": true,
+      "status": 200,
+      "startedByHarness": false
+    }
+  },
+  "realData": {
+    "projects": [
+      {
+        "id": "829dce01-589e-426d-bc83-64ca27cfeac8",
+        "name": "TOWERDESK",
+        "environment": "production",
+        "journeyCount": 1
+      },
+      {
+        "id": "cdefe107-84cd-4bb2-a7ba-6d93f238dc32",
+        "name": "Outcome Walkthrough Fixture",
+        "environment": "local",
+        "journeyCount": 1
+      },
+      {
+        "id": "project-sample-checkout",
+        "name": "Sample Checkout",
+        "environment": "local",
+        "journeyCount": 0
+      }
+    ],
+    "primary": {
+      "projectId": "829dce01-589e-426d-bc83-64ca27cfeac8",
+      "projectName": "TOWERDESK",
+      "journeyId": "ad6267df-5167-462e-8f29-56e16bb92ef3",
+      "journeyName": "ADD Parking Slot",
+      "version": 1,
+      "replayFormat": "hybrid-v2",
+      "stepCount": 10,
+      "traceAvailable": true,
+      "videoAvailable": true,
+      "authenticationAvailable": true,
+      "criticalActionConfigured": false,
+      "outcomeCheckCount": 0
+    },
+    "semantic": {
+      "projectId": "cdefe107-84cd-4bb2-a7ba-6d93f238dc32",
+      "projectName": "Outcome Walkthrough Fixture",
+      "journeyId": "8ba7755c-61ce-41fb-9402-770ebf13bae0",
+      "journeyName": "Create profile",
+      "version": 1,
+      "replayFormat": "semantic-v1",
+      "stepCount": 3,
+      "traceAvailable": false,
+      "videoAvailable": false,
+      "authenticationAvailable": false,
+      "criticalActionConfigured": true,
+      "outcomeCheckCount": 3
+    }
+  },
+  "screenshots": [
+    "journey-detail-1440.png",
+    "journey-detail-1366.png",
+    "journey-detail-1024.png",
+    "journey-detail-390.png",
+    "journey-detail-incomplete-1440.png",
+    "journey-detail-semantic-v1-1440.png"
+  ],
+  "checks": {
+    "accessibility": {
+      "mainCount": 1,
+      "nestedMainCount": 0,
+      "unnamedInteractive": [],
+      "primaryActionCount": 1,
+      "primaryActionFocus": {
+        "outlineColor": "rgb(244, 201, 93)",
+        "outlineStyle": "solid",
+        "outlineWidth": "3px",
+        "boxShadow": "rgba(115, 183, 255, 0.28) 0px 0px 0px 3px",
+        "keyboardReachable": true,
+        "visible": true
+      },
+      "technicalDisclosureKeyboardAccessible": true
+    },
+    "functional": {
+      "realJourneyName": "ADD Parking Slot",
+      "selectedVersionId": "ad6267df-5167-462e-8f29-56e16bb92ef3",
+      "recordedStepCount": 10,
+      "criticalActionConfigured": false,
+      "outcomeCheckCount": 0,
+      "replayMode": "strict",
+      "replayPacing": "fast",
+      "guidedAccessible": true,
+      "advancedAccessible": true,
+      "recordNewVersionHref": "#recording-workspace",
+      "stitchExampleAbsent": true
+    },
+    "responsive": {
+      "mobileColumns": "358px",
+      "horizontalOverflow": {
+        "390": {
+          "overflows": false,
+          "scrollWidth": 390,
+          "clientWidth": 390
+        },
+        "1024": {
+          "overflows": false,
+          "scrollWidth": 1024,
+          "clientWidth": 1024
+        },
+        "1366": {
+          "overflows": false,
+          "scrollWidth": 1366,
+          "clientWidth": 1366
+        },
+        "1440": {
+          "overflows": false,
+          "scrollWidth": 1440,
+          "clientWidth": 1440
+        }
+      }
+    },
+    "visual": {
+      "stitchDirection": "Recorded sequence leads, Critical Action uses amber, readiness stays compact, and technical trace/video evidence remains secondary.",
+      "deliberateDifferences": [
+        "Production retains the real shared FormCrash shell instead of Stitch account chrome.",
+        "Real contract-backed replay, runtime, authentication, outcome, and trace sections extend below the compact Stitch composition.",
+        "Fake DOM snapshots and log artifacts are omitted."
+      ]
+    }
+  },
+  "skippedStates": [
+    "Complete hybrid-v2 capture: no real persisted journey matches this state.",
+    "Missing-runtime-data capture: no current real journey requires unresolved runtime data."
+  ],
+  "consoleErrors": [],
+  "pageErrors": []
+}
