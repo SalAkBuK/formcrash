@@ -190,12 +190,7 @@ export class OutcomeCaptureManager {
       });
       this.update(id, { status: 'replaying' });
       await browser.navigate(project.targetUrl);
-      if (storageStatePath !== null) {
-        await assertSavedAuthenticationSessionActive(
-          project.targetUrl,
-          browser,
-        );
-      }
+      await assertSavedAuthenticationSessionActive(project.targetUrl, browser);
       for (const step of baselineJourney.steps) {
         await executeRecordedStep(browser, step, (item) =>
           resolveStepValue(item, runtime),

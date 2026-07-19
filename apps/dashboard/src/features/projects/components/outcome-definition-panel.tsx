@@ -13,6 +13,7 @@ import type {
   ReplayLocator,
 } from '@formcrash/contracts';
 
+import { FormCrashApiError } from '../../../lib/api-client';
 import {
   approveCriticalAction,
   approveOutcomeCheck,
@@ -24,6 +25,10 @@ import {
   listOutcomeChecks,
   startOutcomeCapture,
 } from '../api/projects';
+import {
+  AuthenticationRecoveryPanel,
+  useAuthenticationGate,
+} from './authentication-gate';
 
 export function OutcomeDefinitionPanel({
   journey,
@@ -77,10 +82,20 @@ export function OutcomeDefinitionPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const authentication = useAuthenticationGate({
+    projectId: journey.projectId,
+  });
   const initialization = useRef<{
     readonly journeyId: string;
     readonly promise: ReturnType<typeof loadOutcomeDefinition>;
   } | null>(null);
+  const authenticationJourneyId = useRef(journey.id);
+
+  useEffect(() => {
+    if (authenticationJourneyId.current === journey.id) return;
+    authenticationJourneyId.current = journey.id;
+    authentication.complete();
+  }, [authentication.complete, journey.id]);
 
   useEffect(() => {
     let active = true;
@@ -166,7 +181,14 @@ export function OutcomeDefinitionPanel({
     }
   }
 
-  async function beginCapture(): Promise<void> {
+  async function beginCapture(preflightComplete = false): Promise<boolean> {
+    const operation = {
+      kind: 'startOutcomeBaseline',
+      projectId: journey.projectId,
+      journeyId: journey.id,
+    } as const;
+    if (!preflightComplete && !(await authentication.ensure(operation)))
+      return false;
     setBusy('capture');
     setError(null);
     try {
@@ -179,8 +201,15 @@ export function OutcomeDefinitionPanel({
       setBindingExpression(
         started.selectedTarget?.generatedBindings[0]?.expression ?? '',
       );
+      return true;
     } catch (reason: unknown) {
-      setError(messageOf(reason));
+      if (
+        reason instanceof FormCrashApiError &&
+        reason.code === 'AUTHENTICATION_REQUIRED'
+      ) {
+        authentication.requireRecovery(operation, 'expired');
+      } else setError(messageOf(reason));
+      return false;
     } finally {
       setBusy(null);
     }
@@ -271,6 +300,15 @@ export function OutcomeDefinitionPanel({
             {error}
           </div>
         )}
+        <AuthenticationRecoveryPanel
+          gate={authentication}
+          onRetry={(operation) => {
+            if (operation.kind !== 'startOutcomeBaseline') return;
+            void beginCapture(true).then((started) => {
+              if (started) authentication.complete();
+            });
+          }}
+        />
 
         {activeSection === 'checks' ? null : (
           <>
@@ -383,7 +421,8 @@ export function OutcomeDefinitionPanel({
                     busy !== null ||
                     disabled ||
                     criticalAction === null ||
-                    captureActive
+                    captureActive ||
+                    authentication.pending !== null
                   }
                   onClick={() => void beginCapture()}
                   type="button"

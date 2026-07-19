@@ -1,8 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import type { ExternalRunSummary } from '@formcrash/contracts';
+import { useEffect, useRef, useState } from 'react';
+import type {
+  AuthCaptureSession,
+  ExternalRunSummary,
+  ProjectAuthStatus,
+  ProjectExecutionSettings,
+} from '@formcrash/contracts';
 
 import { StateMessage } from '../../../components/ui/state-message';
 import {
@@ -11,6 +16,13 @@ import {
 } from '../../../components/ui/status-badge';
 import { formatDuration, formatLocalDateTime } from '../../../lib/formatters';
 import { getProject } from '../api/projects';
+import {
+  clearAuthentication,
+  confirmAuthenticationCapture,
+  getProjectSettings,
+  startAuthenticationCapture,
+  testAuthentication,
+} from '../api/external-experiments';
 import {
   loadProjectCrmData,
   scenarioSetupLabel,
@@ -26,6 +38,13 @@ export function ProjectOverviewScreen({
 }) {
   const [data, setData] = useState<ProjectCrmData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [authCapture, setAuthCapture] = useState<AuthCaptureSession | null>(
+    null,
+  );
+  const [authBusy, setAuthBusy] = useState<string | null>(null);
+  const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const authActionActive = useRef(false);
+  const verifiedSavedAuthentication = useRef<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -42,6 +61,120 @@ export function ProjectOverviewScreen({
       active = false;
     };
   }, [projectId]);
+
+  const updateSettings = (settings: ProjectExecutionSettings): void => {
+    setData((current) =>
+      current === null
+        ? current
+        : { ...current, settings: { status: 'available', value: settings } },
+    );
+  };
+
+  async function refreshAuthentication(): Promise<ProjectExecutionSettings> {
+    const settings = await getProjectSettings(projectId);
+    updateSettings(settings);
+    return settings;
+  }
+
+  async function checkAccess(): Promise<void> {
+    if (authActionActive.current) return;
+    authActionActive.current = true;
+    setAuthBusy('check');
+    setAuthMessage(null);
+    try {
+      const result = await testAuthentication(projectId);
+      await refreshAuthentication();
+      setAuthMessage(result.message);
+    } catch (reason: unknown) {
+      setAuthMessage(messageOf(reason));
+    } finally {
+      authActionActive.current = false;
+      setAuthBusy(null);
+    }
+  }
+
+  async function startAuthCapture(): Promise<void> {
+    if (authActionActive.current) return;
+    authActionActive.current = true;
+    setAuthBusy('capture');
+    setAuthMessage(null);
+    try {
+      setAuthCapture(await startAuthenticationCapture(projectId));
+    } catch (reason: unknown) {
+      setAuthMessage(messageOf(reason));
+    } finally {
+      authActionActive.current = false;
+      setAuthBusy(null);
+    }
+  }
+
+  async function confirmAuthCapture(): Promise<void> {
+    if (authActionActive.current || authCapture === null) return;
+    authActionActive.current = true;
+    setAuthBusy('confirm');
+    setAuthMessage(null);
+    try {
+      const completed = await confirmAuthenticationCapture(
+        projectId,
+        authCapture.id,
+      );
+      setAuthCapture(completed);
+      if (completed.status !== 'completed') {
+        setAuthMessage(
+          completed.errorMessage ??
+            'Authentication state could not be saved locally.',
+        );
+        return;
+      }
+      const result = await testAuthentication(projectId);
+      await refreshAuthentication();
+      setAuthMessage(
+        result.status === 'valid'
+          ? 'Authentication saved. Your browser session is ready.'
+          : result.message,
+      );
+    } catch (reason: unknown) {
+      setAuthMessage(messageOf(reason));
+    } finally {
+      authActionActive.current = false;
+      setAuthBusy(null);
+    }
+  }
+
+  async function removeAuthentication(): Promise<void> {
+    if (
+      authActionActive.current ||
+      !window.confirm('Clear saved authentication for this project?')
+    )
+      return;
+    authActionActive.current = true;
+    setAuthBusy('clear');
+    try {
+      updateSettings(await clearAuthentication(projectId));
+      setAuthCapture(null);
+      setAuthMessage('Saved authentication was cleared.');
+    } catch (reason: unknown) {
+      setAuthMessage(messageOf(reason));
+    } finally {
+      authActionActive.current = false;
+      setAuthBusy(null);
+    }
+  }
+
+  useEffect(() => {
+    const authentication =
+      data?.settings.status === 'available'
+        ? data.settings.value.authentication
+        : null;
+    if (
+      authentication?.available !== true ||
+      authentication.verification === 'valid' ||
+      verifiedSavedAuthentication.current === projectId
+    )
+      return;
+    verifiedSavedAuthentication.current = projectId;
+    void checkAccess();
+  }, [data, projectId]);
 
   if (error !== null)
     return <StateMessage variant="error">{error}</StateMessage>;
@@ -138,6 +271,19 @@ export function ProjectOverviewScreen({
         />
       </section>
 
+      {settings === null ? null : (
+        <AuthenticationOverviewCard
+          authentication={settings.authentication}
+          busy={authBusy}
+          capture={authCapture}
+          message={authMessage}
+          onCapture={() => void startAuthCapture()}
+          onClear={() => void removeAuthentication()}
+          onConfirm={() => void confirmAuthCapture()}
+          onTest={() => void checkAccess()}
+        />
+      )}
+
       <div className="crm-overview-layout">
         <div className="crm-overview-primary">
           <OverviewScenarios projectId={projectId} scenarios={scenarios} />
@@ -218,6 +364,180 @@ export function ProjectOverviewScreen({
       </div>
     </main>
   );
+}
+
+function AuthenticationOverviewCard({
+  authentication,
+  busy,
+  capture,
+  message,
+  onCapture,
+  onClear,
+  onConfirm,
+  onTest,
+}: {
+  readonly authentication: ProjectAuthStatus;
+  readonly busy: string | null;
+  readonly capture: AuthCaptureSession | null;
+  readonly message: string | null;
+  readonly onCapture: () => void;
+  readonly onClear: () => void;
+  readonly onConfirm: () => void;
+  readonly onTest: () => void;
+}) {
+  const state = authenticationState(authentication, capture);
+  const connected = state === 'Connected';
+  const expired = state === 'Expired';
+  const required = state === 'Required';
+  return (
+    <section
+      aria-labelledby="project-authentication-title"
+      className="panel crm-authentication-card"
+    >
+      <div>
+        <p className="eyebrow">Project prerequisite</p>
+        <h2 id="project-authentication-title">Authentication</h2>
+        <StatusBadge
+          tone={
+            connected || state === 'Not required'
+              ? 'pass'
+              : expired || required || state === 'Verification failed'
+                ? 'warning'
+                : 'neutral'
+          }
+        >
+          {state}
+        </StatusBadge>
+      </div>
+      <div>
+        <p>{authenticationDescription(state)}</p>
+        {connected ? (
+          <p>
+            Last verified:{' '}
+            {formatLocalDateTime(
+              authentication.lastCheckedAt ?? authentication.capturedAt,
+            )}
+          </p>
+        ) : null}
+        {message === null ? null : <p className="technical-note">{message}</p>}
+        <div className="crm-form-actions">
+          {capture?.status === 'awaiting_confirmation' ? (
+            <button
+              className="button button-primary"
+              disabled={busy !== null}
+              onClick={onConfirm}
+              type="button"
+            >
+              {busy === 'confirm' ? 'Saving…' : 'Save signed-in session'}
+            </button>
+          ) : connected ? (
+            <>
+              <button
+                className="button button-secondary"
+                disabled={busy !== null}
+                onClick={onTest}
+                type="button"
+              >
+                {busy === 'check' ? 'Testing…' : 'Test session'}
+              </button>
+              <button
+                className="button button-secondary"
+                disabled={busy !== null}
+                onClick={onCapture}
+                type="button"
+              >
+                Replace sign-in
+              </button>
+              <button
+                className="button button-destructive"
+                disabled={busy !== null}
+                onClick={onClear}
+                type="button"
+              >
+                Clear
+              </button>
+            </>
+          ) : required || expired ? (
+            <button
+              className="button button-primary"
+              disabled={busy !== null}
+              onClick={onCapture}
+              type="button"
+            >
+              {busy === 'capture'
+                ? 'Opening browser…'
+                : expired
+                  ? 'Capture sign-in again'
+                  : 'Capture sign-in'}
+            </button>
+          ) : (
+            <>
+              <button
+                className="button button-primary"
+                disabled={busy !== null}
+                onClick={onTest}
+                type="button"
+              >
+                {busy === 'check' ? 'Checking access…' : 'Check target access'}
+              </button>
+              <button
+                className="button button-secondary"
+                disabled={busy !== null}
+                onClick={onTest}
+                type="button"
+              >
+                This application does not require authentication
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function authenticationState(
+  authentication: ProjectAuthStatus,
+  capture: AuthCaptureSession | null,
+):
+  | 'Not checked'
+  | 'Not required'
+  | 'Required'
+  | 'Capture in progress'
+  | 'Connected'
+  | 'Expired'
+  | 'Verification failed' {
+  if (capture?.status === 'awaiting_confirmation') return 'Capture in progress';
+  if (authentication.verification === 'expired') return 'Expired';
+  if (
+    authentication.verification === 'failed' ||
+    authentication.verification === 'inconclusive'
+  )
+    return 'Verification failed';
+  if (authentication.available && authentication.verification === 'valid')
+    return 'Connected';
+  if (authentication.requirement === 'not_required') return 'Not required';
+  if (authentication.requirement === 'required') return 'Required';
+  if (authentication.available) return 'Connected';
+  return 'Not checked';
+}
+
+function authenticationDescription(
+  state: ReturnType<typeof authenticationState>,
+): string {
+  if (state === 'Connected')
+    return 'FormCrash can restore the saved browser session for protected operations.';
+  if (state === 'Not required')
+    return 'The target loaded normally without reaching an obvious sign-in route.';
+  if (state === 'Required')
+    return 'Required before FormCrash can record or replay protected journeys.';
+  if (state === 'Expired')
+    return 'FormCrash reached the login page instead of the application.';
+  if (state === 'Capture in progress')
+    return 'Sign in inside the visible Chromium window, then save the session.';
+  if (state === 'Verification failed')
+    return 'FormCrash could not verify target access. Retry the bounded access check.';
+  return 'Check whether the target can be used without a saved browser session.';
 }
 
 function OverviewScenarios({

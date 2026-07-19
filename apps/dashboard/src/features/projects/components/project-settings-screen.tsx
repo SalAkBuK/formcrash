@@ -245,9 +245,10 @@ export function ProjectSettingsScreen({
               </StatusBadge>
             </div>
             <p>
-              FormCrash may discover during replay that authentication is
-              required. Cookies, tokens, authorization headers, and captured
-              payloads are never displayed here.
+              Advanced management for testing, replacing, or clearing the
+              browser session shown on the project overview. Cookies, tokens,
+              authorization headers, and captured payloads are never displayed
+              here.
             </p>
             {settings.authentication.missingReason !== null ? (
               <StateMessage variant="warning">

@@ -41,6 +41,38 @@ afterEach(() => {
 
 describe('authentication validation', () => {
   it.each([
+    ['http://localhost:4300/portal', 'valid', 'public', 'not_required'],
+    [
+      'http://localhost:4300/login',
+      'invalid',
+      'authentication_required',
+      'required',
+    ],
+  ] as const)(
+    'classifies a target without saved state at %s as %s',
+    async (currentUrl, status, outcome, requirement) => {
+      const project = projects.createProject({
+        name: 'Unclassified target',
+        targetUrl: 'http://localhost:4300/portal',
+        environment: 'local',
+        description: '',
+      });
+      const store = new AuthStateStore(temporary.config.artifactRoot, settings);
+
+      const validation = await new AuthValidationService(
+        temporary.config,
+        projects,
+        store,
+        new BrowserOwnership(),
+        new FakeOwner(currentUrl),
+      ).validate(project.id);
+
+      expect(validation).toMatchObject({ status, outcome, currentUrl });
+      expect(store.status(project.id)).toMatchObject({ requirement });
+    },
+  );
+
+  it.each([
     ['http://localhost:4300/portal', 'valid'],
     ['http://localhost:4300/login', 'invalid'],
   ] as const)('classifies redirect to %s as %s', async (currentUrl, status) => {
@@ -69,6 +101,9 @@ describe('authentication validation', () => {
     ).validate(project.id);
 
     expect(validation.status).toBe(status);
+    expect(validation.outcome).toBe(
+      status === 'valid' ? 'authenticated' : 'authentication_expired',
+    );
     expect(validation.currentUrl).toBe(currentUrl);
     expect(ownership.activeWorkload).toBeNull();
   });

@@ -11,7 +11,6 @@ import {
   type SetStateAction,
 } from 'react';
 import type {
-  AuthCaptureSession,
   CreateExternalExperimentRequest,
   EphemeralRuntimeValues,
   ExternalRunDetail,
@@ -30,12 +29,9 @@ import { StateMessage } from '../../../components/ui/state-message';
 import { StatusBadge } from '../../../components/ui/status-badge';
 import { FormCrashApiError } from '../../../lib/api-client';
 import {
-  confirmAuthenticationCapture,
   createExternalExperiment,
   discoverRequests,
-  getProjectSettings,
   runExternalExperiment,
-  startAuthenticationCapture,
 } from '../api/external-experiments';
 import {
   guidedRecipe,
@@ -58,6 +54,11 @@ import {
   selectionProvenance,
 } from '../models/request-selection';
 import { ExternalRunResult } from './external-run-result';
+import {
+  AuthenticationRecoveryPanel,
+  type PendingProtectedOperation,
+  useAuthenticationGate,
+} from './authentication-gate';
 import {
   OutcomeDefinitionPanel,
   type OutcomeDefinitionState,
@@ -175,16 +176,13 @@ export function GuidedTestPanel({
     readonly RecommendationSelection[]
   >([]);
   const [result, setResult] = useState<ExternalRunDetail | null>(null);
-  const [busy, setBusy] = useState<
-    'review' | 'run' | 'auth-start' | 'auth-confirm' | null
-  >(null);
+  const [busy, setBusy] = useState<'review' | 'run' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showValidation, setShowValidation] = useState(false);
-  const [authenticationRequired, setAuthenticationRequired] = useState(false);
-  const [authCapture, setAuthCapture] = useState<AuthCaptureSession | null>(
-    null,
-  );
-  const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const authentication = useAuthenticationGate({
+    projectId: project.id,
+    onSettingsChange: onAuthenticationRecaptured,
+  });
   const submissionPending = useRef(false);
   const reviewPending = useRef(false);
   const restoredDraftName = useRef(false);
@@ -453,6 +451,7 @@ export function GuidedTestPanel({
   }, []);
 
   function selectJourney(nextJourneyId: string): void {
+    authentication.complete();
     setJourneyId(nextJourneyId);
     onSelectedJourneyChange?.(nextJourneyId);
   }
@@ -475,7 +474,7 @@ export function GuidedTestPanel({
     setError(null);
   }
 
-  async function prepareReview(): Promise<void> {
+  async function prepareReview(preflightComplete = false): Promise<boolean> {
     setShowValidation(true);
     if (
       reviewPending.current ||
@@ -483,8 +482,16 @@ export function GuidedTestPanel({
       journey === null ||
       criticalStep === null
     )
-      return;
-    if (safetyBlockers.length > 0) return;
+      return false;
+    if (safetyBlockers.length > 0) return false;
+    const operation = {
+      kind: 'startRequestDiscovery',
+      projectId: project.id,
+      journeyId: journey.id,
+      targetStepId: criticalStep.id,
+    } as const;
+    if (!preflightComplete && !(await authentication.ensure(operation)))
+      return false;
     reviewPending.current = true;
     setBusy('review');
     setError(null);
@@ -526,15 +533,17 @@ export function GuidedTestPanel({
       completeStep(2);
       navigateToStep(3);
       setShowValidation(false);
+      return true;
     } catch (reason: unknown) {
-      handleExecutionFailure(reason);
+      handleExecutionFailure(reason, operation);
+      return false;
     } finally {
       reviewPending.current = false;
       setBusy(null);
     }
   }
 
-  async function saveAndRun(): Promise<void> {
+  async function saveAndRun(preflightComplete = false): Promise<boolean> {
     setShowValidation(true);
     if (
       submissionPending.current ||
@@ -545,8 +554,15 @@ export function GuidedTestPanel({
       selectedCandidate === null ||
       reviewBlockers.length > 0
     ) {
-      return;
+      return false;
     }
+    const operation = {
+      kind: 'runExperiment',
+      projectId: project.id,
+      journeyId: journey.id,
+    } as const;
+    if (!preflightComplete && !(await authentication.ensure(operation)))
+      return false;
     submissionPending.current = true;
     setBusy('run');
     setError(null);
@@ -579,67 +595,36 @@ export function GuidedTestPanel({
         'adaptive',
         replayPacing,
       );
+      if (completed.runnerError?.code === 'authentication_required') {
+        authentication.requireRecovery(operation, 'expired');
+        return false;
+      }
       setResult(completed);
       completeStep(3);
       onCompleted(completed);
-      if (completed.runnerError?.code === 'authentication_required') {
-        setAuthenticationRequired(true);
-        setAuthMessage(completed.runnerError.message);
-      }
+      return true;
     } catch (reason: unknown) {
-      handleExecutionFailure(reason);
+      handleExecutionFailure(reason, operation);
+      return false;
     } finally {
       submissionPending.current = false;
       setBusy(null);
     }
   }
 
-  function handleExecutionFailure(reason: unknown): void {
+  function handleExecutionFailure(
+    reason: unknown,
+    operation: PendingProtectedOperation,
+  ): void {
     if (
       reason instanceof FormCrashApiError &&
       reason.code === 'AUTHENTICATION_REQUIRED'
     ) {
-      setAuthenticationRequired(true);
-      setAuthMessage(reason.message);
+      authentication.requireRecovery(operation, 'expired');
       setError(null);
       return;
     }
     setError(messageOf(reason));
-  }
-
-  async function beginAuthenticationRecovery(): Promise<void> {
-    setBusy('auth-start');
-    setError(null);
-    try {
-      setAuthCapture(await startAuthenticationCapture(project.id));
-    } catch (reason: unknown) {
-      setError(messageOf(reason));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function confirmAuthenticationRecovery(): Promise<void> {
-    if (authCapture === null) return;
-    setBusy('auth-confirm');
-    setError(null);
-    try {
-      const completed = await confirmAuthenticationCapture(
-        project.id,
-        authCapture.id,
-      );
-      setAuthCapture(completed);
-      const refreshed = await getProjectSettings(project.id);
-      onAuthenticationRecaptured(refreshed);
-      setAuthenticationRequired(false);
-      setAuthMessage(
-        'Authentication was saved. Return to Safety & Data and prepare the review again.',
-      );
-    } catch (reason: unknown) {
-      setError(messageOf(reason));
-    } finally {
-      setBusy(null);
-    }
   }
 
   if (journeys.length === 0) {
@@ -693,38 +678,20 @@ export function GuidedTestPanel({
         <StateMessage variant="error">{error}</StateMessage>
       ) : null}
 
-      {authenticationRequired ? (
-        <StateMessage variant="error">
-          <strong>Authentication interrupted</strong>
-          <p>
-            {authMessage ??
-              'Replay proved that the target requires a new saved sign-in.'}
-          </p>
-          <div className="guided-action-row">
-            <Button
-              compact
-              disabled={busy !== null}
-              onClick={() => void beginAuthenticationRecovery()}
-            >
-              {busy === 'auth-start' ? 'Launching sign-in…' : 'Sign in again'}
-            </Button>
-            {authCapture?.status === 'awaiting_confirmation' ? (
-              <Button
-                compact
-                disabled={busy !== null}
-                onClick={() => void confirmAuthenticationRecovery()}
-                variant="primary"
-              >
-                {busy === 'auth-confirm'
-                  ? 'Saving session…'
-                  : 'I am signed in — save session'}
-              </Button>
-            ) : null}
-          </div>
-        </StateMessage>
-      ) : authMessage !== null ? (
-        <StateMessage>{authMessage}</StateMessage>
-      ) : null}
+      <AuthenticationRecoveryPanel
+        gate={authentication}
+        onRetry={(operation) => {
+          const retry =
+            operation.kind === 'startRequestDiscovery'
+              ? prepareReview(true)
+              : operation.kind === 'runExperiment'
+                ? saveAndRun(true)
+                : Promise.resolve(false);
+          void retry.then((started) => {
+            if (started) authentication.complete();
+          });
+        }}
+      />
 
       <section
         aria-labelledby="guided-expected-title"
@@ -1305,7 +1272,12 @@ export function GuidedTestPanel({
                 <Button onClick={() => navigateToStep(1)}>Back</Button>
                 <Button
                   className="guided-wizard-primary"
-                  disabled={busy !== null || safetyBlockers.length > 0}
+                  disabled={
+                    busy !== null ||
+                    authentication.busy ||
+                    authentication.pending !== null ||
+                    safetyBlockers.length > 0
+                  }
                   onClick={() => void prepareReview()}
                   variant="primary"
                 >
@@ -1586,6 +1558,8 @@ export function GuidedTestPanel({
                   className="guided-wizard-primary"
                   disabled={
                     busy !== null ||
+                    authentication.busy ||
+                    authentication.pending !== null ||
                     reviewBlockers.length > 0 ||
                     result !== null
                   }

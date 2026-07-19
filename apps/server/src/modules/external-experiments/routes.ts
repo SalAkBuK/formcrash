@@ -175,6 +175,23 @@ export function registerExternalExperimentRoutes(
     },
   );
 
+  app.post<{ Params: CaptureParams }>(
+    '/api/projects/:projectId/auth-captures/:captureId/cancel',
+    async (request, reply) => {
+      const capture = dependencies.authCaptures.get(request.params.captureId);
+      if (capture === null || capture.projectId !== request.params.projectId) {
+        return notFound(reply, 'Authentication capture');
+      }
+      try {
+        return reply.send(
+          await dependencies.authCaptures.cancel(request.params.captureId),
+        );
+      } catch (error: unknown) {
+        return conflict(reply, publicMessage(error));
+      }
+    },
+  );
+
   app.delete<{ Params: ProjectParams }>(
     '/api/projects/:projectId/authentication',
     async (request, reply) => {

@@ -13,6 +13,7 @@ import { ExternalExperimentPanel } from '../src/features/projects/components/ext
 import { FormCrashApiError } from '../src/lib/api-client';
 
 const mocks = vi.hoisted(() => ({
+  cancelAuthenticationCapture: vi.fn(),
   clearAuthentication: vi.fn(),
   confirmAuthenticationCapture: vi.fn(),
   createExternalExperiment: vi.fn(),
@@ -197,6 +198,14 @@ const outcomeCheck = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.testAuthentication.mockResolvedValue({
+    projectId: project.id,
+    status: 'valid',
+    outcome: 'authenticated',
+    currentUrl: project.targetUrl,
+    message: 'Connected.',
+    checkedAt: '2026-07-16T00:00:00.000Z',
+  });
   mocks.getExternalArtifactUrl.mockReturnValue(
     'http://localhost:4100/api/external-runs/run-1/artifacts/screen-1',
   );
@@ -519,13 +528,16 @@ describe('external experiment dashboard workflow', () => {
       'Place order',
     );
 
-    await user.click(
-      screen.getByRole('button', { name: 'Start outcome baseline' }),
-    );
+    const baseline = screen.getByRole('button', {
+      name: 'Start outcome baseline',
+    });
+    await waitFor(() => expect(baseline).toBeEnabled());
+    await user.click(baseline);
     await waitFor(() =>
       expect(mocks.startOutcomeCapture).toHaveBeenCalledOnce(),
     );
-    expect(mocks.getProjectSettings).toHaveBeenCalledOnce();
+    expect(mocks.getProjectSettings).toHaveBeenCalledTimes(2);
+    expect(mocks.testAuthentication).toHaveBeenCalledOnce();
     expect(mocks.listExternalRuns).toHaveBeenCalledOnce();
     expect(mocks.listExternalExperiments).toHaveBeenCalledOnce();
     expect(mocks.getCriticalAction).toHaveBeenCalledOnce();
@@ -547,6 +559,80 @@ describe('external experiment dashboard workflow', () => {
     expect(
       screen.getByRole('button', { name: 'Set up authentication' }),
     ).toBeVisible();
+  });
+
+  it('does not start request discovery before authentication succeeds', async () => {
+    const user = userEvent.setup();
+    mocks.testAuthentication.mockResolvedValue({
+      projectId: project.id,
+      status: 'invalid',
+      outcome: 'authentication_required',
+      currentUrl: 'http://localhost:4300/login',
+      message: 'Sign-in required.',
+      checkedAt: '2026-07-16T00:00:00.000Z',
+    });
+    render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
+
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Continue to Safety & Data',
+      }),
+    );
+    await user.type(
+      await screen.findByLabelText('Runtime SECRET_TOKEN'),
+      'runtime-only',
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Continue to Review' }),
+    );
+
+    expect(await screen.findByText('Sign-in required')).toBeVisible();
+    expect(mocks.discoverRequests).not.toHaveBeenCalled();
+  });
+
+  it('does not create or run an experiment before its authentication preflight', async () => {
+    const user = userEvent.setup();
+    mocks.testAuthentication
+      .mockResolvedValueOnce({
+        projectId: project.id,
+        status: 'valid',
+        outcome: 'authenticated',
+        currentUrl: project.targetUrl,
+        message: 'Connected.',
+        checkedAt: '2026-07-16T00:00:00.000Z',
+      })
+      .mockResolvedValueOnce({
+        projectId: project.id,
+        status: 'invalid',
+        outcome: 'authentication_expired',
+        currentUrl: 'http://localhost:4300/login',
+        message: 'Expired.',
+        checkedAt: '2026-07-16T00:01:00.000Z',
+      });
+    render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
+
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Continue to Safety & Data',
+      }),
+    );
+    await user.type(
+      await screen.findByLabelText('Runtime SECRET_TOKEN'),
+      'runtime-only',
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Continue to Review' }),
+    );
+    await screen.findByRole('heading', { name: 'Review & Run' });
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Run repeated-submission experiment',
+      }),
+    );
+
+    expect(await screen.findByText('Authentication expired')).toBeVisible();
+    expect(mocks.createExternalExperiment).not.toHaveBeenCalled();
+    expect(mocks.runExternalExperiment).not.toHaveBeenCalled();
   });
 
   it('blocks the first step while Outcome Checks are empty and exposes the existing capture entry', async () => {
@@ -760,12 +846,14 @@ describe('external experiment dashboard workflow', () => {
       screen.getByRole('button', { name: 'Continue to Review' }),
     );
 
-    expect(await screen.findByText('Authentication interrupted')).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Sign in again' }));
+    expect(await screen.findByText('Authentication expired')).toBeVisible();
+    await user.click(
+      screen.getByRole('button', { name: 'Capture sign-in again' }),
+    );
     expect(mocks.startAuthenticationCapture).toHaveBeenCalledWith(project.id);
     await user.click(
       await screen.findByRole('button', {
-        name: /I am signed in/u,
+        name: 'Save signed-in session',
       }),
     );
 
@@ -773,12 +861,19 @@ describe('external experiment dashboard workflow', () => {
       project.id,
       awaitingAuthenticationCapture.id,
     );
-    expect(await screen.findByText(/Authentication was saved/)).toBeVisible();
+    expect(await screen.findByText('Authentication saved')).toBeVisible();
     expect(
-      screen.getByText(/Return to Safety & Data and prepare the review again/u),
+      screen.getByRole('button', { name: 'Retry request discovery' }),
     ).toBeVisible();
+    expect(mocks.discoverRequests).toHaveBeenCalledOnce();
+    await user.click(
+      screen.getByRole('button', { name: 'Retry request discovery' }),
+    );
+    await waitFor(() =>
+      expect(mocks.discoverRequests).toHaveBeenCalledTimes(2),
+    );
     expect(
-      screen.queryByRole('button', { name: 'Open Advanced mode' }),
+      screen.getAllByRole('button', { name: 'Open Advanced mode' })[0],
     ).toBeVisible();
   });
 

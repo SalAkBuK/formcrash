@@ -8,6 +8,7 @@ import { initializePersistence } from '../src/persistence/initialize.js';
 import { ProjectJourneyRepository } from '../src/persistence/project-journey-repository.js';
 import { ProjectSettingsRepository } from '../src/persistence/project-settings-repository.js';
 import { AuthStateStore } from '../src/runner/external/auth-session.js';
+import { SavedAuthenticationExpiredError } from '../src/runner/external/authentication-redirect.js';
 import type {
   ExternalBrowserOptions,
   ExternalBrowserOwner,
@@ -102,6 +103,32 @@ describe('recording event normalization', () => {
     await manager.stop(started.id);
   });
 
+  it('does not activate recording or expose login interactions when the target redirects to sign-in', async () => {
+    temporary = createTemporaryTestConfig();
+    database = initializePersistence(temporary.config);
+    const repository = new ProjectJourneyRepository(database.connection);
+    const project = repository.createProject({
+      name: 'Protected recording',
+      targetUrl: 'https://example.test/protected',
+      description: '',
+    });
+    const browserOwner = new LoginRecordingBrowserOwner();
+    const ownership = new BrowserOwnership();
+    const manager = new RecordingManager(
+      temporary.config,
+      repository,
+      ownership,
+      browserOwner,
+    );
+
+    await expect(manager.start(project.id)).rejects.toBeInstanceOf(
+      SavedAuthenticationExpiredError,
+    );
+
+    expect(browserOwner.closed).toBe(true);
+    expect(ownership.activeWorkload).toBeNull();
+  });
+
   it('coalesces one field across pauses until another action occurs', async () => {
     temporary = createTemporaryTestConfig();
     database = initializePersistence(temporary.config);
@@ -182,6 +209,26 @@ class CapturingBrowserOwner implements ExternalBrowserOwner {
   ): Promise<RecordingBrowserSession> {
     this.options = options;
     return Promise.resolve({ close: () => Promise.resolve() });
+  }
+
+  launchReplay(): Promise<ReplayBrowserSession> {
+    return Promise.reject(new Error('Not used.'));
+  }
+}
+
+class LoginRecordingBrowserOwner implements ExternalBrowserOwner {
+  closed = false;
+
+  launchRecording(): Promise<RecordingBrowserSession> {
+    return Promise.resolve({
+      currentUrl: () => 'https://example.test/login',
+      detectAuthenticationRequired: () =>
+        Promise.resolve({ message: 'Sign-in required.' }),
+      close: () => {
+        this.closed = true;
+        return Promise.resolve();
+      },
+    });
   }
 
   launchReplay(): Promise<ReplayBrowserSession> {

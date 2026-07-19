@@ -110,6 +110,8 @@ export interface RecordingCallbacks {
 export interface RecordingBrowserSession {
   close(): Promise<void>;
   recordedVideoPaths?(): readonly string[];
+  currentUrl?(): string;
+  detectAuthenticationRequired?(): Promise<AuthenticationRequirementDetection | null>;
 }
 
 export interface ReplayBrowserSession {

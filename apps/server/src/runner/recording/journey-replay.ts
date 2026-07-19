@@ -124,12 +124,7 @@ export class JourneyReplayService {
         ...(storageStatePath === null ? {} : { storageStatePath }),
       });
       await session.navigate(project.targetUrl);
-      if (storageStatePath !== null) {
-        await assertSavedAuthenticationSessionActive(
-          project.targetUrl,
-          session,
-        );
-      }
+      await assertSavedAuthenticationSessionActive(project.targetUrl, session);
       for (const [index, step] of journey.steps.entries()) {
         const interaction = interactions.get(step.id);
         const previousStep = journey.steps[index - 1];

@@ -27,6 +27,15 @@ export interface StoredAuthSession {
   readonly updatedAt: string;
 }
 
+export interface StoredAuthAccess {
+  readonly projectId: string;
+  readonly requirement: 'unknown' | 'not_required' | 'required';
+  readonly verification:
+    'not_checked' | 'valid' | 'expired' | 'failed' | 'inconclusive';
+  readonly lastCheckedAt: string | null;
+  readonly updatedAt: string;
+}
+
 interface SettingsRow {
   readonly projectId: string;
   readonly variablesJson: string;
@@ -49,6 +58,14 @@ interface CaptureRow {
   readonly errorMessage: string | null;
   readonly startedAt: string;
   readonly completedAt: string | null;
+}
+
+interface AuthAccessRow {
+  readonly projectId: string;
+  readonly requirement: StoredAuthAccess['requirement'];
+  readonly verification: StoredAuthAccess['verification'];
+  readonly lastCheckedAt: string | null;
+  readonly updatedAt: string;
 }
 
 export class ProjectSettingsRepository {
@@ -151,6 +168,48 @@ export class ProjectSettingsRepository {
     this.database
       .prepare('DELETE FROM project_auth_sessions WHERE project_id = ?')
       .run(projectId);
+  }
+
+  getAuthAccess(projectId: string): StoredAuthAccess {
+    const row = this.database
+      .prepare(
+        `SELECT project_id AS projectId, requirement, verification,
+                last_checked_at AS lastCheckedAt, updated_at AS updatedAt
+           FROM project_auth_access WHERE project_id = ?`,
+      )
+      .get(projectId) as AuthAccessRow | undefined;
+    return (
+      row ?? {
+        projectId,
+        requirement: 'unknown',
+        verification: 'not_checked',
+        lastCheckedAt: null,
+        updatedAt: new Date(0).toISOString(),
+      }
+    );
+  }
+
+  saveAuthAccess(input: Omit<StoredAuthAccess, 'updatedAt'>): StoredAuthAccess {
+    const now = new Date().toISOString();
+    this.database
+      .prepare(
+        `INSERT INTO project_auth_access
+          (project_id, requirement, verification, last_checked_at, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(project_id) DO UPDATE SET
+           requirement = excluded.requirement,
+           verification = excluded.verification,
+           last_checked_at = excluded.last_checked_at,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        input.projectId,
+        input.requirement,
+        input.verification,
+        input.lastCheckedAt,
+        now,
+      );
+    return this.getAuthAccess(input.projectId);
   }
 
   createAuthCapture(projectId: string): AuthCaptureSession {

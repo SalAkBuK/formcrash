@@ -4965,6 +4965,26 @@ code,
   max-width: 100%;
 }
 
+.crm-authentication-card {
+  display: grid;
+  grid-template-columns: minmax(12rem, 0.4fr) minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+  margin-bottom: 1.25rem;
+  padding: 1rem;
+  border-color: var(--border-strong);
+}
+
+.crm-authentication-card h2 {
+  margin: 0.15rem 0 0.65rem;
+  font-size: 1.125rem;
+}
+
+.crm-authentication-card p {
+  margin-top: 0;
+  color: var(--text-secondary);
+}
+
 .crm-overview-layout,
 .crm-settings-layout {
   display: grid;
@@ -5279,6 +5299,10 @@ code,
   }
 
   .crm-status-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .crm-authentication-card {
     grid-template-columns: 1fr;
   }
 

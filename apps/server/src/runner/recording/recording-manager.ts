@@ -31,6 +31,10 @@ import type { ServerConfig } from '../../app/config.js';
 import { JourneyTraceStore } from '../../artifacts/journey-trace-store.js';
 import type { ProjectJourneyRepository } from '../../persistence/project-journey-repository.js';
 import type { AuthStateStore } from '../external/auth-session.js';
+import {
+  isAuthenticationRedirect,
+  SavedAuthenticationExpiredError,
+} from '../external/authentication-redirect.js';
 import type { BrowserOwnership } from '../infrastructure/browser-ownership.js';
 import {
   PlaywrightExternalBrowserOwner,
@@ -172,6 +176,21 @@ export class RecordingManager {
           },
         },
       );
+      try {
+        const currentUrl = browser.currentUrl?.();
+        const visibleRequirement =
+          await browser.detectAuthenticationRequired?.();
+        if (
+          (currentUrl !== undefined &&
+            isAuthenticationRedirect(project.targetUrl, currentUrl)) ||
+          (visibleRequirement !== undefined && visibleRequirement !== null)
+        ) {
+          throw new SavedAuthenticationExpiredError();
+        }
+      } catch (error: unknown) {
+        await browser.close().catch(() => undefined);
+        throw error;
+      }
       const maximumDurationTimer = setTimeout(
         () => {
           if (this.active?.sessionId === created.id) {
@@ -194,7 +213,7 @@ export class RecordingManager {
     } catch (error: unknown) {
       releaseOwnership();
       this.traceStore.removeRecording(created.id);
-      return this.repository.updateRecordingSession({
+      const failed = this.repository.updateRecordingSession({
         id: created.id,
         status: 'runner_error',
         errorMessage: publicError(
@@ -203,6 +222,8 @@ export class RecordingManager {
         ),
         completedAt: new Date().toISOString(),
       });
+      if (error instanceof SavedAuthenticationExpiredError) throw error;
+      return failed;
     }
   }
 

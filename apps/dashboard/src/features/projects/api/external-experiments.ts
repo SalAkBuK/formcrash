@@ -72,6 +72,17 @@ export function confirmAuthenticationCapture(
   );
 }
 
+export function cancelAuthenticationCapture(
+  projectId: string,
+  captureId: string,
+): Promise<AuthCaptureSession> {
+  return requestJson(
+    `/api/projects/${projectId}/auth-captures/${captureId}/cancel`,
+    authCaptureSessionSchema,
+    { method: 'POST' },
+  );
+}
+
 export function clearAuthentication(
   projectId: string,
 ): Promise<ProjectExecutionSettings> {

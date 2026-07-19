@@ -30,6 +30,8 @@ const mocks = vi.hoisted(() => ({
   startAuthenticationCapture: vi.fn(),
   startOutcomeCapture: vi.fn(),
   stopRecording: vi.fn(),
+  testAuthentication: vi.fn(),
+  cancelAuthenticationCapture: vi.fn(),
 }));
 
 vi.mock('../src/features/projects/api/projects', () => mocks);
@@ -39,6 +41,8 @@ vi.mock('../src/features/projects/api/external-experiments', () => ({
   listExternalExperiments: mocks.listExternalExperiments,
   listExternalRuns: mocks.listExternalRuns,
   startAuthenticationCapture: mocks.startAuthenticationCapture,
+  testAuthentication: mocks.testAuthentication,
+  cancelAuthenticationCapture: mocks.cancelAuthenticationCapture,
 }));
 
 const project = {
@@ -114,6 +118,14 @@ const awaitingAuthenticationCapture = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.testAuthentication.mockResolvedValue({
+    projectId: project.id,
+    status: 'valid',
+    outcome: 'public',
+    currentUrl: project.targetUrl,
+    message: 'Public target.',
+    checkedAt: '2026-07-16T00:00:00.000Z',
+  });
   mocks.getProjectSettings.mockResolvedValue({
     projectId: project.id,
     variables: [],

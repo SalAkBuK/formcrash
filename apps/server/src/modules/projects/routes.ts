@@ -168,6 +168,14 @@ export function registerProjectRoutes(
       } catch (error: unknown) {
         if (error instanceof BrowserOwnershipConflictError)
           return conflict(reply, error.message);
+        if (error instanceof SavedAuthenticationExpiredError) {
+          return reply.status(409).send({
+            error: {
+              code: 'AUTHENTICATION_REQUIRED',
+              message: error.message,
+            },
+          });
+        }
         throw error;
       }
     },
