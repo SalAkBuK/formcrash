@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ApplicationShell } from '../src/components/application-shell';
 import { ProjectListScreen } from '../src/features/projects/components/project-list-screen';
 import { ProjectWorkspaceLayout } from '../src/features/projects/components/project-workspace-layout';
 import { readGuidedTestDraft } from '../src/features/projects/components/test-builder-screen';
@@ -17,6 +18,7 @@ const api = vi.hoisted(() => ({
   getProject: vi.fn(),
   listProjects: vi.fn(),
 }));
+const crm = vi.hoisted(() => ({ loadProjectCrmData: vi.fn() }));
 
 vi.mock('next/navigation', () => ({
   usePathname: () => navigation.pathname,
@@ -30,6 +32,13 @@ vi.mock('../src/features/projects/api/projects', async (importOriginal) => ({
   getProject: api.getProject,
   listProjects: api.listProjects,
 }));
+vi.mock(
+  '../src/features/projects/components/crm-project-data',
+  async (importOriginal) => ({
+    ...(await importOriginal()),
+    loadProjectCrmData: crm.loadProjectCrmData,
+  }),
+);
 
 const first = {
   id: 'project-one',
@@ -53,43 +62,79 @@ beforeEach(() => {
   window.sessionStorage.clear();
   api.getProject.mockResolvedValue(first);
   api.listProjects.mockResolvedValue([first, second]);
+  api.createProject.mockResolvedValue(first);
+  api.deleteProject.mockResolvedValue(undefined);
+  crm.loadProjectCrmData.mockImplementation((project: typeof first) =>
+    Promise.resolve({
+      project,
+      settings: { status: 'unavailable', reason: 'Not loaded' },
+      journeys: { status: 'available', value: [] },
+      experiments: { status: 'available', value: [] },
+      runs: { status: 'available', value: [] },
+      scenarios: { status: 'available', value: [] },
+      lastActivity: project.updatedAt,
+    }),
+  );
 });
 
 describe('CRM project workspace', () => {
   it('renders durable project tabs and marks the matching nested route current', async () => {
     navigation.pathname = '/projects/project-one/journeys/journey-one/replay';
     render(
-      <ProjectWorkspaceLayout projectId={first.id}>
-        <main>Nested route</main>
-      </ProjectWorkspaceLayout>,
+      <ApplicationShell>
+        <ProjectWorkspaceLayout projectId={first.id}>
+          <main>Nested route</main>
+        </ProjectWorkspaceLayout>
+      </ApplicationShell>,
     );
 
-    expect(
-      await screen.findByRole('heading', { name: first.name }),
-    ).toBeVisible();
-    expect(screen.getByRole('link', { name: 'Journeys' })).toHaveAttribute(
+    expect(await screen.findByTitle(first.name)).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Scenarios' })).toHaveAttribute(
       'aria-current',
       'page',
     );
-    expect(screen.getByRole('link', { name: 'Tests' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Scenarios' })).toHaveAttribute(
       'href',
-      `/projects/${first.id}/tests`,
+      `/projects/${first.id}/scenarios`,
     );
+    expect(
+      screen.queryByRole('link', { name: 'Journeys' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: 'Tests' }),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole('main')).toHaveTextContent('Nested route');
   });
 
   it('switches projects through a real project selector', async () => {
     const user = userEvent.setup();
     render(
-      <ProjectWorkspaceLayout projectId={first.id}>
-        <main>Overview</main>
-      </ProjectWorkspaceLayout>,
+      <ApplicationShell>
+        <ProjectWorkspaceLayout projectId={first.id}>
+          <main>Overview</main>
+        </ProjectWorkspaceLayout>
+      </ApplicationShell>,
     );
     await user.selectOptions(
       await screen.findByLabelText('Switch project'),
       second.id,
     );
     expect(navigation.push).toHaveBeenCalledWith(`/projects/${second.id}`);
+  });
+
+  it('marks Scenarios current for legacy Test routes', async () => {
+    navigation.pathname = '/projects/project-one/tests/configuration-one';
+    render(
+      <ApplicationShell>
+        <ProjectWorkspaceLayout projectId={first.id}>
+          <main>Legacy Test route</main>
+        </ProjectWorkspaceLayout>
+      </ApplicationShell>,
+    );
+
+    expect(
+      await screen.findByRole('link', { name: 'Scenarios' }),
+    ).toHaveAttribute('aria-current', 'page');
   });
 
   it('filters the project directory without hiding canonical links', async () => {
@@ -103,6 +148,41 @@ describe('CRM project workspace', () => {
     expect(
       screen.getByRole('link', { name: /Checkout staging/ }),
     ).toHaveAttribute('href', `/projects/${second.id}`);
+  });
+
+  it('keeps real environment filtering, creation, and deletion available', async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    render(<ProjectListScreen />);
+    await screen.findByText(first.name);
+
+    await user.selectOptions(
+      screen.getByLabelText('Filter environment'),
+      'staging',
+    );
+    expect(screen.queryByText(first.name)).not.toBeInTheDocument();
+    expect(screen.getByText(second.name)).toBeVisible();
+
+    await user.selectOptions(
+      screen.getByLabelText('Filter environment'),
+      'all',
+    );
+    await user.click(screen.getByLabelText(`Select ${first.name}`));
+    await user.click(screen.getByRole('button', { name: /Delete selected/ }));
+    await waitFor(() =>
+      expect(api.deleteProject).toHaveBeenCalledWith(first.id, true),
+    );
+
+    await user.click(screen.getByRole('button', { name: 'New Project' }));
+    await user.type(screen.getByLabelText('Project name'), 'New target');
+    await user.type(
+      screen.getByLabelText('Target URL'),
+      'http://localhost:4400',
+    );
+    await user.click(screen.getByRole('button', { name: 'Create project' }));
+    await waitFor(() => expect(api.createProject).toHaveBeenCalledOnce());
+    expect(navigation.push).toHaveBeenCalledWith(`/projects/${first.id}`);
+    confirm.mockRestore();
   });
 
   it('sanitizes restored Guided Test drafts and rejects unsafe value modes', () => {

@@ -7,11 +7,21 @@ import type { Project } from '@formcrash/contracts';
 
 import { StateMessage } from '../../../components/ui/state-message';
 import { StatusBadge } from '../../../components/ui/status-badge';
+import { formatLocalDateTime } from '../../../lib/formatters';
 import { createProject, deleteProject, listProjects } from '../api/projects';
+import {
+  loadProjectCrmData,
+  scenarioSetupLabel,
+  verdictLabel,
+  type ProjectCrmData,
+} from './crm-project-data';
 
 export function ProjectListScreen() {
   const router = useRouter();
   const [projects, setProjects] = useState<readonly Project[]>([]);
+  const [records, setRecords] = useState<ReadonlyMap<string, ProjectCrmData>>(
+    new Map(),
+  );
   const [query, setQuery] = useState('');
   const [environment, setEnvironment] = useState('all');
   const [creating, setCreating] = useState(false);
@@ -41,9 +51,20 @@ export function ProjectListScreen() {
     setBusy('loading');
     setError(null);
     try {
-      setProjects(
-        (await listProjects()).filter(
-          (project) => project.id !== 'project-sample-checkout',
+      const nextProjects = (await listProjects()).filter(
+        (project) => project.id !== 'project-sample-checkout',
+      );
+      setProjects(nextProjects);
+      const derived = await Promise.allSettled(
+        nextProjects.map((project) => loadProjectCrmData(project, 20)),
+      );
+      setRecords(
+        new Map(
+          derived.flatMap((result) =>
+            result.status === 'fulfilled'
+              ? [[result.value.project.id, result.value] as const]
+              : [],
+          ),
         ),
       );
     } catch (reason: unknown) {
@@ -109,8 +130,8 @@ export function ProjectListScreen() {
           <p className="eyebrow">External workflow</p>
           <h1>Projects</h1>
           <p>
-            Controlled application targets, their recorded journeys, tests, and
-            durable run evidence.
+            Controlled application targets, recorded Scenarios, Configurations,
+            and durable Run evidence.
           </p>
         </div>
         <button
@@ -118,7 +139,7 @@ export function ProjectListScreen() {
           onClick={() => setCreating((current) => !current)}
           type="button"
         >
-          {creating ? 'Close form' : 'Create project'}
+          {creating ? 'Close form' : 'New Project'}
         </button>
       </header>
 
@@ -249,12 +270,15 @@ export function ProjectListScreen() {
             <table className="crm-table">
               <thead>
                 <tr>
-                  <th aria-label="Select" />
-                  <th>Project</th>
-                  <th>Environment</th>
-                  <th>Target</th>
-                  <th>Updated</th>
-                  <th aria-label="Actions" />
+                  <th aria-label="Select" scope="col" />
+                  <th scope="col">Project</th>
+                  <th scope="col">Target origin</th>
+                  <th scope="col">Environment</th>
+                  <th scope="col">Authentication</th>
+                  <th scope="col">Scenario setup</th>
+                  <th scope="col">Latest result</th>
+                  <th scope="col">Last activity</th>
+                  <th aria-label="Actions" scope="col" />
                 </tr>
               </thead>
               <tbody>
@@ -286,6 +310,9 @@ export function ProjectListScreen() {
                         <span>{project.description || 'No description'}</span>
                       </Link>
                     </td>
+                    <td data-label="Target origin">
+                      <code>{safeOrigin(project.targetUrl)}</code>
+                    </td>
                     <td data-label="Environment">
                       <StatusBadge
                         tone={
@@ -297,13 +324,20 @@ export function ProjectListScreen() {
                         {project.environment}
                       </StatusBadge>
                     </td>
-                    <td data-label="Target">
-                      <code>{project.targetUrl}</code>
+                    <td data-label="Authentication">
+                      <AuthenticationCell record={records.get(project.id)} />
                     </td>
-                    <td data-label="Updated">
-                      {new Intl.DateTimeFormat(undefined, {
-                        dateStyle: 'medium',
-                      }).format(new Date(project.updatedAt))}
+                    <td data-label="Scenario setup">
+                      <ScenarioStateCell record={records.get(project.id)} />
+                    </td>
+                    <td data-label="Latest result">
+                      <LatestResultCell record={records.get(project.id)} />
+                    </td>
+                    <td data-label="Last activity">
+                      {formatLocalDateTime(
+                        records.get(project.id)?.lastActivity ??
+                          project.updatedAt,
+                      )}
                     </td>
                     <td data-label="Actions">
                       <Link
@@ -322,6 +356,79 @@ export function ProjectListScreen() {
       </section>
     </main>
   );
+}
+
+function AuthenticationCell({
+  record,
+}: {
+  readonly record: ProjectCrmData | undefined;
+}) {
+  if (record === undefined)
+    return <StatusBadge tone="neutral">Unavailable</StatusBadge>;
+  if (record.settings.status === 'unavailable')
+    return <StatusBadge tone="neutral">Unavailable</StatusBadge>;
+  return (
+    <StatusBadge
+      tone={record.settings.value.authentication.available ? 'pass' : 'warning'}
+    >
+      {record.settings.value.authentication.available
+        ? 'Saved and available'
+        : 'Not available'}
+    </StatusBadge>
+  );
+}
+
+function ScenarioStateCell({
+  record,
+}: {
+  readonly record: ProjectCrmData | undefined;
+}) {
+  if (record === undefined || record.scenarios.status === 'unavailable')
+    return <StatusBadge tone="neutral">Unavailable</StatusBadge>;
+  const scenario = record.scenarios.value[0];
+  if (scenario === undefined)
+    return <StatusBadge tone="warning">No Scenarios</StatusBadge>;
+  return (
+    <span className="crm-stacked-state">
+      <StatusBadge tone={scenario.setupState === 'ready' ? 'pass' : 'warning'}>
+        {scenarioSetupLabel(scenario.setupState)}
+      </StatusBadge>
+      <small>{record.scenarios.value.length} lineages</small>
+    </span>
+  );
+}
+
+function LatestResultCell({
+  record,
+}: {
+  readonly record: ProjectCrmData | undefined;
+}) {
+  if (record === undefined || record.runs.status === 'unavailable')
+    return <StatusBadge tone="neutral">Unavailable</StatusBadge>;
+  const run = record.runs.value[0] ?? null;
+  return (
+    <StatusBadge
+      tone={
+        run === null
+          ? 'neutral'
+          : run.status === 'runner_error' || run.outcomeAggregate === 'failed'
+            ? 'failure'
+            : run.outcomeAggregate === 'passed'
+              ? 'pass'
+              : 'warning'
+      }
+    >
+      {verdictLabel(run)}
+    </StatusBadge>
+  );
+}
+
+function safeOrigin(value: string): string {
+  try {
+    return new URL(value).origin;
+  } catch {
+    return value;
+  }
 }
 
 function formValue(form: FormData, name: string): string {

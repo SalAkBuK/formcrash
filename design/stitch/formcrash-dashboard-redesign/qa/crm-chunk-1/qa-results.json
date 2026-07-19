@@ -1,0 +1,573 @@
+{
+  "generatedAt": "2026-07-19T13:45:43.078Z",
+  "services": {
+    "dashboard": { "connected": true, "status": 200 },
+    "server": { "connected": true, "status": 200 },
+    "sampleCheckout": { "connected": true, "status": 200 }
+  },
+  "realData": {
+    "project": {
+      "id": "cdefe107-84cd-4bb2-a7ba-6d93f238dc32",
+      "name": "Outcome Walkthrough Fixture",
+      "environment": "local",
+      "targetUrl": "http://127.0.0.1:4300/"
+    },
+    "scenarioCount": 1,
+    "configurationCount": 4,
+    "runCount": 4
+  },
+  "browserVersion": "149.0.7827.55",
+  "screenshots": [
+    "projects-1440x1000.png",
+    "projects-1024x768.png",
+    "projects-390x844.png",
+    "overview-1440x1000.png",
+    "overview-1024x768.png",
+    "overview-390x844.png",
+    "scenarios-1440x1000.png",
+    "scenarios-1024x768.png",
+    "scenarios-390x844.png",
+    "runs-1440x1000.png",
+    "runs-1024x768.png",
+    "runs-390x844.png",
+    "settings-1440x1000.png",
+    "settings-1024x768.png",
+    "settings-390x844.png"
+  ],
+  "checks": {
+    "projects": {
+      "1440x1000": {
+        "surfaceKey": "projects",
+        "viewportWidth": 1440,
+        "mainCount": 1,
+        "horizontalOverflow": false,
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "sidebar": {
+          "display": "flex",
+          "position": "fixed",
+          "width": "256px",
+          "transform": "none"
+        },
+        "topbarHeight": "56px",
+        "projectNavigationVisible": false,
+        "tableExpected": true,
+        "tablePresent": true,
+        "tableHeaders": [
+          { "text": "", "scope": "col" },
+          { "text": "Project", "scope": "col" },
+          { "text": "Target origin", "scope": "col" },
+          { "text": "Environment", "scope": "col" },
+          { "text": "Authentication", "scope": "col" },
+          { "text": "Scenario setup", "scope": "col" },
+          { "text": "Latest result", "scope": "col" },
+          { "text": "Last activity", "scope": "col" },
+          { "text": "", "scope": "col" }
+        ],
+        "tableResponsive": {
+          "headDisplay": "table-header-group",
+          "rowDisplay": "table-row",
+          "cellDisplay": "table-cell"
+        },
+        "overviewColumns": null,
+        "focusVisible": true,
+        "fakeTerms": []
+      },
+      "1024x768": {
+        "surfaceKey": "projects",
+        "viewportWidth": 1024,
+        "mainCount": 1,
+        "horizontalOverflow": false,
+        "scrollWidth": 1024,
+        "clientWidth": 1024,
+        "sidebar": {
+          "display": "flex",
+          "position": "fixed",
+          "width": "256px",
+          "transform": "none"
+        },
+        "topbarHeight": "56px",
+        "projectNavigationVisible": false,
+        "tableExpected": true,
+        "tablePresent": true,
+        "tableHeaders": [
+          { "text": "", "scope": "col" },
+          { "text": "Project", "scope": "col" },
+          { "text": "Target origin", "scope": "col" },
+          { "text": "Environment", "scope": "col" },
+          { "text": "Authentication", "scope": "col" },
+          { "text": "Scenario setup", "scope": "col" },
+          { "text": "Latest result", "scope": "col" },
+          { "text": "Last activity", "scope": "col" },
+          { "text": "", "scope": "col" }
+        ],
+        "tableResponsive": {
+          "headDisplay": "table-header-group",
+          "rowDisplay": "table-row",
+          "cellDisplay": "table-cell"
+        },
+        "overviewColumns": null,
+        "focusVisible": true,
+        "fakeTerms": []
+      },
+      "390x844": {
+        "surfaceKey": "projects",
+        "viewportWidth": 390,
+        "mainCount": 1,
+        "horizontalOverflow": false,
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "sidebar": {
+          "display": "flex",
+          "position": "fixed",
+          "width": "304px",
+          "transform": "matrix(1, 0, 0, 1, -319.2, 0)"
+        },
+        "topbarHeight": "56px",
+        "projectNavigationVisible": false,
+        "tableExpected": true,
+        "tablePresent": true,
+        "tableHeaders": [
+          { "text": "", "scope": "col" },
+          { "text": "Project", "scope": "col" },
+          { "text": "Target origin", "scope": "col" },
+          { "text": "Environment", "scope": "col" },
+          { "text": "Authentication", "scope": "col" },
+          { "text": "Scenario setup", "scope": "col" },
+          { "text": "Latest result", "scope": "col" },
+          { "text": "Last activity", "scope": "col" },
+          { "text": "", "scope": "col" }
+        ],
+        "tableResponsive": {
+          "headDisplay": "none",
+          "rowDisplay": "block",
+          "cellDisplay": "grid"
+        },
+        "overviewColumns": null,
+        "focusVisible": true,
+        "fakeTerms": []
+      }
+    },
+    "overview": {
+      "1440x1000": {
+        "surfaceKey": "overview",
+        "viewportWidth": 1440,
+        "mainCount": 1,
+        "horizontalOverflow": false,
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "sidebar": {
+          "display": "flex",
+          "position": "fixed",
+          "width": "256px",
+          "transform": "none"
+        },
+        "topbarHeight": "113px",
+        "projectNavigationVisible": true,
+        "tableExpected": true,
+        "tablePresent": true,
+        "tableHeaders": [
+          { "text": "Scenario", "scope": "col" },
+          { "text": "Version", "scope": "col" },
+          { "text": "Setup", "scope": "col" },
+          { "text": "Latest verdict", "scope": "col" },
+          { "text": "", "scope": "col" }
+        ],
+        "tableResponsive": {
+          "headDisplay": "table-header-group",
+          "rowDisplay": "table-row",
+          "cellDisplay": "table-cell"
+        },
+        "overviewColumns": "796px 304px",
+        "focusVisible": true,
+        "fakeTerms": []
+      },
+      "1024x768": {
+        "surfaceKey": "overview",
+        "viewportWidth": 1024,
+        "mainCount": 1,
+        "horizontalOverflow": false,
+        "scrollWidth": 1024,
+        "clientWidth": 1024,
+        "sidebar": {
+          "display": "flex",
+          "position": "fixed",
+          "width": "256px",
+          "transform": "none"
+        },
+        "topbarHeight": "113px",
+        "projectNavigationVisible": true,
+        "tableExpected": true,
+        "tablePresent": true,
+        "tableHeaders": [
+          { "text": "Scenario", "scope": "col" },
+          { "text": "Version", "scope": "col" },
+          { "text": "Setup", "scope": "col" },
+          { "text": "Latest verdict", "scope": "col" },
+          { "text": "", "scope": "col" }
+        ],
+        "tableResponsive": {
+          "headDisplay": "table-header-group",
+          "rowDisplay": "table-row",
+          "cellDisplay": "table-cell"
+        },
+        "overviewColumns": "704px",
+        "focusVisible": true,
+        "fakeTerms": []
+      },
+      "390x844": {
+        "surfaceKey": "overview",
+        "viewportWidth": 390,
+        "mainCount": 1,
+        "horizontalOverflow": false,
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "sidebar": {
+          "display": "flex",
+          "position": "fixed",
+          "width": "304px",
+          "transform": "matrix(1, 0, 0, 1, -319.2, 0)"
+        },
+        "topbarHeight": "137px",
+        "projectNavigationVisible": true,
+        "tableExpected": true,
+        "tablePresent": true,
+        "tableHeaders": [
+          { "text": "Scenario", "scope": "col" },
+          { "text": "Version", "scope": "col" },
+          { "text": "Setup", "scope": "col" },
+          { "text": "Latest verdict", "scope": "col" },
+          { "text": "", "scope": "col" }
+        ],
+        "tableResponsive": {
+          "headDisplay": "none",
+          "rowDisplay": "block",
+          "cellDisplay": "grid"
+        },
+        "overviewColumns": "350px",
+        "focusVisible": true,
+        "fakeTerms": []
+      }
+    },
+    "scenarios": {
+      "1440x1000": {
+        "surfaceKey": "scenarios",
+        "viewportWidth": 1440,
+        "mainCount": 1,
+        "horizontalOverflow": false,
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "sidebar": {
+          "display": "flex",
+          "position": "fixed",
+          "width": "256px",
+          "transform": "none"
+        },
+        "topbarHeight": "113px",
+        "projectNavigationVisible": true,
+        "tableExpected": true,
+        "tablePresent": true,
+        "tableHeaders": [
+          { "text": "Scenario", "scope": "col" },
+          { "text": "Recorded-flow version", "scope": "col" },
+          { "text": "Setup", "scope": "col" },
+          { "text": "Critical Action", "scope": "col" },
+          { "text": "Outcome Checks", "scope": "col" },
+          { "text": "Latest verdict", "scope": "col" },
+          { "text": "Last Run", "scope": "col" },
+          { "text": "Configurations", "scope": "col" },
+          { "text": "", "scope": "col" }
+        ],
+        "tableResponsive": {
+          "headDisplay": "table-header-group",
+          "rowDisplay": "table-row",
+          "cellDisplay": "table-cell"
+        },
+        "overviewColumns": null,
+        "focusVisible": true,
+        "fakeTerms": []
+      },
+      "1024x768": {
+        "surfaceKey": "scenarios",
+        "viewportWidth": 1024,
+        "mainCount": 1,
+        "horizontalOverflow": false,
+        "scrollWidth": 1024,
+        "clientWidth": 1024,
+        "sidebar": {
+          "display": "flex",
+          "position": "fixed",
+          "width": "256px",
+          "transform": "none"
+        },
+        "topbarHeight": "113px",
+        "projectNavigationVisible": true,
+        "tableExpected": true,
+        "tablePresent": true,
+        "tableHeaders": [
+          { "text": "Scenario", "scope": "col" },
+          { "text": "Recorded-flow version", "scope": "col" },
+          { "text": "Setup", "scope": "col" },
+          { "text": "Critical Action", "scope": "col" },
+          { "text": "Outcome Checks", "scope": "col" },
+          { "text": "Latest verdict", "scope": "col" },
+          { "text": "Last Run", "scope": "col" },
+          { "text": "Configurations", "scope": "col" },
+          { "text": "", "scope": "col" }
+        ],
+        "tableResponsive": {
+          "headDisplay": "table-header-group",
+          "rowDisplay": "table-row",
+          "cellDisplay": "table-cell"
+        },
+        "overviewColumns": null,
+        "focusVisible": true,
+        "fakeTerms": []
+      },
+      "390x844": {
+        "surfaceKey": "scenarios",
+        "viewportWidth": 390,
+        "mainCount": 1,
+        "horizontalOverflow": false,
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "sidebar": {
+          "display": "flex",
+          "position": "fixed",
+          "width": "304px",
+          "transform": "matrix(1, 0, 0, 1, -319.2, 0)"
+        },
+        "topbarHeight": "137px",
+        "projectNavigationVisible": true,
+        "tableExpected": true,
+        "tablePresent": true,
+        "tableHeaders": [
+          { "text": "Scenario", "scope": "col" },
+          { "text": "Recorded-flow version", "scope": "col" },
+          { "text": "Setup", "scope": "col" },
+          { "text": "Critical Action", "scope": "col" },
+          { "text": "Outcome Checks", "scope": "col" },
+          { "text": "Latest verdict", "scope": "col" },
+          { "text": "Last Run", "scope": "col" },
+          { "text": "Configurations", "scope": "col" },
+          { "text": "", "scope": "col" }
+        ],
+        "tableResponsive": {
+          "headDisplay": "none",
+          "rowDisplay": "block",
+          "cellDisplay": "grid"
+        },
+        "overviewColumns": null,
+        "focusVisible": true,
+        "fakeTerms": []
+      }
+    },
+    "runs": {
+      "1440x1000": {
+        "surfaceKey": "runs",
+        "viewportWidth": 1440,
+        "mainCount": 1,
+        "horizontalOverflow": false,
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "sidebar": {
+          "display": "flex",
+          "position": "fixed",
+          "width": "256px",
+          "transform": "none"
+        },
+        "topbarHeight": "113px",
+        "projectNavigationVisible": true,
+        "tableExpected": true,
+        "tablePresent": true,
+        "tableHeaders": [
+          { "text": "Scenario", "scope": "col" },
+          { "text": "Verdict", "scope": "col" },
+          { "text": "Configuration", "scope": "col" },
+          { "text": "Recorded-flow version", "scope": "col" },
+          { "text": "Started", "scope": "col" },
+          { "text": "Duration", "scope": "col" },
+          { "text": "Outcome summary", "scope": "col" },
+          { "text": "Comparison", "scope": "col" },
+          { "text": "Evidence", "scope": "col" },
+          { "text": "", "scope": "col" }
+        ],
+        "tableResponsive": {
+          "headDisplay": "table-header-group",
+          "rowDisplay": "table-row",
+          "cellDisplay": "table-cell"
+        },
+        "overviewColumns": null,
+        "focusVisible": true,
+        "fakeTerms": []
+      },
+      "1024x768": {
+        "surfaceKey": "runs",
+        "viewportWidth": 1024,
+        "mainCount": 1,
+        "horizontalOverflow": false,
+        "scrollWidth": 1024,
+        "clientWidth": 1024,
+        "sidebar": {
+          "display": "flex",
+          "position": "fixed",
+          "width": "256px",
+          "transform": "none"
+        },
+        "topbarHeight": "113px",
+        "projectNavigationVisible": true,
+        "tableExpected": true,
+        "tablePresent": true,
+        "tableHeaders": [
+          { "text": "Scenario", "scope": "col" },
+          { "text": "Verdict", "scope": "col" },
+          { "text": "Configuration", "scope": "col" },
+          { "text": "Recorded-flow version", "scope": "col" },
+          { "text": "Started", "scope": "col" },
+          { "text": "Duration", "scope": "col" },
+          { "text": "Outcome summary", "scope": "col" },
+          { "text": "Comparison", "scope": "col" },
+          { "text": "Evidence", "scope": "col" },
+          { "text": "", "scope": "col" }
+        ],
+        "tableResponsive": {
+          "headDisplay": "table-header-group",
+          "rowDisplay": "table-row",
+          "cellDisplay": "table-cell"
+        },
+        "overviewColumns": null,
+        "focusVisible": true,
+        "fakeTerms": []
+      },
+      "390x844": {
+        "surfaceKey": "runs",
+        "viewportWidth": 390,
+        "mainCount": 1,
+        "horizontalOverflow": false,
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "sidebar": {
+          "display": "flex",
+          "position": "fixed",
+          "width": "304px",
+          "transform": "matrix(1, 0, 0, 1, -319.2, 0)"
+        },
+        "topbarHeight": "137px",
+        "projectNavigationVisible": true,
+        "tableExpected": true,
+        "tablePresent": true,
+        "tableHeaders": [
+          { "text": "Scenario", "scope": "col" },
+          { "text": "Verdict", "scope": "col" },
+          { "text": "Configuration", "scope": "col" },
+          { "text": "Recorded-flow version", "scope": "col" },
+          { "text": "Started", "scope": "col" },
+          { "text": "Duration", "scope": "col" },
+          { "text": "Outcome summary", "scope": "col" },
+          { "text": "Comparison", "scope": "col" },
+          { "text": "Evidence", "scope": "col" },
+          { "text": "", "scope": "col" }
+        ],
+        "tableResponsive": {
+          "headDisplay": "none",
+          "rowDisplay": "block",
+          "cellDisplay": "grid"
+        },
+        "overviewColumns": null,
+        "focusVisible": true,
+        "fakeTerms": []
+      }
+    },
+    "settings": {
+      "1440x1000": {
+        "surfaceKey": "settings",
+        "viewportWidth": 1440,
+        "mainCount": 1,
+        "horizontalOverflow": false,
+        "scrollWidth": 1440,
+        "clientWidth": 1440,
+        "sidebar": {
+          "display": "flex",
+          "position": "fixed",
+          "width": "256px",
+          "transform": "none"
+        },
+        "topbarHeight": "113px",
+        "projectNavigationVisible": true,
+        "tableExpected": false,
+        "tablePresent": false,
+        "tableHeaders": [],
+        "tableResponsive": {
+          "headDisplay": null,
+          "rowDisplay": null,
+          "cellDisplay": null
+        },
+        "overviewColumns": null,
+        "focusVisible": true,
+        "fakeTerms": []
+      },
+      "1024x768": {
+        "surfaceKey": "settings",
+        "viewportWidth": 1024,
+        "mainCount": 1,
+        "horizontalOverflow": false,
+        "scrollWidth": 1024,
+        "clientWidth": 1024,
+        "sidebar": {
+          "display": "flex",
+          "position": "fixed",
+          "width": "256px",
+          "transform": "none"
+        },
+        "topbarHeight": "113px",
+        "projectNavigationVisible": true,
+        "tableExpected": false,
+        "tablePresent": false,
+        "tableHeaders": [],
+        "tableResponsive": {
+          "headDisplay": null,
+          "rowDisplay": null,
+          "cellDisplay": null
+        },
+        "overviewColumns": null,
+        "focusVisible": true,
+        "fakeTerms": []
+      },
+      "390x844": {
+        "surfaceKey": "settings",
+        "viewportWidth": 390,
+        "mainCount": 1,
+        "horizontalOverflow": false,
+        "scrollWidth": 390,
+        "clientWidth": 390,
+        "sidebar": {
+          "display": "flex",
+          "position": "fixed",
+          "width": "304px",
+          "transform": "matrix(1, 0, 0, 1, -319.2, 0)"
+        },
+        "topbarHeight": "137px",
+        "projectNavigationVisible": true,
+        "tableExpected": false,
+        "tablePresent": false,
+        "tableHeaders": [],
+        "tableResponsive": {
+          "headDisplay": null,
+          "rowDisplay": null,
+          "cellDisplay": null
+        },
+        "overviewColumns": null,
+        "focusVisible": true,
+        "fakeTerms": []
+      }
+    },
+    "mobileDrawer": {
+      "opened": true,
+      "receivedFocus": true,
+      "escapeClosed": true,
+      "restoredFocus": true
+    }
+  },
+  "consoleErrors": [],
+  "pageErrors": []
+}

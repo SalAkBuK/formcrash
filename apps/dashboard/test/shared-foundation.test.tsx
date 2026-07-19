@@ -9,15 +9,17 @@ import { DisclosurePanel } from '../src/components/ui/disclosure-panel';
 import { StateMessage } from '../src/components/ui/state-message';
 import { StatusBadge } from '../src/components/ui/status-badge';
 
-const navigation = vi.hoisted(() => ({ pathname: '/' }));
+const navigation = vi.hoisted(() => ({ pathname: '/', push: vi.fn() }));
 
 vi.mock('next/navigation', () => ({
   usePathname: () => navigation.pathname,
+  useRouter: () => ({ push: navigation.push }),
 }));
 
 describe('shared application foundation', () => {
   beforeEach(() => {
     navigation.pathname = '/';
+    navigation.push.mockReset();
     window.history.replaceState(null, '', '/');
   });
 
@@ -72,7 +74,7 @@ describe('shared application foundation', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('marks external projects current and exposes its Guided and Advanced context', () => {
+  it('marks external projects current and exposes its project-record context', () => {
     navigation.pathname = '/projects';
     render(
       <ApplicationShell>
@@ -84,9 +86,7 @@ describe('shared application foundation', () => {
       'aria-current',
       'page',
     );
-    expect(
-      screen.getByText('Recording · Guided and Advanced testing'),
-    ).toBeVisible();
+    expect(screen.getByText('External application records')).toBeVisible();
   });
 
   it('opens the responsive navigation, closes it with Escape, and focuses content after route changes', async () => {
@@ -101,9 +101,19 @@ describe('shared application foundation', () => {
     expect(screen.getByLabelText('Application sidebar')).toHaveClass(
       'app-sidebar-open',
     );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('link', { name: 'Bundled Sample' }),
+      ).toHaveFocus(),
+    );
     await user.keyboard('{Escape}');
     expect(screen.getByLabelText('Application sidebar')).not.toHaveClass(
       'app-sidebar-open',
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Open navigation' }),
+      ).toHaveFocus(),
     );
 
     navigation.pathname = '/projects';
