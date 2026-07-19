@@ -3,6 +3,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
   type SetStateAction,
@@ -141,6 +142,14 @@ export function ExternalExperimentPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [productionConfirmed, setProductionConfirmed] = useState(false);
+  const projectInitialization = useRef<{
+    readonly projectId: string;
+    readonly promise: ReturnType<typeof loadExternalWorkspace>;
+  } | null>(null);
+  const journeyInitialization = useRef<{
+    readonly journeyId: string;
+    readonly promise: ReturnType<typeof listExternalExperiments>;
+  } | null>(null);
 
   const journey = useMemo(
     () => journeys.find((item) => item.id === journeyId) ?? null,
@@ -195,27 +204,35 @@ export function ExternalExperimentPanel({
   ]);
 
   useEffect(() => {
+    let active = true;
     setWorkspaceMode('guided');
     setBusy('load-settings');
     setError(null);
     setProductionConfirmed(false);
     setAuthValidation(null);
-    void Promise.all([
-      getProjectSettings(project.id),
-      listExternalRuns(project.id),
-    ])
-      .then(async ([value, history]) => {
+    if (projectInitialization.current?.projectId !== project.id) {
+      projectInitialization.current = {
+        projectId: project.id,
+        promise: loadExternalWorkspace(project.id),
+      };
+    }
+    void projectInitialization.current.promise
+      .then(({ history, result: latestResult, settings: value }) => {
+        if (!active) return;
         setSettingsState(value);
         setSettings(toSettingsInput(value));
         setRunHistory(history.items);
-        setResult(
-          history.items[0] === undefined
-            ? null
-            : await getExternalRun(history.items[0].runId),
-        );
+        setResult(latestResult);
       })
-      .catch((reason: unknown) => setError(messageOf(reason)))
-      .finally(() => setBusy(null));
+      .catch((reason: unknown) => {
+        if (active) setError(messageOf(reason));
+      })
+      .finally(() => {
+        if (active) setBusy(null);
+      });
+    return () => {
+      active = false;
+    };
   }, [project.id]);
 
   useEffect(() => {
@@ -241,6 +258,7 @@ export function ExternalExperimentPanel({
   }, [journeyId, journeys, selectedJourneyId]);
 
   useEffect(() => {
+    let active = true;
     if (journey === null) {
       setTargetStepId('');
       setExperiments([]);
@@ -249,13 +267,29 @@ export function ExternalExperimentPanel({
     const first = journey.steps.find(
       (step) => step.type === 'click' || step.type === 'submit',
     );
-    if (!journey.steps.some((step) => step.id === targetStepId)) {
-      setTargetStepId(first?.id ?? '');
-    }
+    setTargetStepId((current) => {
+      if (journey.steps.some((step) => step.id === current)) return current;
+      return first?.id ?? '';
+    });
     setDiscovery(null);
     setCandidateIndex(-1);
-    void refreshExperiments(journey.id);
-  }, [journey, targetStepId]);
+    if (journeyInitialization.current?.journeyId !== journey.id) {
+      journeyInitialization.current = {
+        journeyId: journey.id,
+        promise: listExternalExperiments(journey.id),
+      };
+    }
+    void journeyInitialization.current.promise
+      .then((items) => {
+        if (active) setExperiments(items);
+      })
+      .catch((reason: unknown) => {
+        if (active) setError(messageOf(reason));
+      });
+    return () => {
+      active = false;
+    };
+  }, [journey]);
 
   useEffect(() => {
     setDiscovery(null);
@@ -1537,6 +1571,19 @@ function assertionNeedsValue(type: ExternalAssertionType): boolean {
     'field_retained',
   ].includes(type);
 }
+
+async function loadExternalWorkspace(projectId: string) {
+  const [settings, history] = await Promise.all([
+    getProjectSettings(projectId),
+    listExternalRuns(projectId),
+  ]);
+  const result =
+    history.items[0] === undefined
+      ? null
+      : await getExternalRun(history.items[0].runId);
+  return { history, result, settings };
+}
+
 function assertionNeedsStep(type: ExternalAssertionType): boolean {
   return type.startsWith('element_') || type === 'field_retained';
 }

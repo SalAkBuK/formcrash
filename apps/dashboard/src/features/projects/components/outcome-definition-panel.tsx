@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   ApproveOutcomeCheckRequest,
   CriticalAction,
@@ -57,10 +57,9 @@ export function OutcomeDefinitionPanel({
       ),
     [journey],
   );
+  const highConfidenceSteps = compatibleSteps.filter(isHighConfidenceAction);
   const recommended =
-    [...compatibleSteps].reverse().find((step) => step.type === 'submit') ??
-    compatibleSteps.at(-1) ??
-    null;
+    highConfidenceSteps.length === 1 ? highConfidenceSteps[0]! : null;
   const [criticalAction, setCriticalAction] = useState<CriticalAction | null>(
     null,
   );
@@ -78,15 +77,24 @@ export function OutcomeDefinitionPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const initialization = useRef<{
+    readonly journeyId: string;
+    readonly promise: ReturnType<typeof loadOutcomeDefinition>;
+  } | null>(null);
 
   useEffect(() => {
+    let active = true;
     setLoading(true);
-    void Promise.all([
-      getCriticalAction(journey.id),
-      listOutcomeChecks(journey.id),
-      getActiveOutcomeCapture(journey.id),
-    ])
+    setError(null);
+    if (initialization.current?.journeyId !== journey.id) {
+      initialization.current = {
+        journeyId: journey.id,
+        promise: loadOutcomeDefinition(journey.id),
+      };
+    }
+    void initialization.current.promise
       .then(([action, savedChecks, activeCapture]) => {
+        if (!active) return;
         setCriticalAction(action);
         setChecks(savedChecks);
         setCapture(activeCapture);
@@ -96,11 +104,23 @@ export function OutcomeDefinitionPanel({
         if (action !== null) {
           setStepId(action.stepId);
           setActionLabel(action.label);
+        } else {
+          setStepId(recommended?.id ?? '');
+          setActionLabel(
+            recommended === null ? '' : actionName(recommended, journey),
+          );
         }
       })
-      .catch((reason: unknown) => setError(messageOf(reason)))
-      .finally(() => setLoading(false));
-  }, [journey.id]);
+      .catch((reason: unknown) => {
+        if (active) setError(messageOf(reason));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [journey, recommended]);
 
   useEffect(() => {
     onStateChange?.({ checks, criticalAction, error, loading });
@@ -225,6 +245,8 @@ export function OutcomeDefinitionPanel({
     !['completed', 'expired', 'runner_error'].includes(capture.status);
   const requiresTarget = checkType !== 'final_pathname_matches';
   const requiresBinding = checkType === 'matching_item_appears_exactly_once';
+  const selectedStep =
+    compatibleSteps.find((step) => step.id === stepId) ?? null;
 
   return (
     <details
@@ -253,40 +275,67 @@ export function OutcomeDefinitionPanel({
         {activeSection === 'checks' ? null : (
           <>
             <div className="outcome-definition-step">
-              <p className="eyebrow">Critical Action</p>
+              <h3>Choose the action to stress</h3>
+              <p>
+                Select the action FormCrash should repeat or disrupt during this
+                test.
+              </p>
               <div className="outcome-form-grid">
                 <label>
-                  Recorded click or submit
+                  Recorded action
                   <select
                     aria-label={`${journey.name} Critical Action`}
                     disabled={criticalAction !== null && checks.length > 0}
                     value={stepId}
                     onChange={(event) => {
+                      const nextStep = compatibleSteps.find(
+                        (step) => step.id === event.target.value,
+                      );
                       setStepId(event.target.value);
                       setActionLabel(
-                        compatibleSteps.find(
-                          (step) => step.id === event.target.value,
-                        )?.name ?? '',
+                        nextStep === undefined
+                          ? ''
+                          : actionName(nextStep, journey),
                       );
                     }}
                   >
+                    {recommended === null && criticalAction === null ? (
+                      <option value="">Select an action</option>
+                    ) : null}
                     {compatibleSteps.map((step) => (
                       <option key={step.id} value={step.id}>
-                        {step.name} ({step.type})
+                        {actionName(step, journey)}
                       </option>
                     ))}
                   </select>
                 </label>
                 <label>
-                  Human-readable label
+                  Action name
                   <input
-                    aria-label={`${journey.name} Critical Action label`}
+                    aria-label={`${journey.name} Action name`}
                     maxLength={160}
                     value={actionLabel}
                     onChange={(event) => setActionLabel(event.target.value)}
                   />
+                  <small>Used in test results and reports.</small>
                 </label>
               </div>
+              {selectedStep === null ? null : (
+                <div
+                  aria-label="Selected action details"
+                  className="critical-action-preview"
+                >
+                  <strong>{actionName(selectedStep, journey)}</strong>
+                  <span>
+                    Step {journey.steps.indexOf(selectedStep) + 1} of{' '}
+                    {journey.steps.length}
+                  </span>
+                  <span>{plainActionType(selectedStep)}</span>
+                  {actionPageContext(selectedStep.url) === null ? null : (
+                    <small>{actionPageContext(selectedStep.url)}</small>
+                  )}
+                </div>
+              )}
               <button
                 className="button button-secondary button-compact"
                 disabled={
@@ -298,15 +347,11 @@ export function OutcomeDefinitionPanel({
                 onClick={() => void saveCriticalAction()}
                 type="button"
               >
-                {busy === 'action'
-                  ? 'Saving Critical Action…'
-                  : criticalAction === null
-                    ? 'Approve Critical Action'
-                    : 'Update Critical Action label'}
+                {busy === 'action' ? 'Saving action…' : 'Use this action'}
               </button>
               {criticalAction === null ? null : (
                 <p className="guided-ready-note">
-                  Approved: {criticalAction.label}
+                  Selected action: {criticalAction.label}
                 </p>
               )}
               {checks.length > 0 ? (
@@ -560,6 +605,92 @@ export interface OutcomeDefinitionState {
   readonly criticalAction: CriticalAction | null;
   readonly error: string | null;
   readonly loading: boolean;
+}
+
+function loadOutcomeDefinition(journeyId: string) {
+  return Promise.all([
+    getCriticalAction(journeyId),
+    listOutcomeChecks(journeyId),
+    getActiveOutcomeCapture(journeyId),
+  ]);
+}
+
+function isHighConfidenceAction(
+  step: PersistedJourney['steps'][number],
+): boolean {
+  return (
+    step.locator !== null &&
+    step.locator.strategy !== 'css' &&
+    step.locator.strategy !== 'text'
+  );
+}
+
+function actionName(
+  step: PersistedJourney['steps'][number],
+  journey: PersistedJourney,
+): string {
+  const fingerprint = step.fingerprint;
+  const tagName = fingerprint?.tagName.toLowerCase();
+  const accessibleControlName =
+    tagName === 'button' ||
+    tagName === 'input' ||
+    tagName === 'select' ||
+    tagName === 'textarea' ||
+    step.type === 'click'
+      ? fingerprint?.accessibleName?.trim()
+      : null;
+  return (
+    nonEmpty(accessibleControlName) ??
+    nonEmpty(fingerprint?.label) ??
+    nonEmpty(step.name) ??
+    genericActionName(step, journey)
+  );
+}
+
+function genericActionName(
+  step: PersistedJourney['steps'][number],
+  journey: PersistedJourney,
+): string {
+  const page = pageName(step.url) ?? pageName(journey.steps[0]?.url ?? '');
+  if (step.type === 'submit') {
+    return page === null ? 'Submit form' : `Submit ${page} form`;
+  }
+  return page === null ? 'Use recorded control' : `Use ${page} control`;
+}
+
+function plainActionType(step: PersistedJourney['steps'][number]): string {
+  if (step.type === 'submit') {
+    const page = pageName(step.url);
+    return page === null
+      ? 'Submits the selected form'
+      : `Submits the ${page} form`;
+  }
+  return 'Activates the selected control';
+}
+
+function actionPageContext(url: string): string | null {
+  const page = pageName(url);
+  return page === null ? null : `${sentenceCase(page)} page`;
+}
+
+function pageName(url: string): string | null {
+  try {
+    const segment = new URL(url).pathname.split('/').filter(Boolean).at(-1);
+    return segment === undefined
+      ? null
+      : decodeURIComponent(segment).replaceAll(/[-_]+/gu, ' ');
+  } catch {
+    return null;
+  }
+}
+
+function nonEmpty(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed === '' ? null : trimmed;
+}
+
+function sentenceCase(value: string): string {
+  return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`;
 }
 
 function readableOutcome(check: OutcomeCheck): string {

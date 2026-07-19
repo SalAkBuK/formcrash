@@ -186,6 +186,7 @@ export function GuidedTestPanel({
   );
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const submissionPending = useRef(false);
+  const reviewPending = useRef(false);
   const restoredDraftName = useRef(false);
   const journeyResetReady = useRef(false);
 
@@ -373,8 +374,12 @@ export function GuidedTestPanel({
   }, [journeyId]);
 
   useEffect(() => {
-    onStageChange?.(stageForStep(currentStep));
-  }, [currentStep, onStageChange]);
+    if (initialDraft === null) return;
+    const hydratedStep = stepForStage(initialDraft.stage);
+    setCurrentStep((current) =>
+      current === hydratedStep ? current : hydratedStep,
+    );
+  }, [initialDraft?.stage]);
 
   useEffect(() => {
     if (project.id === '' || journeyId === '') return;
@@ -456,19 +461,31 @@ export function GuidedTestPanel({
     setCompletedSteps((current) => new Set([...current, step]));
   }
 
+  function navigateToStep(step: WizardStep): void {
+    setCurrentStep(step);
+    onStageChange?.(stageForStep(step));
+  }
+
   function continueFromExpectedOutcome(): void {
     setShowValidation(true);
     if (expectedBlockers.length > 0) return;
     completeStep(1);
-    setCurrentStep(2);
+    navigateToStep(2);
     setShowValidation(false);
     setError(null);
   }
 
   async function prepareReview(): Promise<void> {
     setShowValidation(true);
-    if (busy !== null || journey === null || criticalStep === null) return;
+    if (
+      reviewPending.current ||
+      busy !== null ||
+      journey === null ||
+      criticalStep === null
+    )
+      return;
     if (safetyBlockers.length > 0) return;
+    reviewPending.current = true;
     setBusy('review');
     setError(null);
     setResult(null);
@@ -507,11 +524,12 @@ export function GuidedTestPanel({
       setSelectedCandidate(candidate);
       setAssertionSelections(selections);
       completeStep(2);
-      setCurrentStep(3);
+      navigateToStep(3);
       setShowValidation(false);
     } catch (reason: unknown) {
       handleExecutionFailure(reason);
     } finally {
+      reviewPending.current = false;
       setBusy(null);
     }
   }
@@ -668,7 +686,7 @@ export function GuidedTestPanel({
       <WizardProgress
         completedSteps={completedSteps}
         currentStep={currentStep}
-        onNavigate={setCurrentStep}
+        onNavigate={navigateToStep}
       />
 
       {error !== null ? (
@@ -1284,7 +1302,7 @@ export function GuidedTestPanel({
               )}
 
               <WizardActions>
-                <Button onClick={() => setCurrentStep(1)}>Back</Button>
+                <Button onClick={() => navigateToStep(1)}>Back</Button>
                 <Button
                   className="guided-wizard-primary"
                   disabled={busy !== null || safetyBlockers.length > 0}
@@ -1555,7 +1573,7 @@ export function GuidedTestPanel({
               <WizardActions>
                 <Button
                   disabled={busy !== null}
-                  onClick={() => setCurrentStep(2)}
+                  onClick={() => navigateToStep(2)}
                 >
                   Back to Safety &amp; Data
                 </Button>
@@ -1970,6 +1988,12 @@ function stageForStep(step: WizardStep): GuidedWizardStage {
   if (step === 1) return 'outcome';
   if (step === 2) return 'safety';
   return 'review';
+}
+
+function stepForStage(stage: GuidedWizardStage): WizardStep {
+  if (stage === 'outcome') return 1;
+  if (stage === 'safety') return 2;
+  return 3;
 }
 
 function boundedName(value: string): string {

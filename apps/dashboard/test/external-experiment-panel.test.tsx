@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -402,6 +403,136 @@ beforeEach(() => {
 });
 
 describe('external experiment dashboard workflow', () => {
+  it('presents and initializes one high-confidence action once under Strict Mode', async () => {
+    const user = userEvent.setup();
+    const placeOrderStep = {
+      ...journey.steps[0]!,
+      id: 'place-order',
+      name: 'Stable recorded checkout description',
+      type: 'click' as const,
+      timestamp: 8,
+      url: 'http://localhost:4300/checkout',
+      locator: {
+        strategy: 'role' as const,
+        role: 'button',
+        name: 'Place order',
+      },
+      fingerprint: {
+        ...journey.steps[0]!.fingerprint!,
+        tagName: 'button',
+        inputType: null,
+        role: 'button',
+        accessibleName: 'Place order',
+        label: 'Checkout action',
+        text: 'Place order',
+      },
+      value: null,
+    };
+    const checkoutJourney = {
+      ...journey,
+      id: 'journey-checkout',
+      name: 'Checkout order',
+      steps: [
+        ...Array.from({ length: 7 }, (_, index) => ({
+          ...journey.steps[0]!,
+          id: `setup-${index + 1}`,
+          name: `Checkout setup ${index + 1}`,
+          type: 'navigate' as const,
+          timestamp: index,
+          url: 'http://localhost:4300/checkout',
+          locator: null,
+          fingerprint: null,
+          value: null,
+        })),
+        placeOrderStep,
+      ],
+    };
+    const savedAction = {
+      ...criticalAction,
+      journeyId: checkoutJourney.id,
+      stepId: placeOrderStep.id,
+      label: 'Place order',
+    };
+    mocks.getCriticalAction.mockResolvedValue(null);
+    mocks.listOutcomeChecks.mockResolvedValue([]);
+    mocks.approveCriticalAction.mockResolvedValue(savedAction);
+    mocks.startOutcomeCapture.mockResolvedValue({
+      id: 'checkout-capture',
+      journeyId: checkoutJourney.id,
+      criticalActionId: savedAction.id,
+      generatedInputs: [],
+      status: 'awaiting_selection',
+      selectedTarget: null,
+      selectionWarnings: [],
+      finalPathname: null,
+      errorMessage: null,
+      startedAt: '2026-07-16T00:00:00.000Z',
+      expiresAt: '2026-07-16T00:10:00.000Z',
+      completedAt: null,
+    });
+
+    render(
+      <StrictMode>
+        <ExternalExperimentPanel
+          project={project}
+          journeys={[checkoutJourney]}
+        />
+      </StrictMode>,
+    );
+    await user.click(
+      await screen.findByRole('tab', { name: /Critical Action/u }),
+    );
+
+    expect(
+      screen.getByRole('heading', { name: 'Choose the action to stress' }),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        'Select the action FormCrash should repeat or disrupt during this test.',
+      ),
+    ).toBeVisible();
+    expect(screen.getByLabelText('Selected action details')).toHaveTextContent(
+      'Place order',
+    );
+    expect(screen.getByLabelText('Selected action details')).toHaveTextContent(
+      'Step 8 of 8',
+    );
+    expect(screen.getByLabelText('Selected action details')).toHaveTextContent(
+      'Activates the selected control',
+    );
+    expect(screen.getByLabelText('Selected action details')).toHaveTextContent(
+      'Checkout page',
+    );
+    expect(screen.getByText('Action name')).toBeVisible();
+    expect(screen.getByText('Used in test results and reports.')).toBeVisible();
+    expect(
+      screen.queryByText(/\(click\)|Recorded click or submit/u),
+    ).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Use this action' }));
+    await waitFor(() =>
+      expect(mocks.approveCriticalAction).toHaveBeenCalledOnce(),
+    );
+    expect(mocks.approveCriticalAction).toHaveBeenCalledWith(
+      checkoutJourney.id,
+      placeOrderStep.id,
+      'Place order',
+    );
+
+    await user.click(
+      screen.getByRole('button', { name: 'Start outcome baseline' }),
+    );
+    await waitFor(() =>
+      expect(mocks.startOutcomeCapture).toHaveBeenCalledOnce(),
+    );
+    expect(mocks.getProjectSettings).toHaveBeenCalledOnce();
+    expect(mocks.listExternalRuns).toHaveBeenCalledOnce();
+    expect(mocks.listExternalExperiments).toHaveBeenCalledOnce();
+    expect(mocks.getCriticalAction).toHaveBeenCalledOnce();
+    expect(mocks.listOutcomeChecks).toHaveBeenCalledOnce();
+    expect(mocks.getActiveOutcomeCapture).toHaveBeenCalledOnce();
+  });
+
   it('shows a concrete first-test tutorial when no journey exists', async () => {
     render(<ExternalExperimentPanel project={project} journeys={[]} />);
 
