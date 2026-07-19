@@ -419,6 +419,22 @@ input[type='radio'] {
   background: var(--safe-soft);
 }
 
+.critical-action-preview {
+  display: grid;
+  gap: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  padding: 0.75rem;
+  background: #090d0f;
+}
+
+.critical-action-preview span,
+.critical-action-preview small,
+.outcome-form-grid label small {
+  color: var(--muted);
+  font-weight: 400;
+}
+
 .captured-outcome-preview span,
 .captured-outcome-preview small {
   color: var(--muted);

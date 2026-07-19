@@ -588,9 +588,7 @@ describe('external project journey workflow', () => {
     expect(
       outcome.getByText(/controlled non-production environment/u),
     ).toBeVisible();
-    await user.click(
-      outcome.getByRole('button', { name: 'Approve Critical Action' }),
-    );
+    await user.click(outcome.getByRole('button', { name: 'Use this action' }));
     expect(mocks.approveCriticalAction).toHaveBeenCalledWith(
       journey.id,
       submitStep.id,
