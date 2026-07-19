@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  externalExperimentListSchema,
   externalExperimentVersionSchema,
   externalRunListSchema,
   projectSchema,
@@ -89,6 +90,18 @@ describe('external lifecycle and safety routes', () => {
     );
     expect(listed.items).toEqual([
       expect.objectContaining({ runId, assertionCount: 1 }),
+    ]);
+
+    const projectVersions = externalExperimentListSchema.parse(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/api/projects/${project.id}/experiments`,
+        })
+      ).json(),
+    );
+    expect(projectVersions.items).toEqual([
+      expect.objectContaining({ id: version.id, projectId: project.id }),
     ]);
 
     expect(

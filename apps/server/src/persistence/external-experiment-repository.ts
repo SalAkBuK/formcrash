@@ -287,6 +287,23 @@ export class ExternalExperimentRepository {
     });
   }
 
+  listVersionsByProject(
+    projectId: string,
+  ): readonly ExternalExperimentVersion[] {
+    return this.protect('list project external experiment versions', () => {
+      const rows = this.database
+        .prepare(
+          experimentSelect(
+            'WHERE e.project_id = ? ORDER BY ev.created_at DESC, ev.id DESC',
+          ),
+        )
+        .all(projectId) as ExperimentRow[];
+      return externalExperimentListSchema.parse({
+        items: rows.map(mapExperiment),
+      }).items;
+    });
+  }
+
   createRun(input: {
     readonly runId: string;
     readonly experiment: ExternalExperimentVersion;

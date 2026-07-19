@@ -179,6 +179,7 @@ describe('external project journey workflow', () => {
     });
 
     render(<ProjectJourneyDashboard />);
+    await openProjectManagement();
 
     expect(
       await screen.findByRole('heading', { name: 'Project overview' }),
@@ -213,6 +214,7 @@ describe('external project journey workflow', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     render(<ProjectJourneyDashboard />);
+    await openProjectManagement();
     await screen.findByText('Saved targets');
     await user.click(screen.getByLabelText('Select all'));
     await user.click(
@@ -246,6 +248,7 @@ describe('external project journey workflow', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     render(<ProjectJourneyDashboard />);
+    await openProjectManagement();
     await screen.findByText('Saved targets');
     await user.click(
       screen.getByRole('button', { name: 'Delete Extra target extra-pr' }),
@@ -275,6 +278,7 @@ describe('external project journey workflow', () => {
       .mockResolvedValueOnce([project, created]);
 
     render(<ProjectJourneyDashboard />);
+    await openProjectManagement();
     await screen.findByText('Saved targets');
 
     const nameInput = screen.getByLabelText('Project name');
@@ -299,6 +303,7 @@ describe('external project journey workflow', () => {
   it('starts, stops, reviews, saves, and replays a captured journey', async () => {
     const user = userEvent.setup();
     render(<ProjectJourneyDashboard />);
+    await openProjectManagement();
 
     expect((await screen.findAllByText(project.targetUrl))[0]).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Start recording' }));
@@ -314,6 +319,8 @@ describe('external project journey workflow', () => {
     await user.type(name, 'Profile journey');
     mocks.listJourneys.mockResolvedValue([journey]);
     await user.click(screen.getByRole('button', { name: 'Save journey' }));
+
+    await openJourneyDetail();
 
     expect(
       await screen.findByRole('heading', { name: 'Profile journey' }),
@@ -339,6 +346,7 @@ describe('external project journey workflow', () => {
 
   it('shows the controlled-environment warning and explicit unsupported list', async () => {
     render(<ProjectJourneyDashboard />);
+    await openProjectManagement();
     expect(
       await screen.findByText(/Controlled environments only/),
     ).toBeVisible();
@@ -357,6 +365,9 @@ describe('external project journey workflow', () => {
     );
 
     render(<ProjectJourneyDashboard />);
+    await openProjectManagement();
+
+    await openJourneyDetail();
 
     await user.click(await screen.findByRole('button', { name: 'Replay' }));
     expect(await screen.findAllByText('Needs replacement')).not.toHaveLength(0);
@@ -428,6 +439,8 @@ describe('external project journey workflow', () => {
     mocks.getOutcomeCapture.mockResolvedValue(activeCapture);
 
     render(<ProjectJourneyDashboard />);
+    await openProjectManagement();
+    await openJourneyDetail();
     await screen.findByRole('heading', { name: outcomeJourney.name });
     const detailOutcome = document.querySelector(
       '#journey-outcome-configuration',
@@ -558,6 +571,8 @@ describe('external project journey workflow', () => {
     });
 
     render(<ProjectJourneyDashboard />);
+    await openProjectManagement();
+    await openJourneyDetail();
     await screen.findByRole('heading', { name: outcomeJourney.name });
     const detailOutcome = document.querySelector(
       '#journey-outcome-configuration',
@@ -619,3 +634,18 @@ describe('external project journey workflow', () => {
     ).toBeVisible();
   });
 });
+
+async function openProjectManagement(): Promise<void> {
+  const user = userEvent.setup();
+  await user.click(
+    await screen.findByRole('button', { name: 'Manage projects' }),
+  );
+  await screen.findByRole('heading', { name: 'Project overview' });
+}
+
+async function openJourneyDetail(): Promise<void> {
+  const user = userEvent.setup();
+  await user.click(
+    await screen.findByRole('button', { name: 'Journey detail' }),
+  );
+}

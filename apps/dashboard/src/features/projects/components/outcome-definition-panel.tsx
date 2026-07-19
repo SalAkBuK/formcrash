@@ -31,6 +31,7 @@ export function OutcomeDefinitionPanel({
   confirmProduction,
   environment,
   disabled,
+  activeSection = 'all',
   expanded,
   id = 'journey-outcome-configuration',
   onExpandedChange,
@@ -42,6 +43,7 @@ export function OutcomeDefinitionPanel({
   readonly confirmProduction: boolean;
   readonly environment: ProjectEnvironment;
   readonly disabled: boolean;
+  readonly activeSection?: 'all' | 'action' | 'checks';
   readonly expanded?: boolean;
   readonly id?: string;
   readonly onExpandedChange?: (expanded: boolean) => void;
@@ -226,7 +228,7 @@ export function OutcomeDefinitionPanel({
 
   return (
     <details
-      className={`outcome-definition outcome-definition-${presentation}`}
+      className={`outcome-definition outcome-definition-${presentation} outcome-section-${activeSection}`}
       id={id}
       open={presentation === 'wizard' ? true : expanded}
       onToggle={(event) => {
@@ -248,121 +250,128 @@ export function OutcomeDefinitionPanel({
           </div>
         )}
 
-        <div className="outcome-definition-step">
-          <p className="eyebrow">Critical Action</p>
-          <div className="outcome-form-grid">
-            <label>
-              Recorded click or submit
-              <select
-                aria-label={`${journey.name} Critical Action`}
-                disabled={criticalAction !== null && checks.length > 0}
-                value={stepId}
-                onChange={(event) => {
-                  setStepId(event.target.value);
-                  setActionLabel(
-                    compatibleSteps.find(
-                      (step) => step.id === event.target.value,
-                    )?.name ?? '',
-                  );
-                }}
+        {activeSection === 'checks' ? null : (
+          <>
+            <div className="outcome-definition-step">
+              <p className="eyebrow">Critical Action</p>
+              <div className="outcome-form-grid">
+                <label>
+                  Recorded click or submit
+                  <select
+                    aria-label={`${journey.name} Critical Action`}
+                    disabled={criticalAction !== null && checks.length > 0}
+                    value={stepId}
+                    onChange={(event) => {
+                      setStepId(event.target.value);
+                      setActionLabel(
+                        compatibleSteps.find(
+                          (step) => step.id === event.target.value,
+                        )?.name ?? '',
+                      );
+                    }}
+                  >
+                    {compatibleSteps.map((step) => (
+                      <option key={step.id} value={step.id}>
+                        {step.name} ({step.type})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Human-readable label
+                  <input
+                    aria-label={`${journey.name} Critical Action label`}
+                    maxLength={160}
+                    value={actionLabel}
+                    onChange={(event) => setActionLabel(event.target.value)}
+                  />
+                </label>
+              </div>
+              <button
+                className="button button-secondary button-compact"
+                disabled={
+                  busy !== null ||
+                  stepId === '' ||
+                  actionLabel.trim() === '' ||
+                  compatibleSteps.length === 0
+                }
+                onClick={() => void saveCriticalAction()}
+                type="button"
               >
-                {compatibleSteps.map((step) => (
-                  <option key={step.id} value={step.id}>
-                    {step.name} ({step.type})
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Human-readable label
-              <input
-                aria-label={`${journey.name} Critical Action label`}
-                maxLength={160}
-                value={actionLabel}
-                onChange={(event) => setActionLabel(event.target.value)}
-              />
-            </label>
-          </div>
-          <button
-            className="button button-secondary button-compact"
-            disabled={
-              busy !== null ||
-              stepId === '' ||
-              actionLabel.trim() === '' ||
-              compatibleSteps.length === 0
-            }
-            onClick={() => void saveCriticalAction()}
-            type="button"
-          >
-            {busy === 'action'
-              ? 'Saving Critical Action…'
-              : criticalAction === null
-                ? 'Approve Critical Action'
-                : 'Update Critical Action label'}
-          </button>
-          {criticalAction === null ? null : (
-            <p className="guided-ready-note">
-              Approved: {criticalAction.label}
-            </p>
-          )}
-          {checks.length > 0 ? (
-            <p className="technical-note">
-              To choose a different Critical Action, explicitly remove every
-              current Outcome Check below, approve the new action, then start a
-              fresh baseline capture.
-            </p>
-          ) : null}
-        </div>
+                {busy === 'action'
+                  ? 'Saving Critical Action…'
+                  : criticalAction === null
+                    ? 'Approve Critical Action'
+                    : 'Update Critical Action label'}
+              </button>
+              {criticalAction === null ? null : (
+                <p className="guided-ready-note">
+                  Approved: {criticalAction.label}
+                </p>
+              )}
+              {checks.length > 0 ? (
+                <p className="technical-note">
+                  To choose a different Critical Action, explicitly remove every
+                  current Outcome Check below, approve the new action, then
+                  start a fresh baseline capture.
+                </p>
+              ) : null}
+            </div>
 
-        <div className="outcome-definition-step">
-          <p className="eyebrow">Successful baseline</p>
-          <p>
-            This executes the real saved journey against the {environment}{' '}
-            target. It can send state-changing requests and create test data.
-            Use a controlled non-production environment whenever possible.
-            Existing preparation, authentication, production confirmation, and
-            cleanup settings apply to this replay.
-          </p>
-          <div className="guided-action-row">
-            <button
-              className={`button button-compact ${
-                presentation === 'wizard'
-                  ? 'button-secondary'
-                  : 'button-primary'
-              }`}
-              disabled={
-                busy !== null ||
-                disabled ||
-                criticalAction === null ||
-                captureActive
-              }
-              onClick={() => void beginCapture()}
-              type="button"
-            >
-              {busy === 'capture'
-                ? 'Replaying baseline…'
-                : 'Start outcome baseline'}
-            </button>
-            {capture === null ? null : <span>{capture.status}</span>}
-          </div>
-          {capture?.status === 'awaiting_selection' ? (
-            <p className="guided-ready-note">
-              Chromium is waiting. Click the visible result element you want
-              FormCrash to capture.
-            </p>
-          ) : null}
-          {capture?.selectionWarnings.map((warning) => (
-            <p className="recording-warning" key={warning.code}>
-              {warning.message}
-            </p>
-          ))}
-          {capture?.errorMessage === null ||
-          capture?.errorMessage === undefined ? null : (
-            <p className="recording-warning">{capture.errorMessage}</p>
-          )}
-        </div>
+            <div className="outcome-definition-step">
+              <p className="eyebrow">Successful baseline</p>
+              <p>
+                This executes the real saved journey against the {environment}{' '}
+                target. It can send state-changing requests and create test
+                data. Use a controlled non-production environment whenever
+                possible. Existing preparation, authentication, production
+                confirmation, and cleanup settings apply to this replay.
+              </p>
+              <div className="guided-action-row">
+                <button
+                  className={`button button-compact ${
+                    presentation === 'wizard'
+                      ? 'button-secondary'
+                      : 'button-primary'
+                  }`}
+                  disabled={
+                    busy !== null ||
+                    disabled ||
+                    criticalAction === null ||
+                    captureActive
+                  }
+                  onClick={() => void beginCapture()}
+                  type="button"
+                >
+                  {busy === 'capture'
+                    ? 'Replaying baseline…'
+                    : 'Start outcome baseline'}
+                </button>
+                {capture === null ? null : (
+                  <span>{captureStatusLabel(capture.status)}</span>
+                )}
+              </div>
+              {capture?.status === 'awaiting_selection' ? (
+                <p className="guided-ready-note">
+                  Chromium is waiting. Click the visible result element you want
+                  FormCrash to capture.
+                </p>
+              ) : null}
+              {capture?.selectionWarnings.map((warning) => (
+                <p className="recording-warning" key={warning.code}>
+                  {warning.message}
+                </p>
+              ))}
+              {capture?.errorMessage === null ||
+              capture?.errorMessage === undefined ? null : (
+                <RunnerFailureMessage message={capture.errorMessage} />
+              )}
+            </div>
+          </>
+        )}
 
-        {capture === null ||
+        {activeSection === 'action' ||
+        capture === null ||
         ['completed', 'expired', 'runner_error'].includes(
           capture.status,
         ) ? null : (
@@ -496,49 +505,51 @@ export function OutcomeDefinitionPanel({
           </div>
         )}
 
-        <div className="outcome-definition-step">
-          <p className="eyebrow">Saved Outcome Checks</p>
-          {checks.length === 0 ? (
-            <p className="technical-note">No Outcome Checks saved yet.</p>
-          ) : (
-            <ul className="outcome-check-list">
-              {checks.map((check) => (
-                <li key={check.id}>
-                  <strong>{readableOutcome(check)}</strong>
-                  <span>{check.description}</span>
-                  <details>
-                    <summary>Technical details</summary>
-                    <p>
-                      {check.type.replaceAll('_', ' ')} - journey version{' '}
-                      {journey.version} - {journey.id}
-                    </p>
-                    {'binding' in check ? (
+        {activeSection === 'action' ? null : (
+          <div className="outcome-definition-step">
+            <p className="eyebrow">Saved Outcome Checks</p>
+            {checks.length === 0 ? (
+              <p className="technical-note">No Outcome Checks saved yet.</p>
+            ) : (
+              <ul className="outcome-check-list">
+                {checks.map((check) => (
+                  <li key={check.id}>
+                    <strong>{readableOutcome(check)}</strong>
+                    <span>{check.description}</span>
+                    <details>
+                      <summary>Technical details</summary>
                       <p>
-                        Binding: <code>{check.binding.template}</code>
+                        {check.type.replaceAll('_', ' ')} - journey version{' '}
+                        {journey.version} - {journey.id}
                       </p>
-                    ) : null}
-                    {'target' in check ? (
-                      <p>
-                        Locator:{' '}
-                        <code>{formatLocator(check.target.locator)}</code>
-                      </p>
-                    ) : null}
-                  </details>
-                  <button
-                    className="button button-secondary button-compact"
-                    disabled={busy !== null || captureActive}
-                    onClick={() => void removeCheck(check)}
-                    type="button"
-                  >
-                    {busy === `delete-check-${check.id}`
-                      ? 'Removing...'
-                      : 'Remove and recapture'}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+                      {'binding' in check ? (
+                        <p>
+                          Binding: <code>{check.binding.template}</code>
+                        </p>
+                      ) : null}
+                      {'target' in check ? (
+                        <p>
+                          Locator:{' '}
+                          <code>{formatLocator(check.target.locator)}</code>
+                        </p>
+                      ) : null}
+                    </details>
+                    <button
+                      className="button button-secondary button-compact"
+                      disabled={busy !== null || captureActive}
+                      onClick={() => void removeCheck(check)}
+                      type="button"
+                    >
+                      {busy === `delete-check-${check.id}`
+                        ? 'Removing...'
+                        : 'Remove and recapture'}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
     </details>
   );
@@ -588,6 +599,53 @@ function formatLocator(locator: ReplayLocator): string {
   return locator.strategy === 'role'
     ? `role=${locator.role}, name=${JSON.stringify(locator.name)}`
     : `${locator.strategy}=${JSON.stringify(locator.value)}`;
+}
+
+function RunnerFailureMessage({ message }: { readonly message: string }) {
+  const technicalDetail = stripTerminalFormatting(message);
+  return (
+    <div className="outcome-runner-failure" role="alert">
+      <div>
+        <strong>Baseline replay could not complete</strong>
+        <p>{friendlyRunnerFailure(technicalDetail)}</p>
+      </div>
+      <details>
+        <summary>Technical runner detail</summary>
+        <pre>{technicalDetail}</pre>
+      </details>
+    </div>
+  );
+}
+
+function captureStatusLabel(status: OutcomeCaptureSession['status']): string {
+  if (status === 'runner_error') return 'Runner error';
+  return status;
+}
+
+function friendlyRunnerFailure(message: string): string {
+  if (
+    message.includes('Target page, context or browser has been closed') ||
+    message.includes('Target page, context or browser was closed')
+  ) {
+    return 'The controlled browser closed before the saved journey reached the baseline state. Review authentication and the recorded navigation, then retry.';
+  }
+  const firstLine = message.split(/\r?\n/u).find((line) => line.trim() !== '');
+  return (
+    firstLine?.replace(/^page\.goto:\s*/u, '') ??
+    'The baseline replay stopped before an Outcome Check could be captured.'
+  );
+}
+
+function stripTerminalFormatting(message: string): string {
+  const terminalEscape = String.fromCharCode(27);
+  const ansiSequence = new RegExp(
+    `${terminalEscape}\\[[0-?]*[ -/]*[@-~]`,
+    'gu',
+  );
+  return message
+    .replace(ansiSequence, '')
+    .replace(/\n?Call log:[\s\S]*$/u, '')
+    .trim();
 }
 
 function messageOf(reason: unknown): string {

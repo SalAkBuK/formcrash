@@ -1,0 +1,45 @@
+{
+  "generatedAt": "2026-07-19T11:36:45.220Z",
+  "screenshots": [
+    "journey-detail.png",
+    "test-wizard-expected-outcome.png",
+    "test-wizard-expected-critical-action.png",
+    "test-wizard-expected-outcome-checks.png",
+    "test-wizard-safety-data.png",
+    "test-wizard-review-run.png",
+    "runs-list.png",
+    "run-result-vulnerability.png",
+    "run-result-not-configured.png"
+  ],
+  "data": {
+    "projectId": "cdefe107-84cd-4bb2-a7ba-6d93f238dc32",
+    "journeyId": "8ba7755c-61ce-41fb-9402-770ebf13bae0",
+    "vulnerableRunId": "8fed8f99-111a-4eda-860e-184ca4f78876",
+    "notConfiguredRunId": "76c65422-02c9-431d-8660-7341ad0eff72"
+  },
+  "checks": {
+    "overflow": {
+      "journey-detail": true,
+      "test-wizard-expected-outcome": true,
+      "test-wizard-expected-critical-action": true,
+      "test-wizard-expected-outcome-checks": true,
+      "test-wizard-safety-data": true,
+      "test-wizard-review-run": true,
+      "runs-list": true,
+      "run-result-vulnerability": true,
+      "run-result-not-configured": true
+    },
+    "landmarks": {
+      "journey-detail": 1,
+      "test-wizard-expected-outcome": 1,
+      "test-wizard-expected-critical-action": 1,
+      "test-wizard-expected-outcome-checks": 1,
+      "test-wizard-safety-data": 1,
+      "test-wizard-review-run": 1,
+      "runs-list": 1,
+      "run-result-vulnerability": 1,
+      "run-result-not-configured": 1
+    },
+    "errors": []
+  }
+}

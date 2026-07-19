@@ -73,6 +73,9 @@ export function ProjectJourneyDashboard() {
   >(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [surface, setSurface] = useState<'journey' | 'test' | 'manage'>(
+    'journey',
+  );
 
   useEffect(() => {
     void refreshProjects();
@@ -450,224 +453,260 @@ export function ProjectJourneyDashboard() {
 
   return (
     <main className="dashboard-shell project-workbench">
-      <header className="project-overview-header">
-        <div className="project-overview-heading">
-          <p className="eyebrow">External projects</p>
-          <h1>Project overview</h1>
-          <p className="hero-statement">
-            Connect a controlled target, record its critical journey, and prove
-            how repeated action changes the browser-visible outcome.
-          </p>
-        </div>
-        <div className="project-overview-actions">
-          <Link className="button button-secondary" href="/">
-            Open Sample Checkout
-          </Link>
-        </div>
-        <p className="safety-notice project-safety-notice">
-          <strong>Controlled environments only.</strong> Test applications you
-          own or are explicitly authorized to test. Production targets require
-          an additional confirmation before replay.
-        </p>
-      </header>
-
-      {error !== null ? (
-        <div className="state-message state-message-error" role="alert">
-          {error}
-        </div>
+      {selected !== null ? (
+        <nav
+          aria-label="Project workspace views"
+          className="project-surface-nav"
+        >
+          <button
+            aria-current={surface === 'journey' ? 'page' : undefined}
+            onClick={() => setSurface('journey')}
+            type="button"
+          >
+            Journey detail
+          </button>
+          <button
+            aria-current={surface === 'test' ? 'page' : undefined}
+            onClick={() => setSurface('test')}
+            type="button"
+          >
+            Configure test
+          </button>
+          <button
+            aria-current={surface === 'manage' ? 'page' : undefined}
+            onClick={() => setSurface('manage')}
+            type="button"
+          >
+            Manage projects
+          </button>
+        </nav>
       ) : null}
 
-      <section
-        className="project-grid project-overview-grid"
-        aria-label="Projects"
-      >
-        <form
-          className="panel project-form project-create-panel"
-          onSubmit={(event) => void submitProject(event)}
-        >
-          <div className="project-panel-heading">
-            <span className="project-panel-index" aria-hidden="true">
-              01
-            </span>
-            <div>
-              <p className="eyebrow">New project</p>
-              <h2>Connect a target</h2>
+      {surface === 'manage' || selected === null ? (
+        <>
+          <header className="project-overview-header">
+            <div className="project-overview-heading">
+              <p className="eyebrow">External projects</p>
+              <h1>Project overview</h1>
+              <p className="hero-statement">
+                Connect a controlled target, record its critical journey, and
+                prove how repeated action changes the browser-visible outcome.
+              </p>
             </div>
-          </div>
-          <p className="project-panel-description">
-            Save the application boundary before recording any browser activity.
-          </p>
-          <label>
-            Project name
-            <input
-              name="name"
-              required
-              maxLength={120}
-              placeholder="Account settings"
-            />
-          </label>
-          <label>
-            Target URL
-            <input
-              name="targetUrl"
-              required
-              type="url"
-              placeholder="http://localhost:4300"
-            />
-          </label>
-          <label>
-            Environment
-            <select defaultValue="production" name="environment" required>
-              <option value="local">Local development</option>
-              <option value="staging">Staging / disposable test data</option>
-              <option value="production">Production / real data</option>
-            </select>
-          </label>
-          <label>
-            Description <span>(optional)</span>
-            <textarea name="description" maxLength={1000} rows={3} />
-          </label>
-          <button
-            className="button button-primary"
-            disabled={busy !== null}
-            type="submit"
-          >
-            {busy === 'project' ? 'Creating…' : 'Create project'}
-          </button>
-        </form>
+            <div className="project-overview-actions">
+              <Link className="button button-secondary" href="/">
+                Open Sample Checkout
+              </Link>
+            </div>
+            <p className="safety-notice project-safety-notice">
+              <strong>Controlled environments only.</strong> Test applications
+              you own or are explicitly authorized to test. Production targets
+              require an additional confirmation before replay.
+            </p>
+          </header>
 
-        <div className="panel project-targets-panel">
-          <div className="section-heading-row">
-            <div className="project-panel-heading">
-              <span className="project-panel-index" aria-hidden="true">
-                02
-              </span>
-              <div>
-                <p className="eyebrow">Projects</p>
-                <h2>Saved targets</h2>
-              </div>
-            </div>
-            <span className="project-count">
-              {formatCount(projects.length, 'target')}
-            </span>
-          </div>
-          {deletableProjects.length > 0 ? (
-            <div className="project-bulk-actions">
-              <label>
-                <input
-                  checked={allDeletableProjectsSelected}
-                  disabled={busy !== null}
-                  onChange={(event) =>
-                    setSelectedProjectIds(
-                      event.target.checked
-                        ? new Set(
-                            deletableProjects.map((project) => project.id),
-                          )
-                        : new Set(),
-                    )
-                  }
-                  type="checkbox"
-                />{' '}
-                Select all
-              </label>
-              <button
-                className="project-delete-button"
-                disabled={busy !== null || selectedProjectCount === 0}
-                onClick={() => void removeSelectedProjects()}
-                type="button"
-              >
-                {busy === 'delete-projects'
-                  ? 'Deleting selected…'
-                  : `Delete selected (${selectedProjectCount})`}
-              </button>
+          {error !== null ? (
+            <div className="state-message state-message-error" role="alert">
+              {error}
             </div>
           ) : null}
-          {projects.length === 0 ? (
-            <p className="empty-state">No projects yet.</p>
-          ) : (
-            <div className="project-list">
-              {projects.map((project) => (
-                <article
-                  className={`project-card ${selected?.id === project.id ? 'project-card-selected' : ''}`}
-                  key={project.id}
-                >
-                  {project.id !== 'project-sample-checkout' ? (
-                    <label
-                      aria-label={`Select ${project.name} ${project.id.slice(0, 8)}`}
-                      className="project-checkbox"
-                    >
-                      <input
-                        checked={selectedProjectIds.has(project.id)}
-                        disabled={busy !== null}
-                        onChange={(event) =>
-                          setSelectedProjectIds((current) => {
-                            const next = new Set(current);
-                            if (event.target.checked) next.add(project.id);
-                            else next.delete(project.id);
-                            return next;
-                          })
-                        }
-                        type="checkbox"
-                      />
-                    </label>
-                  ) : (
-                    <span
-                      aria-hidden="true"
-                      className="project-checkbox-placeholder"
-                    />
-                  )}
+
+          <section
+            className="project-grid project-overview-grid"
+            aria-label="Projects"
+          >
+            <form
+              className="panel project-form project-create-panel"
+              onSubmit={(event) => void submitProject(event)}
+            >
+              <div className="project-panel-heading">
+                <span className="project-panel-index" aria-hidden="true">
+                  01
+                </span>
+                <div>
+                  <p className="eyebrow">New project</p>
+                  <h2>Connect a target</h2>
+                </div>
+              </div>
+              <p className="project-panel-description">
+                Save the application boundary before recording any browser
+                activity.
+              </p>
+              <label>
+                Project name
+                <input
+                  name="name"
+                  required
+                  maxLength={120}
+                  placeholder="Account settings"
+                />
+              </label>
+              <label>
+                Target URL
+                <input
+                  name="targetUrl"
+                  required
+                  type="url"
+                  placeholder="http://localhost:4300"
+                />
+              </label>
+              <label>
+                Environment
+                <select defaultValue="production" name="environment" required>
+                  <option value="local">Local development</option>
+                  <option value="staging">
+                    Staging / disposable test data
+                  </option>
+                  <option value="production">Production / real data</option>
+                </select>
+              </label>
+              <label>
+                Description <span>(optional)</span>
+                <textarea name="description" maxLength={1000} rows={3} />
+              </label>
+              <button
+                className="button button-primary"
+                disabled={busy !== null}
+                type="submit"
+              >
+                {busy === 'project' ? 'Creating…' : 'Create project'}
+              </button>
+            </form>
+
+            <div className="panel project-targets-panel">
+              <div className="section-heading-row">
+                <div className="project-panel-heading">
+                  <span className="project-panel-index" aria-hidden="true">
+                    02
+                  </span>
+                  <div>
+                    <p className="eyebrow">Projects</p>
+                    <h2>Saved targets</h2>
+                  </div>
+                </div>
+                <span className="project-count">
+                  {formatCount(projects.length, 'target')}
+                </span>
+              </div>
+              {deletableProjects.length > 0 ? (
+                <div className="project-bulk-actions">
+                  <label>
+                    <input
+                      checked={allDeletableProjectsSelected}
+                      disabled={busy !== null}
+                      onChange={(event) =>
+                        setSelectedProjectIds(
+                          event.target.checked
+                            ? new Set(
+                                deletableProjects.map((project) => project.id),
+                              )
+                            : new Set(),
+                        )
+                      }
+                      type="checkbox"
+                    />{' '}
+                    Select all
+                  </label>
                   <button
-                    className="project-card-select"
-                    onClick={() => {
-                      setSelected(project);
-                      setRecording(null);
-                      setReviewSteps([]);
-                      setReplayResult(null);
-                      setReplayAuthenticationRequired(false);
-                      setReplayAuthCapture(null);
-                      setReplayAuthMessage(null);
-                    }}
+                    className="project-delete-button"
+                    disabled={busy !== null || selectedProjectCount === 0}
+                    onClick={() => void removeSelectedProjects()}
                     type="button"
                   >
-                    <span className="project-card-heading">
-                      <strong>{project.name}</strong>
-                      <StatusBadge
-                        tone={
-                          project.environment === 'production'
-                            ? 'warning'
-                            : 'neutral'
-                        }
-                      >
-                        {environmentLabel(project.environment)}
-                      </StatusBadge>
-                    </span>
-                    <code>{project.targetUrl}</code>
-                    <span className="project-card-description">
-                      {project.description ||
-                        `Project ${project.id.slice(0, 8)}`}
-                    </span>
+                    {busy === 'delete-projects'
+                      ? 'Deleting selected…'
+                      : `Delete selected (${selectedProjectCount})`}
                   </button>
-                  {project.id !== 'project-sample-checkout' ? (
-                    <button
-                      aria-label={`Delete ${project.name} ${project.id.slice(0, 8)}`}
-                      className="project-delete-button"
-                      disabled={busy !== null}
-                      onClick={() => void removeProject(project)}
-                      type="button"
+                </div>
+              ) : null}
+              {projects.length === 0 ? (
+                <p className="empty-state">No projects yet.</p>
+              ) : (
+                <div className="project-list">
+                  {projects.map((project) => (
+                    <article
+                      className={`project-card ${selected?.id === project.id ? 'project-card-selected' : ''}`}
+                      key={project.id}
                     >
-                      {busy === `delete-project-${project.id}`
-                        ? 'Deleting…'
-                        : 'Delete'}
-                    </button>
-                  ) : null}
-                </article>
-              ))}
+                      {project.id !== 'project-sample-checkout' ? (
+                        <label
+                          aria-label={`Select ${project.name} ${project.id.slice(0, 8)}`}
+                          className="project-checkbox"
+                        >
+                          <input
+                            checked={selectedProjectIds.has(project.id)}
+                            disabled={busy !== null}
+                            onChange={(event) =>
+                              setSelectedProjectIds((current) => {
+                                const next = new Set(current);
+                                if (event.target.checked) next.add(project.id);
+                                else next.delete(project.id);
+                                return next;
+                              })
+                            }
+                            type="checkbox"
+                          />
+                        </label>
+                      ) : (
+                        <span
+                          aria-hidden="true"
+                          className="project-checkbox-placeholder"
+                        />
+                      )}
+                      <button
+                        className="project-card-select"
+                        onClick={() => {
+                          setSelected(project);
+                          setRecording(null);
+                          setReviewSteps([]);
+                          setReplayResult(null);
+                          setReplayAuthenticationRequired(false);
+                          setReplayAuthCapture(null);
+                          setReplayAuthMessage(null);
+                        }}
+                        type="button"
+                      >
+                        <span className="project-card-heading">
+                          <strong>{project.name}</strong>
+                          <StatusBadge
+                            tone={
+                              project.environment === 'production'
+                                ? 'warning'
+                                : 'neutral'
+                            }
+                          >
+                            {environmentLabel(project.environment)}
+                          </StatusBadge>
+                        </span>
+                        <code>{project.targetUrl}</code>
+                        <span className="project-card-description">
+                          {project.description ||
+                            `Project ${project.id.slice(0, 8)}`}
+                        </span>
+                      </button>
+                      {project.id !== 'project-sample-checkout' ? (
+                        <button
+                          aria-label={`Delete ${project.name} ${project.id.slice(0, 8)}`}
+                          className="project-delete-button"
+                          disabled={busy !== null}
+                          onClick={() => void removeProject(project)}
+                          type="button"
+                        >
+                          {busy === `delete-project-${project.id}`
+                            ? 'Deleting…'
+                            : 'Delete'}
+                        </button>
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      </section>
+          </section>
+        </>
+      ) : null}
 
-      {selected !== null ? (
+      {selected !== null && surface === 'manage' ? (
         <>
           <section
             className="panel selected-project-overview"
@@ -968,58 +1007,62 @@ export function ProjectJourneyDashboard() {
               </button>
             </section>
           ) : null}
-
-          <JourneyDetail
-            authCapture={replayAuthCapture}
-            authMessage={replayAuthMessage}
-            authenticationRequired={replayAuthenticationRequired}
-            busy={busy}
-            executionSettings={executionSettings}
-            journeys={journeys}
-            loading={projectDetailsLoading}
-            onAuthenticationConfirm={() =>
-              void confirmReplayAuthenticationCapture()
-            }
-            onAuthenticationStart={() =>
-              void beginReplayAuthenticationCapture()
-            }
-            onDelete={(journey) => void removeJourney(journey)}
-            onProductionConfirmationChange={setProductionReplayConfirmed}
-            onReplay={(journey) => void runReplay(journey)}
-            onReplayModeChange={setReplayMode}
-            onReplayPacingChange={setReplayPacing}
-            onRuntimeValueChange={(journeyId, variableName, value) =>
-              setReplayValues((current) => ({
-                ...current,
-                [journeyId]: {
-                  ...current[journeyId],
-                  [variableName]: value,
-                },
-              }))
-            }
-            onSelectionChange={(journeyId) => {
-              setSelectedJourneyId(journeyId);
-              setReplayResult(null);
-              setReplayAuthenticationRequired(false);
-              setReplayAuthCapture(null);
-              setReplayAuthMessage(null);
-            }}
-            productionReplayConfirmed={productionReplayConfirmed}
-            project={selected}
-            replayMode={replayMode}
-            replayPacing={replayPacing}
-            replayResult={replayResult}
-            replayValues={replayValues}
-            selectedJourneyId={selectedJourneyId}
-          />
-
-          <ExternalExperimentPanel
-            journeys={journeys}
-            onSelectedJourneyChange={setSelectedJourneyId}
-            project={selected}
-            selectedJourneyId={selectedJourneyId}
-          />
         </>
+      ) : null}
+
+      {selected !== null && surface === 'journey' ? (
+        <JourneyDetail
+          authCapture={replayAuthCapture}
+          authMessage={replayAuthMessage}
+          authenticationRequired={replayAuthenticationRequired}
+          busy={busy}
+          executionSettings={executionSettings}
+          journeys={journeys}
+          loading={projectDetailsLoading}
+          onAuthenticationConfirm={() =>
+            void confirmReplayAuthenticationCapture()
+          }
+          onAuthenticationStart={() => void beginReplayAuthenticationCapture()}
+          onDelete={(journey) => void removeJourney(journey)}
+          onManageProjects={() => setSurface('manage')}
+          onOpenTest={() => setSurface('test')}
+          onProductionConfirmationChange={setProductionReplayConfirmed}
+          onReplay={(journey) => void runReplay(journey)}
+          onReplayModeChange={setReplayMode}
+          onReplayPacingChange={setReplayPacing}
+          onRuntimeValueChange={(journeyId, variableName, value) =>
+            setReplayValues((current) => ({
+              ...current,
+              [journeyId]: {
+                ...current[journeyId],
+                [variableName]: value,
+              },
+            }))
+          }
+          onSelectionChange={(journeyId) => {
+            setSelectedJourneyId(journeyId);
+            setReplayResult(null);
+            setReplayAuthenticationRequired(false);
+            setReplayAuthCapture(null);
+            setReplayAuthMessage(null);
+          }}
+          productionReplayConfirmed={productionReplayConfirmed}
+          project={selected}
+          replayMode={replayMode}
+          replayPacing={replayPacing}
+          replayResult={replayResult}
+          replayValues={replayValues}
+          selectedJourneyId={selectedJourneyId}
+        />
+      ) : null}
+
+      {selected !== null && surface === 'test' ? (
+        <ExternalExperimentPanel
+          journeys={journeys}
+          onSelectedJourneyChange={setSelectedJourneyId}
+          project={selected}
+          selectedJourneyId={selectedJourneyId}
+        />
       ) : null}
     </main>
   );

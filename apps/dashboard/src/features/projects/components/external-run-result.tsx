@@ -16,6 +16,10 @@ export function ExternalRunResult({
   readonly result: ExternalRunDetail;
   readonly eyebrow?: string;
 }) {
+  if (result.outcomeAggregate === 'not_configured') {
+    return <NotConfiguredRunResult result={result} />;
+  }
+
   const presentation = result.presentation;
   const screenshots = [...result.artifacts].sort(
     (left, right) => screenshotPriority(left) - screenshotPriority(right),
@@ -463,6 +467,234 @@ export function ExternalRunResult({
       </details>
     </div>
   );
+}
+
+function NotConfiguredRunResult({
+  result,
+}: {
+  readonly result: ExternalRunDetail;
+}) {
+  const failureCount = result.events.filter(
+    (event) => event.eventType === 'runner.error',
+  ).length;
+  const visibleEvents = result.events.slice(-10);
+  const screenshot = result.artifacts.find((artifact) =>
+    artifact.mimeType.startsWith('image/'),
+  );
+
+  return (
+    <div
+      className="external-result external-result-not-configured outcome-not_configured"
+      role="status"
+    >
+      <header className="not-configured-banner">
+        <span className="not-configured-icon" aria-hidden="true">
+          !
+        </span>
+        <div>
+          <p className="eyebrow">Outcome unverified</p>
+          <h2>{result.presentation.headline}</h2>
+          <p>
+            {result.outcomeCheckSnapshot.checks.length === 0
+              ? 'No approved Outcome Checks were configured for this immutable run snapshot.'
+              : result.presentation.outcomeSummary}
+          </p>
+        </div>
+        <div className="not-configured-actions">
+          <a className="button button-primary" href="/projects">
+            Configure Outcome Check
+          </a>
+          <a className="button button-secondary" href="#technical-run-detail">
+            View technical evidence
+          </a>
+        </div>
+      </header>
+
+      <div className="not-configured-layout">
+        <div className="not-configured-main">
+          <section className="panel not-configured-events">
+            <div className="section-heading-row compact-heading">
+              <div>
+                <p className="eyebrow">Execution timeline</p>
+                <h3>Observed runner activity</h3>
+              </div>
+              <span className="event-count">
+                {result.events.length} events captured
+              </span>
+            </div>
+            <div className="not-configured-event-table-wrap">
+              <table className="not-configured-event-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Event</th>
+                    <th>Observed detail</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleEvents.map((event) => (
+                    <tr key={event.eventId}>
+                      <td>{formatElapsed(event.relativeTimestampMs)}</td>
+                      <td>
+                        <code>{event.eventType}</code>
+                      </td>
+                      <td>{eventSummary(event.payload)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {result.networkObservations.length > 0 ? (
+              <div className="not-configured-network-evidence">
+                <h4>Observed network activity</h4>
+                <RequestObservationTable result={result} />
+              </div>
+            ) : null}
+          </section>
+
+          <section
+            className="panel not-configured-terminal"
+            id="technical-run-detail"
+          >
+            <div className="terminal-heading">
+              <span aria-hidden="true">● ● ●</span>
+              <span>Runner detail</span>
+            </div>
+            <pre>
+              {result.runnerError === null
+                ? 'Execution finished without a persisted runner error.'
+                : `${result.runnerError.code}\n${result.runnerError.message}\n${result.runnerError.failedStep?.technicalMessage ?? ''}`}
+            </pre>
+          </section>
+        </div>
+
+        <aside
+          className="not-configured-rail"
+          aria-label="Run snapshot and diagnostics"
+        >
+          <section className="panel not-configured-snapshot">
+            <p className="eyebrow">Run snapshot</p>
+            {screenshot === undefined ? (
+              <div className="not-configured-screenshot-empty">
+                No screenshot evidence is available for this run.
+              </div>
+            ) : (
+              <figure className="not-configured-screenshot">
+                <a
+                  aria-label={`Open ${screenshotCaption(screenshot.label).title.toLowerCase()} screenshot`}
+                  href={getExternalArtifactUrl(
+                    result.runId,
+                    screenshot.artifactId,
+                  )}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  <img
+                    alt={`${screenshot.label} screenshot`}
+                    src={getExternalArtifactUrl(
+                      result.runId,
+                      screenshot.artifactId,
+                    )}
+                  />
+                </a>
+                <figcaption>
+                  <strong>{screenshotCaption(screenshot.label).title}</strong>
+                  <span>{screenshotCaption(screenshot.label).description}</span>
+                </figcaption>
+              </figure>
+            )}
+            <dl>
+              <div>
+                <dt>Duration</dt>
+                <dd>{formatDuration(result.durationMs)}</dd>
+              </div>
+              <div>
+                <dt>Failures</dt>
+                <dd>{failureCount}</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section className="panel not-configured-environment">
+            <p className="eyebrow">Environment</p>
+            <dl>
+              <div>
+                <dt>Target URL</dt>
+                <dd title={result.targetUrl}>{result.targetUrl}</dd>
+              </div>
+              <div>
+                <dt>Project</dt>
+                <dd>{result.projectName}</dd>
+              </div>
+              <div>
+                <dt>Journey</dt>
+                <dd>{result.journeyName}</dd>
+              </div>
+              <div>
+                <dt>Run ID</dt>
+                <dd>
+                  <code>{result.runId.slice(0, 12)}…</code>
+                </dd>
+              </div>
+            </dl>
+          </section>
+
+          <section className="panel not-configured-diagnostic">
+            <p className="eyebrow">Diagnostic next step</p>
+            <strong>
+              {result.runnerError === null
+                ? 'Add an approved Outcome Check.'
+                : 'Resolve the recorded journey failure first.'}
+            </strong>
+            <p>
+              {result.runnerError?.message ??
+                'Without an approved browser-visible outcome, this run cannot establish application success or failure.'}
+            </p>
+          </section>
+        </aside>
+      </div>
+
+      <details className="external-technical not-configured-technical">
+        <summary>Technical evidence</summary>
+        <div className="external-technical-body">
+          <section>
+            <h5>Technical assertions</h5>
+            {result.assertions.length > 0 ? (
+              <ul>
+                {result.assertions.map((assertion) => (
+                  <li key={assertion.assertionId}>
+                    <code>{assertion.assertionId}</code> · {assertion.status}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>No technical assertion results are available.</p>
+            )}
+          </section>
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function eventSummary(payload: unknown): string {
+  if (payload === null || typeof payload !== 'object') return 'No detail';
+  const values = Object.values(payload as Record<string, unknown>);
+  const useful = values.find(
+    (value) => typeof value === 'string' || typeof value === 'number',
+  );
+  return useful === undefined ? 'State transition recorded' : String(useful);
+}
+
+function formatElapsed(milliseconds: number): string {
+  return `+${(milliseconds / 1000).toFixed(2)}s`;
+}
+
+function formatDuration(milliseconds: number | null): string {
+  if (milliseconds === null) return 'In progress';
+  return milliseconds < 1000
+    ? `${milliseconds} ms`
+    : `${(milliseconds / 1000).toFixed(1)} s`;
 }
 
 function ConditionCard({

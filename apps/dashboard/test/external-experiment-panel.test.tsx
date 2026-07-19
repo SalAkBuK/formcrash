@@ -419,19 +419,24 @@ describe('external experiment dashboard workflow', () => {
   });
 
   it('blocks the first step while Outcome Checks are empty and exposes the existing capture entry', async () => {
+    const user = userEvent.setup();
     mocks.listOutcomeChecks.mockResolvedValue([]);
 
     render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
 
-    expect(
-      await screen.findByText('No Outcome Checks saved yet.'),
-    ).toBeVisible();
     expect(
       screen.getByRole('button', { name: 'Continue to Safety & Data' }),
     ).toBeDisabled();
     expect(
       await screen.findByText('Save at least one valid Outcome Check.'),
     ).toBeVisible();
+    await user.click(
+      await screen.findByRole('tab', { name: /Outcome Checks/u }),
+    );
+    expect(
+      await screen.findByText('No Outcome Checks saved yet.'),
+    ).toBeVisible();
+    await user.click(screen.getByRole('tab', { name: /Critical Action/u }));
     expect(
       screen.getByRole('button', { name: 'Start outcome baseline' }),
     ).toBeVisible();
@@ -460,6 +465,45 @@ describe('external experiment dashboard workflow', () => {
     expect(
       screen.queryByText(/confidence|provenance/u),
     ).not.toBeInTheDocument();
+  });
+
+  it('contains baseline runner failures and removes terminal escape noise', async () => {
+    const user = userEvent.setup();
+    mocks.listOutcomeChecks.mockResolvedValue([]);
+    mocks.getActiveOutcomeCapture.mockResolvedValue({
+      id: 'failed-outcome-capture',
+      journeyId: journey.id,
+      criticalActionId: criticalAction.id,
+      generatedInputs: [],
+      status: 'runner_error',
+      selectedTarget: null,
+      selectionWarnings: [],
+      finalPathname: null,
+      errorMessage:
+        'page.goto: Target page, context or browser has been closed\nCall log: \u001b[2m - navigating to "https://example.test"\u001b[22m',
+      startedAt: '2026-07-16T00:00:00.000Z',
+      expiresAt: '2026-07-16T00:10:00.000Z',
+      completedAt: '2026-07-16T00:01:00.000Z',
+    });
+
+    render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
+    await user.click(
+      await screen.findByRole('tab', { name: /Critical Action/u }),
+    );
+
+    expect(
+      await screen.findByText('Baseline replay could not complete'),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/controlled browser closed before the saved journey/u),
+    ).toBeVisible();
+    expect(document.body.textContent).not.toContain(String.fromCharCode(27));
+    await user.click(screen.getByText('Technical runner detail'));
+    expect(
+      screen.getByText(
+        'page.goto: Target page, context or browser has been closed',
+      ),
+    ).toBeVisible();
   });
 
   it('keeps authentication unknown, redacts runtime values, and requires production confirmation', async () => {
@@ -689,6 +733,9 @@ describe('external experiment dashboard workflow', () => {
         name: 'Define the outcome, check safety, then run',
       }),
     ).toBeVisible();
+    await user.click(
+      await screen.findByRole('tab', { name: /Outcome Checks/u }),
+    );
     expect(
       await screen.findByText('The profile page should appear.'),
     ).toBeVisible();

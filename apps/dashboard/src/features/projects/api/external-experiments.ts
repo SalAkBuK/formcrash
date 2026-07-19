@@ -129,6 +129,26 @@ export async function listExternalExperiments(
   ).items;
 }
 
+export async function listProjectExternalExperiments(
+  projectId: string,
+): Promise<readonly ExternalExperimentVersion[]> {
+  return (
+    await requestJson(
+      `/api/projects/${projectId}/experiments`,
+      externalExperimentListSchema,
+    )
+  ).items;
+}
+
+export function getExternalExperimentVersion(
+  experimentVersionId: string,
+): Promise<ExternalExperimentVersion> {
+  return requestJson(
+    `/api/external-experiments/${experimentVersionId}`,
+    externalExperimentVersionSchema,
+  );
+}
+
 export function createExternalExperiment(
   journeyId: string,
   input: CreateExternalExperimentRequest,
@@ -178,15 +198,15 @@ export function runExternalExperiment(
 }
 
 export function listExternalRuns(
-  projectId: string,
+  projectId?: string,
   limit = 20,
   offset = 0,
 ): Promise<ExternalRunList> {
   const query = new URLSearchParams({
-    projectId,
     limit: String(limit),
     offset: String(offset),
   });
+  if (projectId !== undefined) query.set('projectId', projectId);
   return requestJson(
     `/api/external-runs?${query.toString()}`,
     externalRunListSchema,

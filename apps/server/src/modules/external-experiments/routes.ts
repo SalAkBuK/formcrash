@@ -81,6 +81,22 @@ export function registerExternalExperimentRoutes(
   );
 
   app.get<{ Params: ProjectParams }>(
+    '/api/projects/:projectId/experiments',
+    async (request, reply) => {
+      if (dependencies.projects.getProject(request.params.projectId) === null) {
+        return notFound(reply, 'Project');
+      }
+      return reply.send(
+        externalExperimentListSchema.parse({
+          items: dependencies.experiments.listVersionsByProject(
+            request.params.projectId,
+          ),
+        }),
+      );
+    },
+  );
+
+  app.get<{ Params: ProjectParams }>(
     '/api/projects/:projectId/settings',
     async (request, reply) => {
       try {

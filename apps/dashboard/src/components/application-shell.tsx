@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 type NavigationItem = Readonly<{
   href: string;
@@ -15,22 +15,21 @@ const navigation: readonly NavigationItem[] = [
   {
     href: '/',
     icon: 'sample',
-    label: 'Sample Checkout',
-    match: (pathname, hash) => pathname === '/' && hash !== '#history-title',
+    label: 'Bundled Sample',
+    match: (pathname) => pathname === '/',
   },
   {
     href: '/projects',
     icon: 'projects',
-    label: 'External Projects',
+    label: 'Projects',
     match: (pathname) => pathname.startsWith('/projects'),
   },
   {
-    href: '/#history-title',
+    href: '/runs',
     icon: 'runs',
-    label: 'Runs',
-    match: (pathname, hash) =>
-      pathname.startsWith('/runs') ||
-      (pathname === '/' && hash === '#history-title'),
+    label: 'All Runs',
+    match: (pathname) =>
+      pathname.startsWith('/runs') || pathname.startsWith('/external-runs'),
   },
 ];
 
@@ -41,6 +40,8 @@ export function ApplicationShell({
 }) {
   const pathname = usePathname();
   const [hash, setHash] = useState('');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const previousPathname = useRef(pathname);
   const context = routeContext(pathname);
 
   useEffect(() => {
@@ -54,12 +55,35 @@ export function ApplicationShell({
     };
   }, [pathname]);
 
+  useEffect(() => {
+    setSidebarOpen(false);
+    if (previousPathname.current !== pathname) {
+      previousPathname.current = pathname;
+      window.requestAnimationFrame(() => {
+        document.getElementById('main-content')?.focus();
+      });
+    }
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSidebarOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [sidebarOpen]);
+
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">
         Skip to main content
       </a>
-      <aside className="app-sidebar" aria-label="Application sidebar">
+      <aside
+        className={`app-sidebar${sidebarOpen ? ' app-sidebar-open' : ''}`}
+        aria-label="Application sidebar"
+        id="application-sidebar"
+      >
         <Link
           className="app-brand"
           href="/"
@@ -71,12 +95,12 @@ export function ApplicationShell({
           </span>
           <span>
             <strong>FormCrash</strong>
-            <small>Controlled failure workbench</small>
+            <small>Reliability workbench</small>
           </span>
         </Link>
 
         <nav className="app-navigation" aria-label="Primary navigation">
-          <p className="app-navigation-label">Workspaces</p>
+          <p className="app-navigation-label">Workbench</p>
           {navigation.map((item) => {
             const active = item.match(pathname, hash);
             return (
@@ -85,11 +109,7 @@ export function ApplicationShell({
                 href={item.href}
                 key={item.label}
                 aria-current={active ? 'page' : undefined}
-                onClick={() =>
-                  setHash(
-                    item.href === '/#history-title' ? '#history-title' : '',
-                  )
-                }
+                onClick={() => setHash('')}
               >
                 <NavigationIcon name={item.icon} />
                 <span>{item.label}</span>
@@ -101,14 +121,35 @@ export function ApplicationShell({
         <div className="app-sidebar-footer">
           <span className="local-status" aria-hidden="true" />
           <span>
-            <strong>Local workbench</strong>
-            <small>Controlled environments only</small>
+            <strong>Local environment</strong>
+            <small>Controlled targets only</small>
           </span>
         </div>
       </aside>
 
+      {sidebarOpen ? (
+        <button
+          aria-label="Close navigation"
+          className="app-sidebar-backdrop"
+          onClick={() => setSidebarOpen(false)}
+          type="button"
+        />
+      ) : null}
+
       <div className="app-shell-main">
         <header className="project-context-bar" aria-label="Current workspace">
+          <button
+            aria-controls="application-sidebar"
+            aria-expanded={sidebarOpen}
+            aria-label="Open navigation"
+            className="app-menu-button"
+            onClick={() => setSidebarOpen(true)}
+            type="button"
+          >
+            <span aria-hidden="true" />
+            <span aria-hidden="true" />
+            <span aria-hidden="true" />
+          </button>
           <div>
             <span className="project-context-label">Current workspace</span>
             <strong title={context.title}>{context.title}</strong>
@@ -128,14 +169,20 @@ function routeContext(
 ): Readonly<{ title: string; detail: string }> {
   if (pathname.startsWith('/projects')) {
     return {
-      title: 'External projects',
+      title: 'Journey workspace',
       detail: 'Recording · Guided and Advanced testing',
     };
   }
   if (pathname.startsWith('/runs')) {
     return {
-      title: 'Bundled Sample Checkout',
+      title: pathname === '/runs' ? 'Runs' : 'Run result',
       detail: 'Persisted run evidence',
+    };
+  }
+  if (pathname.startsWith('/external-runs')) {
+    return {
+      title: 'Run result',
+      detail: 'Persisted external-run evidence',
     };
   }
   return {
@@ -146,8 +193,10 @@ function routeContext(
 
 function NavigationIcon({ name }: { readonly name: NavigationItem['icon'] }) {
   const paths = {
-    sample: <path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5" />,
-    projects: <path d="M4 7h6l2 2h8v10H4zM4 7V5h6l2 2" />,
+    sample: <path d="M5 4h14v16H5zM8 8h8M8 12h5M8 16h3" />,
+    projects: (
+      <path d="M5 4v5a3 3 0 0 0 3 3h8a3 3 0 0 1 3 3v5M5 4h4M15 20h4M12 9l3 3-3 3" />
+    ),
     runs: <path d="M12 3a9 9 0 1 1-6.4 2.7M3 3v6h6M12 7v5l3 2" />,
   } as const;
   return (

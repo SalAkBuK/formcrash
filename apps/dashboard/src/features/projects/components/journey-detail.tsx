@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
+import Link from 'next/link';
 import type {
   AuthCaptureSession,
   CriticalAction,
@@ -44,6 +45,8 @@ interface JourneyDetailProps {
   readonly onAuthenticationConfirm: () => void;
   readonly onAuthenticationStart: () => void;
   readonly onDelete: (journey: PersistedJourney) => void;
+  readonly onManageProjects?: () => void;
+  readonly onOpenTest?: () => void;
   readonly onProductionConfirmationChange: (confirmed: boolean) => void;
   readonly onReplay: (journey: PersistedJourney) => void;
   readonly onReplayModeChange: (mode: ReplayMode) => void;
@@ -63,6 +66,7 @@ interface JourneyDetailProps {
     Record<string, Readonly<Record<string, string>>>
   >;
   readonly selectedJourneyId: string | null;
+  readonly view?: 'overview' | 'sequence' | 'outcomes' | 'replay';
 }
 
 const emptyDefinition: OutcomeDefinitionState = {
@@ -83,6 +87,7 @@ export function JourneyDetail(props: JourneyDetailProps) {
     null,
   );
   const [outcomeExpanded, setOutcomeExpanded] = useState(false);
+  const view = props.view ?? 'overview';
 
   const currentDefinition =
     journey !== null && definitionJourneyId === journey.id
@@ -194,6 +199,7 @@ export function JourneyDetail(props: JourneyDetailProps) {
     definitionLoading: currentDefinition.loading,
     missingRuntime: missingRequirements.length > 0,
     onAuthenticationStart: props.onAuthenticationStart,
+    onManageProjects: props.onManageProjects ?? (() => undefined),
     onOpenOutcome: openOutcomeConfiguration,
     onReplay: () => props.onReplay(journey),
     productionConfirmationMissing,
@@ -242,14 +248,22 @@ export function JourneyDetail(props: JourneyDetailProps) {
 
           <div className="journey-next-action">
             <span>Next action</span>
+            <button
+              className="button button-primary"
+              onClick={props.onOpenTest}
+              type="button"
+            >
+              Configure test
+            </button>
             {primaryAction}
             {traceMissing ? null : (
-              <a
+              <button
                 className="button button-secondary"
-                href="#recording-workspace"
+                onClick={props.onManageProjects}
+                type="button"
               >
                 Record new version
-              </a>
+              </button>
             )}
             <small>
               Recording again creates a new version. This historical version
@@ -298,460 +312,509 @@ export function JourneyDetail(props: JourneyDetailProps) {
         </div>
       </header>
 
-      <JourneyReadiness
-        authenticationRequired={props.authenticationRequired}
-        checks={currentDefinition.checks}
-        criticalAction={currentDefinition.criticalAction}
-        definitionLoading={currentDefinition.loading}
-        executionSettings={props.executionSettings}
-        journey={journey}
-        missingRuntimeCount={missingRequirements.length}
-      />
+      <nav aria-label="Journey sections" className="crm-record-tabs">
+        <Link
+          aria-current={view === 'overview' ? 'page' : undefined}
+          href={`/projects/${props.project.id}/journeys/${journey.id}`}
+        >
+          Overview
+        </Link>
+        <Link
+          aria-current={view === 'sequence' ? 'page' : undefined}
+          href={`/projects/${props.project.id}/journeys/${journey.id}/sequence`}
+        >
+          Sequence
+        </Link>
+        <Link
+          aria-current={view === 'outcomes' ? 'page' : undefined}
+          href={`/projects/${props.project.id}/journeys/${journey.id}/outcomes`}
+        >
+          Outcomes
+        </Link>
+        <Link
+          aria-current={view === 'replay' ? 'page' : undefined}
+          href={`/projects/${props.project.id}/journeys/${journey.id}/replay`}
+        >
+          Replay
+        </Link>
+      </nav>
 
       <div className="journey-detail-grid">
         <div className="journey-detail-primary-column">
-          <section
-            className="journey-sequence"
-            aria-labelledby="recorded-sequence-title"
-          >
-            <div className="journey-section-heading">
-              <div>
-                <p className="eyebrow">Recorded sequence</p>
-                <h3 id="recorded-sequence-title">What will replay</h3>
-                <p>
-                  Readable intent leads; locators and recorded fingerprints stay
-                  collapsed.
-                </p>
-              </div>
-              <StatusBadge tone="neutral">
-                {formatCount(journey.steps.length, 'step')}
-              </StatusBadge>
-            </div>
-            <ol className="recorded-step-list">
-              {journey.steps.map((step, index) => {
-                const isCritical =
-                  step.id === currentDefinition.criticalAction?.stepId;
-                const valueIdentities = safeValueIdentities(step);
-                const locatorWarning = step.locator?.strategy === 'css';
-                return (
-                  <li
-                    className={`recorded-step-row${isCritical ? ' recorded-step-critical' : ''}`}
-                    key={step.id}
-                  >
-                    <span className="recorded-step-number" aria-hidden="true">
-                      {String(index + 1).padStart(2, '0')}
-                    </span>
-                    <div className="recorded-step-content">
-                      <div className="recorded-step-heading">
-                        <div>
-                          <span className="recorded-step-type">
-                            {sentenceCase(step.type)}
-                          </span>
-                          <h4>{step.name}</h4>
-                        </div>
-                        {isCritical ? (
-                          <StatusBadge tone="disruption">
-                            Critical Action
-                          </StatusBadge>
-                        ) : null}
-                      </div>
-                      <p>
-                        {describeStep(step.type, describeTarget(step))}
-                        <span className="recorded-step-path">
-                          {safePathname(step.url)}
-                        </span>
-                      </p>
-                      <div className="recorded-step-flags">
-                        {valueIdentities.map((identity) => (
-                          <code key={identity}>{identity}</code>
-                        ))}
-                        {locatorWarning ? (
-                          <span className="journey-inline-warning">
-                            Brittle CSS locator
-                          </span>
-                        ) : null}
-                        {step.sensitive ? <span>Value redacted</span> : null}
-                      </div>
-                      <details className="recorded-step-detail">
-                        <summary>Technical step detail</summary>
-                        <dl>
-                          <div>
-                            <dt>Step ID</dt>
-                            <dd>
-                              <code>{step.id}</code>
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>Replay locator</dt>
-                            <dd>
-                              <code>{formatLocator(step.locator)}</code>
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>Target</dt>
-                            <dd>{describeTarget(step)}</dd>
-                          </div>
-                          <div>
-                            <dt>Page context</dt>
-                            <dd>
-                              <code>{safePathname(step.url)}</code>
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>Recorded offset</dt>
-                            <dd>
-                              <code>{step.timestamp} ms</code>
-                            </dd>
-                          </div>
-                        </dl>
-                        <p>
-                          Hybrid target candidates, geometry, frame identity,
-                          and postconditions are used by replay where available
-                          but are not exposed by the saved-step summary
-                          contract.
-                        </p>
-                      </details>
-                    </div>
-                  </li>
-                );
-              })}
-            </ol>
-          </section>
-
-          <section
-            className={`critical-action-card${criticalStep === null ? ' critical-action-missing' : ''}`}
-            aria-labelledby="critical-action-title"
-          >
-            <div className="journey-section-heading">
-              <div>
-                <p className="eyebrow">Controlled action</p>
-                <h3 id="critical-action-title">Critical Action</h3>
-              </div>
-              <StatusBadge
-                tone={criticalStep === null ? 'warning' : 'disruption'}
-              >
-                {criticalStep === null ? 'Not selected' : 'Configured'}
-              </StatusBadge>
-            </div>
-            {criticalStep === null ? (
-              <div className="journey-incomplete-state">
-                <strong>
-                  No Critical Action is approved for this version.
-                </strong>
-                <p>
-                  Select the saved click or submit that future experiments may
-                  repeat.
-                </p>
-                <button
-                  className="button button-secondary"
-                  onClick={openOutcomeConfiguration}
-                  type="button"
-                >
-                  Select Critical Action
-                </button>
-              </div>
-            ) : (
-              <div className="critical-action-summary">
-                <span className="critical-action-step">
-                  Step {criticalStepIndex + 1}
-                </span>
+          {view === 'overview' || view === 'sequence' ? (
+            <section
+              className="journey-sequence"
+              aria-labelledby="recorded-sequence-title"
+            >
+              <div className="journey-section-heading">
                 <div>
-                  <h4>{currentDefinition.criticalAction?.label}</h4>
+                  <p className="eyebrow">Recorded sequence</p>
+                  <h3 id="recorded-sequence-title">What will replay</h3>
                   <p>
-                    {sentenceCase(criticalStep.type)} ·{' '}
-                    {describeTarget(criticalStep)}
+                    Readable intent leads; locators and recorded fingerprints
+                    stay collapsed.
                   </p>
-                  <small>
-                    Locked to journey version {journey.version}. This action is
-                    compatible with controlled repeated-action recipes.
-                  </small>
                 </div>
+                <StatusBadge tone="neutral">
+                  {formatCount(journey.steps.length, 'step')}
+                </StatusBadge>
               </div>
-            )}
-          </section>
-
-          <section
-            className="outcome-check-summary"
-            aria-labelledby="outcome-checks-title"
-          >
-            <div className="journey-section-heading">
-              <div>
-                <p className="eyebrow">Approved expectation</p>
-                <h3 id="outcome-checks-title">Outcome Checks</h3>
-              </div>
-              <StatusBadge
-                tone={currentDefinition.checks.length > 0 ? 'pass' : 'warning'}
-              >
-                {currentDefinition.loading
-                  ? 'Checking…'
-                  : currentDefinition.checks.length > 0
-                    ? formatCount(
-                        currentDefinition.checks.length,
-                        'configured check',
-                      )
-                    : 'Not configured'}
-              </StatusBadge>
-            </div>
-            {currentDefinition.loading ? (
-              <StateMessage variant="loading">
-                Loading Critical Action and Outcome Checks…
-              </StateMessage>
-            ) : currentDefinition.checks.length === 0 ? (
-              <div className="journey-incomplete-state">
-                <strong>
-                  No approved Outcome Check exists for this version.
-                </strong>
-                <p>
-                  FormCrash cannot produce an outcome-first conclusion until you
-                  approve an expected browser outcome. Absence is incomplete
-                  setup, not a failed outcome.
-                </p>
-                <button
-                  className="button button-secondary"
-                  onClick={openOutcomeConfiguration}
-                  type="button"
-                >
-                  Define expected outcome
-                </button>
-              </div>
-            ) : (
-              <ul className="journey-outcome-list">
-                {currentDefinition.checks.map((check) => (
-                  <li key={check.id}>
-                    <StatusBadge tone="pass">Ready</StatusBadge>
-                    <div>
-                      <strong>{check.description}</strong>
-                      <span>{outcomeTypeLabel(check.type)}</span>
-                      <code>{outcomeExpectedCondition(check)}</code>
-                      <small>
-                        Required for the aggregate outcome · approved manually
-                      </small>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-
-          <OutcomeDefinitionPanel
-            confirmProduction={!productionConfirmationMissing}
-            disabled={props.busy !== null || missingRequirements.length > 0}
-            environment={props.project.environment}
-            expanded={outcomeExpanded}
-            journey={journey}
-            onExpandedChange={setOutcomeExpanded}
-            onStateChange={handleDefinitionStateChange}
-            runtimeValues={nonEmptyValues(values)}
-          />
-        </div>
-
-        <aside
-          className="journey-detail-rail"
-          aria-label="Journey configuration and evidence"
-        >
-          <section
-            className="journey-configuration-card"
-            id="journey-replay-configuration"
-          >
-            <div className="journey-section-heading">
-              <div>
-                <p className="eyebrow">Replay configuration</p>
-                <h3>Behavior and pacing</h3>
-              </div>
-            </div>
-            <label>
-              Replay mode
-              <select
-                aria-label="Replay mode"
-                value={props.replayMode}
-                onChange={(event) =>
-                  props.onReplayModeChange(event.target.value as ReplayMode)
-                }
-              >
-                <option value="adaptive">Adaptive</option>
-                <option value="strict">Strict</option>
-              </select>
-            </label>
-            <p className="journey-field-help">
-              {props.replayMode === 'adaptive'
-                ? 'Safely ranks recorded semantic strategies and verifies resulting state.'
-                : 'Uses the recorded strategy without adaptive locator recovery.'}
-            </p>
-            <label>
-              Replay pacing
-              <select
-                aria-label="Replay pacing"
-                value={props.replayPacing}
-                onChange={(event) =>
-                  props.onReplayPacingChange(event.target.value as ReplayPacing)
-                }
-              >
-                <option value="recorded">Recorded</option>
-                <option value="deliberate">Deliberate</option>
-                <option value="fast">Fast</option>
-              </select>
-            </label>
-            <p className="journey-field-help">
-              {pacingDescription(props.replayPacing)}
-            </p>
-            <p className="technical-note">
-              Repeated-action injection timing is controlled separately and is
-              never changed by normal replay pacing.
-            </p>
-            {props.project.environment === 'production' ? (
-              <label className="production-confirmation">
-                <input
-                  checked={props.productionReplayConfirmed}
-                  onChange={(event) =>
-                    props.onProductionConfirmationChange(event.target.checked)
-                  }
-                  type="checkbox"
-                />{' '}
-                I understand replay can change real production data.
-              </label>
-            ) : null}
-            {!traceMissing &&
-            (currentDefinition.loading ||
-              currentDefinition.criticalAction === null ||
-              currentDefinition.checks.length === 0 ||
-              missingRequirements.length > 0 ||
-              props.authenticationRequired ||
-              productionConfirmationMissing) ? (
-              <button
-                className="button button-secondary"
-                disabled={replayBlocked}
-                onClick={() => props.onReplay(journey)}
-                type="button"
-              >
-                {props.busy === `replay-${journey.id}`
-                  ? 'Replaying…'
-                  : 'Replay'}
-              </button>
-            ) : null}
-          </section>
-
-          <section
-            className="journey-configuration-card"
-            id="journey-runtime-data"
-          >
-            <div className="journey-section-heading">
-              <div>
-                <p className="eyebrow">Runtime data</p>
-                <h3>Required values</h3>
-              </div>
-              <StatusBadge
-                tone={missingRequirements.length > 0 ? 'warning' : 'pass'}
-              >
-                {missingRequirements.length > 0
-                  ? `${missingRequirements.length} missing`
-                  : 'Ready'}
-              </StatusBadge>
-            </div>
-            {requirements.length === 0 ? (
-              <p>No unresolved runtime values are required for this journey.</p>
-            ) : (
-              <div className="journey-runtime-fields">
-                {requirements.map((requirement) => {
-                  const present =
-                    (values[requirement.name] ?? '').trim() !== '';
+              <ol className="recorded-step-list">
+                {journey.steps.map((step, index) => {
+                  const isCritical =
+                    step.id === currentDefinition.criticalAction?.stepId;
+                  const valueIdentities = safeValueIdentities(step);
+                  const locatorWarning = step.locator?.strategy === 'css';
                   return (
-                    <label key={requirement.name}>
-                      <span>
-                        {requirement.label}
-                        <StatusBadge tone={present ? 'pass' : 'warning'}>
-                          {present ? 'Present' : 'Missing'}
-                        </StatusBadge>
+                    <li
+                      className={`recorded-step-row${isCritical ? ' recorded-step-critical' : ''}`}
+                      key={step.id}
+                    >
+                      <span className="recorded-step-number" aria-hidden="true">
+                        {String(index + 1).padStart(2, '0')}
                       </span>
-                      <input
-                        aria-label={`${journey.name} ${requirement.name}`}
-                        autoComplete="off"
-                        placeholder={requirement.name}
-                        type={requirement.secret ? 'password' : 'text'}
-                        value={values[requirement.name] ?? ''}
-                        onChange={(event) =>
-                          props.onRuntimeValueChange(
-                            journey.id,
-                            requirement.name,
-                            event.target.value,
-                          )
-                        }
-                      />
-                      <code>{`{{var.${requirement.name}}}`}</code>
-                    </label>
+                      <div className="recorded-step-content">
+                        <div className="recorded-step-heading">
+                          <div>
+                            <span className="recorded-step-type">
+                              {sentenceCase(step.type)}
+                            </span>
+                            <h4>{step.name}</h4>
+                          </div>
+                          {isCritical ? (
+                            <StatusBadge tone="disruption">
+                              Critical Action
+                            </StatusBadge>
+                          ) : null}
+                        </div>
+                        <p>
+                          {describeStep(step.type, describeTarget(step))}
+                          <span className="recorded-step-path">
+                            {safePathname(step.url)}
+                          </span>
+                        </p>
+                        <div className="recorded-step-flags">
+                          {valueIdentities.map((identity) => (
+                            <code key={identity}>{identity}</code>
+                          ))}
+                          {locatorWarning ? (
+                            <span className="journey-inline-warning">
+                              Brittle CSS locator
+                            </span>
+                          ) : null}
+                          {step.sensitive ? <span>Value redacted</span> : null}
+                        </div>
+                        <details className="recorded-step-detail">
+                          <summary>Technical step detail</summary>
+                          <dl>
+                            <div>
+                              <dt>Step ID</dt>
+                              <dd>
+                                <code>{step.id}</code>
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>Replay locator</dt>
+                              <dd>
+                                <code>{formatLocator(step.locator)}</code>
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>Target</dt>
+                              <dd>{describeTarget(step)}</dd>
+                            </div>
+                            <div>
+                              <dt>Page context</dt>
+                              <dd>
+                                <code>{safePathname(step.url)}</code>
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>Recorded offset</dt>
+                              <dd>
+                                <code>{step.timestamp} ms</code>
+                              </dd>
+                            </div>
+                          </dl>
+                          <p>
+                            Hybrid target candidates, geometry, frame identity,
+                            and postconditions are used by replay where
+                            available but are not exposed by the saved-step
+                            summary contract.
+                          </p>
+                        </details>
+                      </div>
+                    </li>
                   );
                 })}
+              </ol>
+            </section>
+          ) : null}
+
+          {view === 'overview' || view === 'outcomes' ? (
+            <details className="journey-secondary-configuration" open>
+              <summary>Critical Action and Outcome Check summary</summary>
+              <section
+                className={`critical-action-card${criticalStep === null ? ' critical-action-missing' : ''}`}
+                aria-labelledby="critical-action-title"
+              >
+                <div className="journey-section-heading">
+                  <div>
+                    <p className="eyebrow">Controlled action</p>
+                    <h3 id="critical-action-title">Critical Action</h3>
+                  </div>
+                  <StatusBadge
+                    tone={criticalStep === null ? 'warning' : 'disruption'}
+                  >
+                    {criticalStep === null ? 'Not selected' : 'Configured'}
+                  </StatusBadge>
+                </div>
+                {criticalStep === null ? (
+                  <div className="journey-incomplete-state">
+                    <strong>
+                      No Critical Action is approved for this version.
+                    </strong>
+                    <p>
+                      Select the saved click or submit that future experiments
+                      may repeat.
+                    </p>
+                    <button
+                      className="button button-secondary"
+                      onClick={openOutcomeConfiguration}
+                      type="button"
+                    >
+                      Select Critical Action
+                    </button>
+                  </div>
+                ) : (
+                  <div className="critical-action-summary">
+                    <span className="critical-action-step">
+                      Step {criticalStepIndex + 1}
+                    </span>
+                    <div>
+                      <h4>{currentDefinition.criticalAction?.label}</h4>
+                      <p>
+                        {sentenceCase(criticalStep.type)} ·{' '}
+                        {describeTarget(criticalStep)}
+                      </p>
+                      <small>
+                        Locked to journey version {journey.version}. This action
+                        is compatible with controlled repeated-action recipes.
+                      </small>
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              <section
+                className="outcome-check-summary"
+                aria-labelledby="outcome-checks-title"
+              >
+                <div className="journey-section-heading">
+                  <div>
+                    <p className="eyebrow">Approved expectation</p>
+                    <h3 id="outcome-checks-title">Outcome Checks</h3>
+                  </div>
+                  <StatusBadge
+                    tone={
+                      currentDefinition.checks.length > 0 ? 'pass' : 'warning'
+                    }
+                  >
+                    {currentDefinition.loading
+                      ? 'Checking…'
+                      : currentDefinition.checks.length > 0
+                        ? formatCount(
+                            currentDefinition.checks.length,
+                            'configured check',
+                          )
+                        : 'Not configured'}
+                  </StatusBadge>
+                </div>
+                {currentDefinition.loading ? (
+                  <StateMessage variant="loading">
+                    Loading Critical Action and Outcome Checks…
+                  </StateMessage>
+                ) : currentDefinition.checks.length === 0 ? (
+                  <div className="journey-incomplete-state">
+                    <strong>
+                      No approved Outcome Check exists for this version.
+                    </strong>
+                    <p>
+                      FormCrash cannot produce an outcome-first conclusion until
+                      you approve an expected browser outcome. Absence is
+                      incomplete setup, not a failed outcome.
+                    </p>
+                    <button
+                      className="button button-secondary"
+                      onClick={openOutcomeConfiguration}
+                      type="button"
+                    >
+                      Define expected outcome
+                    </button>
+                  </div>
+                ) : (
+                  <ul className="journey-outcome-list">
+                    {currentDefinition.checks.map((check) => (
+                      <li key={check.id}>
+                        <StatusBadge tone="pass">Ready</StatusBadge>
+                        <div>
+                          <strong>{check.description}</strong>
+                          <span>{outcomeTypeLabel(check.type)}</span>
+                          <code>{outcomeExpectedCondition(check)}</code>
+                          <small>
+                            Required for the aggregate outcome · approved
+                            manually
+                          </small>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              <OutcomeDefinitionPanel
+                confirmProduction={!productionConfirmationMissing}
+                disabled={props.busy !== null || missingRequirements.length > 0}
+                environment={props.project.environment}
+                expanded={outcomeExpanded}
+                journey={journey}
+                onExpandedChange={setOutcomeExpanded}
+                onStateChange={handleDefinitionStateChange}
+                runtimeValues={nonEmptyValues(values)}
+              />
+            </details>
+          ) : null}
+        </div>
+
+        {view === 'overview' || view === 'replay' ? (
+          <aside
+            className="journey-detail-rail"
+            aria-label="Journey configuration and evidence"
+          >
+            <JourneyReadiness
+              authenticationRequired={props.authenticationRequired}
+              checks={currentDefinition.checks}
+              criticalAction={currentDefinition.criticalAction}
+              definitionLoading={currentDefinition.loading}
+              executionSettings={props.executionSettings}
+              journey={journey}
+              missingRuntimeCount={missingRequirements.length}
+            />
+
+            <section
+              className="journey-configuration-card"
+              id="journey-replay-configuration"
+            >
+              <div className="journey-section-heading">
+                <div>
+                  <p className="eyebrow">Replay configuration</p>
+                  <h3>Behavior and pacing</h3>
+                </div>
               </div>
-            )}
-            <p className="technical-note">
-              Secret values remain masked and are sent ephemerally. Protected
-              environment contents and saved authentication data are never
-              shown.
-            </p>
-          </section>
+              <label>
+                Replay mode
+                <select
+                  aria-label="Replay mode"
+                  value={props.replayMode}
+                  onChange={(event) =>
+                    props.onReplayModeChange(event.target.value as ReplayMode)
+                  }
+                >
+                  <option value="adaptive">Adaptive</option>
+                  <option value="strict">Strict</option>
+                </select>
+              </label>
+              <p className="journey-field-help">
+                {props.replayMode === 'adaptive'
+                  ? 'Safely ranks recorded semantic strategies and verifies resulting state.'
+                  : 'Uses the recorded strategy without adaptive locator recovery.'}
+              </p>
+              <label>
+                Replay pacing
+                <select
+                  aria-label="Replay pacing"
+                  value={props.replayPacing}
+                  onChange={(event) =>
+                    props.onReplayPacingChange(
+                      event.target.value as ReplayPacing,
+                    )
+                  }
+                >
+                  <option value="recorded">Recorded</option>
+                  <option value="deliberate">Deliberate</option>
+                  <option value="fast">Fast</option>
+                </select>
+              </label>
+              <p className="journey-field-help">
+                {pacingDescription(props.replayPacing)}
+              </p>
+              <p className="technical-note">
+                Repeated-action injection timing is controlled separately and is
+                never changed by normal replay pacing.
+              </p>
+              {props.project.environment === 'production' ? (
+                <label className="production-confirmation">
+                  <input
+                    checked={props.productionReplayConfirmed}
+                    onChange={(event) =>
+                      props.onProductionConfirmationChange(event.target.checked)
+                    }
+                    type="checkbox"
+                  />{' '}
+                  I understand replay can change real production data.
+                </label>
+              ) : null}
+              {!traceMissing &&
+              (currentDefinition.loading ||
+                currentDefinition.criticalAction === null ||
+                currentDefinition.checks.length === 0 ||
+                missingRequirements.length > 0 ||
+                props.authenticationRequired ||
+                productionConfirmationMissing) ? (
+                <button
+                  className="button button-secondary"
+                  disabled={replayBlocked}
+                  onClick={() => props.onReplay(journey)}
+                  type="button"
+                >
+                  {props.busy === `replay-${journey.id}`
+                    ? 'Replaying…'
+                    : 'Replay'}
+                </button>
+              ) : null}
+            </section>
 
-          <AuthenticationCard
-            authCapture={props.authCapture}
-            authMessage={props.authMessage}
-            authenticationRequired={props.authenticationRequired}
-            busy={props.busy}
-            onConfirm={props.onAuthenticationConfirm}
-            onStart={props.onAuthenticationStart}
-            settings={props.executionSettings}
-          />
+            <section
+              className="journey-configuration-card"
+              id="journey-runtime-data"
+            >
+              <div className="journey-section-heading">
+                <div>
+                  <p className="eyebrow">Runtime data</p>
+                  <h3>Required values</h3>
+                </div>
+                <StatusBadge
+                  tone={missingRequirements.length > 0 ? 'warning' : 'pass'}
+                >
+                  {missingRequirements.length > 0
+                    ? `${missingRequirements.length} missing`
+                    : 'Ready'}
+                </StatusBadge>
+              </div>
+              {requirements.length === 0 ? (
+                <p>
+                  No unresolved runtime values are required for this journey.
+                </p>
+              ) : (
+                <div className="journey-runtime-fields">
+                  {requirements.map((requirement) => {
+                    const present =
+                      (values[requirement.name] ?? '').trim() !== '';
+                    return (
+                      <label key={requirement.name}>
+                        <span>
+                          {requirement.label}
+                          <StatusBadge tone={present ? 'pass' : 'warning'}>
+                            {present ? 'Present' : 'Missing'}
+                          </StatusBadge>
+                        </span>
+                        <input
+                          aria-label={`${journey.name} ${requirement.name}`}
+                          autoComplete="off"
+                          placeholder={requirement.name}
+                          type={requirement.secret ? 'password' : 'text'}
+                          value={values[requirement.name] ?? ''}
+                          onChange={(event) =>
+                            props.onRuntimeValueChange(
+                              journey.id,
+                              requirement.name,
+                              event.target.value,
+                            )
+                          }
+                        />
+                        <code>{`{{var.${requirement.name}}}`}</code>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+              <p className="technical-note">
+                Secret values remain masked and are sent ephemerally. Protected
+                environment contents and saved authentication data are never
+                shown.
+              </p>
+            </section>
 
-          <TraceCard journey={journey} />
-        </aside>
+            <AuthenticationCard
+              authCapture={props.authCapture}
+              authMessage={props.authMessage}
+              authenticationRequired={props.authenticationRequired}
+              busy={props.busy}
+              onConfirm={props.onAuthenticationConfirm}
+              onStart={props.onAuthenticationStart}
+              settings={props.executionSettings}
+            />
+
+            <TraceCard journey={journey} />
+          </aside>
+        ) : null}
       </div>
 
-      {props.authMessage !== null && !props.authenticationRequired ? (
+      {(view === 'overview' || view === 'replay') &&
+      props.authMessage !== null &&
+      !props.authenticationRequired ? (
         <StateMessage>{props.authMessage}</StateMessage>
       ) : null}
-      {props.replayResult !== null ? (
+      {(view === 'overview' || view === 'replay') &&
+      props.replayResult !== null ? (
         <ReplaySummary result={props.replayResult} />
       ) : null}
 
-      <DisclosurePanel
-        description="Review explicit browser boundaries and saved recording warnings."
-        title="Limitations and recording warnings"
-      >
-        {journey.recordingMetadata.warningCount > 0 ? (
-          <StateMessage variant="warning">
-            {formatCount(
-              journey.recordingMetadata.warningCount,
-              'recording warning',
-            )}{' '}
-            was saved with this version. The current journey summary does not
-            expose individual warning codes.
-          </StateMessage>
-        ) : (
-          <p>No recording warnings were saved with this journey version.</p>
-        )}
-        <ul className="journey-boundary-list">
-          <li>Live CAPTCHA or human verification is not bypassed.</li>
-          <li>
-            Closed Shadow DOM, browser or OS chrome, and unsupported file
-            uploads remain outside replay.
-          </li>
-          <li>
-            Third-party payment authorization and unallowlisted cross-origin
-            frames remain unsupported.
-          </li>
-        </ul>
-        <p>
-          For CAPTCHA on an application you own, use official provider test
-          keys, a staging-only bypass, WAF allowlisting, or an allowlisted test
-          account. These boundaries are technical limitations, not failed
-          Outcome Checks.
-        </p>
-      </DisclosurePanel>
+      {view === 'overview' || view === 'sequence' ? (
+        <DisclosurePanel
+          description="Review explicit browser boundaries and saved recording warnings."
+          title="Limitations and recording warnings"
+        >
+          {journey.recordingMetadata.warningCount > 0 ? (
+            <StateMessage variant="warning">
+              {formatCount(
+                journey.recordingMetadata.warningCount,
+                'recording warning',
+              )}{' '}
+              was saved with this version. The current journey summary does not
+              expose individual warning codes.
+            </StateMessage>
+          ) : (
+            <p>No recording warnings were saved with this journey version.</p>
+          )}
+          <ul className="journey-boundary-list">
+            <li>Live CAPTCHA or human verification is not bypassed.</li>
+            <li>
+              Closed Shadow DOM, browser or OS chrome, and unsupported file
+              uploads remain outside replay.
+            </li>
+            <li>
+              Third-party payment authorization and unallowlisted cross-origin
+              frames remain unsupported.
+            </li>
+          </ul>
+          <p>
+            For CAPTCHA on an application you own, use official provider test
+            keys, a staging-only bypass, WAF allowlisting, or an allowlisted
+            test account. These boundaries are technical limitations, not failed
+            Outcome Checks.
+          </p>
+        </DisclosurePanel>
+      ) : null}
 
       <div className="journey-detail-footer-actions">
-        <a className="button button-secondary" href="#experiment-workspace">
+        <button
+          className="button button-secondary"
+          onClick={props.onOpenTest}
+          type="button"
+        >
           Open Guided configuration
-        </a>
-        <a className="button button-secondary" href="#experiment-workspace">
-          Open Advanced mode
-        </a>
+        </button>
         <button
           className="button button-destructive"
           disabled={props.busy !== null}
@@ -1091,6 +1154,7 @@ function nextAction(input: {
   readonly definitionLoading: boolean;
   readonly missingRuntime: boolean;
   readonly onAuthenticationStart: () => void;
+  readonly onManageProjects: () => void;
   readonly onOpenOutcome: () => void;
   readonly onReplay: () => void;
   readonly productionConfirmationMissing: boolean;
@@ -1110,12 +1174,13 @@ function nextAction(input: {
   }
   if (input.traceMissing) {
     return (
-      <a
+      <button
         className="button button-primary journey-primary-action"
-        href="#recording-workspace"
+        onClick={input.onManageProjects}
+        type="button"
       >
         Record new version
-      </a>
+      </button>
     );
   }
   if (input.criticalAction === null) {

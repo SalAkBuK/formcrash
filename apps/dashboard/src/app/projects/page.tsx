@@ -1,5 +1,5 @@
-import { ProjectJourneyDashboard } from '../../features/projects/components/project-journey-dashboard';
+import { ProjectListScreen } from '../../features/projects/components/project-list-screen';
 
 export default function ProjectsPage() {
-  return <ProjectJourneyDashboard />;
+  return <ProjectListScreen />;
 }

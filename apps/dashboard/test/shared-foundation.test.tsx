@@ -22,7 +22,8 @@ describe('shared application foundation', () => {
   });
 
   it('marks Runs current when the bundled history anchor is active', async () => {
-    window.history.replaceState(null, '', '/#history-title');
+    navigation.pathname = '/runs';
+    window.history.replaceState(null, '', '/runs');
     render(
       <ApplicationShell>
         <main>Run history</main>
@@ -30,13 +31,13 @@ describe('shared application foundation', () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByRole('link', { name: 'Runs' })).toHaveAttribute(
+      expect(screen.getByRole('link', { name: 'All Runs' })).toHaveAttribute(
         'aria-current',
         'page',
       ),
     );
     expect(
-      screen.getByRole('link', { name: 'Sample Checkout' }),
+      screen.getByRole('link', { name: 'Bundled Sample' }),
     ).not.toHaveAttribute('aria-current');
     expect(screen.getAllByRole('link', { current: 'page' })).toHaveLength(1);
   });
@@ -53,14 +54,15 @@ describe('shared application foundation', () => {
       '/',
     );
     expect(
-      screen.getByRole('link', { name: 'Sample Checkout' }),
+      screen.getByRole('link', { name: 'Bundled Sample' }),
     ).toHaveAttribute('href', '/');
-    expect(
-      screen.getByRole('link', { name: 'External Projects' }),
-    ).toHaveAttribute('href', '/projects');
-    expect(screen.getByRole('link', { name: 'Runs' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Projects' })).toHaveAttribute(
       'href',
-      '/#history-title',
+      '/projects',
+    );
+    expect(screen.getByRole('link', { name: 'All Runs' })).toHaveAttribute(
+      'href',
+      '/runs',
     );
     expect(screen.getAllByRole('link', { current: 'page' })).toHaveLength(1);
     expect(screen.getByText('Bundled Sample Checkout')).toBeVisible();
@@ -78,12 +80,41 @@ describe('shared application foundation', () => {
       </ApplicationShell>,
     );
 
-    expect(
-      screen.getByRole('link', { name: 'External Projects' }),
-    ).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Projects' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
     expect(
       screen.getByText('Recording · Guided and Advanced testing'),
     ).toBeVisible();
+  });
+
+  it('opens the responsive navigation, closes it with Escape, and focuses content after route changes', async () => {
+    const user = userEvent.setup();
+    const view = render(
+      <ApplicationShell>
+        <main>Route content</main>
+      </ApplicationShell>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Open navigation' }));
+    expect(screen.getByLabelText('Application sidebar')).toHaveClass(
+      'app-sidebar-open',
+    );
+    await user.keyboard('{Escape}');
+    expect(screen.getByLabelText('Application sidebar')).not.toHaveClass(
+      'app-sidebar-open',
+    );
+
+    navigation.pathname = '/projects';
+    view.rerender(
+      <ApplicationShell>
+        <main>Project route</main>
+      </ApplicationShell>,
+    );
+    await waitFor(() =>
+      expect(document.getElementById('main-content')).toHaveFocus(),
+    );
   });
 
   it('keeps disabled buttons noninteractive and exposes stable variants', async () => {

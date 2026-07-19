@@ -64,6 +64,8 @@ import {
 } from './outcome-definition-panel';
 
 type WizardStep = 1 | 2 | 3;
+export type GuidedWizardStage = 'outcome' | 'safety' | 'review';
+type ExpectedWorkspaceTab = 'overview' | 'action' | 'checks';
 type SafeValueMode =
   | 'recorded'
   | 'unique_text'
@@ -72,6 +74,19 @@ type SafeValueMode =
   | 'unique_email'
   | 'unique_phone'
   | 'custom';
+
+export interface GuidedTestDraftV1 {
+  readonly version: 1;
+  readonly projectId: string;
+  readonly journeyId: string;
+  readonly stage: GuidedWizardStage;
+  readonly recipeId: GuidedRecipeId;
+  readonly replayPacing: ReplayPacing;
+  readonly experimentName: string;
+  readonly stepValueModes: Readonly<
+    Record<string, Exclude<SafeValueMode, 'custom'>>
+  >;
+}
 
 const generatedTemplateByMode: Readonly<
   Partial<Record<SafeValueMode, string>>
@@ -101,6 +116,9 @@ interface Props {
   readonly onAuthenticationRecaptured: (
     settings: ProjectExecutionSettings,
   ) => void;
+  readonly initialDraft?: GuidedTestDraftV1 | null;
+  readonly onDraftChange?: ((draft: GuidedTestDraftV1) => void) | undefined;
+  readonly onStageChange?: ((stage: GuidedWizardStage) => void) | undefined;
 }
 
 export function GuidedTestPanel({
@@ -112,21 +130,36 @@ export function GuidedTestPanel({
   onOpenAdvanced,
   onCompleted,
   onAuthenticationRecaptured,
+  initialDraft = null,
+  onDraftChange,
+  onStageChange,
 }: Props) {
-  const [currentStep, setCurrentStep] = useState<WizardStep>(1);
+  const [currentStep, setCurrentStep] = useState<WizardStep>(
+    initialDraft?.stage === 'outcome' ? 1 : 2,
+  );
+  const [expectedWorkspaceTab, setExpectedWorkspaceTab] =
+    useState<ExpectedWorkspaceTab>('overview');
   const [completedSteps, setCompletedSteps] = useState<ReadonlySet<number>>(
     new Set(),
   );
-  const [journeyId, setJourneyId] = useState(selectedJourneyId ?? '');
+  const [journeyId, setJourneyId] = useState(
+    initialDraft?.journeyId ?? selectedJourneyId ?? '',
+  );
   const [outcomeState, setOutcomeState] =
     useState<OutcomeDefinitionState>(initialOutcomeState);
   const [runtimeValues, setRuntimeValues] = useState<EphemeralRuntimeValues>(
     {},
   );
   const [productionConfirmed, setProductionConfirmed] = useState(false);
-  const [recipeId, setRecipeId] = useState<GuidedRecipeId>('duplicate_action');
-  const [replayPacing, setReplayPacing] = useState<ReplayPacing>('recorded');
-  const [experimentName, setExperimentName] = useState('');
+  const [recipeId, setRecipeId] = useState<GuidedRecipeId>(
+    initialDraft?.recipeId ?? 'duplicate_action',
+  );
+  const [replayPacing, setReplayPacing] = useState<ReplayPacing>(
+    initialDraft?.replayPacing ?? 'recorded',
+  );
+  const [experimentName, setExperimentName] = useState(
+    initialDraft?.experimentName ?? '',
+  );
   const [stepValueModes, setStepValueModes] = useState<
     Readonly<Record<string, SafeValueMode>>
   >({});
@@ -153,6 +186,8 @@ export function GuidedTestPanel({
   );
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const submissionPending = useRef(false);
+  const restoredDraftName = useRef(false);
+  const journeyResetReady = useRef(false);
 
   const journey = useMemo(
     () => journeys.find((item) => item.id === journeyId) ?? null,
@@ -321,7 +356,12 @@ export function GuidedTestPanel({
   }, [journeyId, journeys, selectedJourneyId]);
 
   useEffect(() => {
+    if (!journeyResetReady.current) {
+      journeyResetReady.current = true;
+      return;
+    }
     setCurrentStep(1);
+    setExpectedWorkspaceTab('overview');
     setCompletedSteps(new Set());
     setOutcomeState(initialOutcomeState);
     setDiscovery(null);
@@ -333,20 +373,61 @@ export function GuidedTestPanel({
   }, [journeyId]);
 
   useEffect(() => {
+    onStageChange?.(stageForStep(currentStep));
+  }, [currentStep, onStageChange]);
+
+  useEffect(() => {
+    if (project.id === '' || journeyId === '') return;
+    const safeModes: Record<string, Exclude<SafeValueMode, 'custom'>> = {};
+    for (const [stepId, mode] of Object.entries(stepValueModes)) {
+      if (mode !== 'custom') safeModes[stepId] = mode;
+    }
+    onDraftChange?.({
+      version: 1,
+      projectId: project.id,
+      journeyId,
+      stage: stageForStep(currentStep),
+      recipeId,
+      replayPacing,
+      experimentName,
+      stepValueModes: safeModes,
+    });
+  }, [
+    currentStep,
+    experimentName,
+    journeyId,
+    onDraftChange,
+    project.id,
+    recipeId,
+    replayPacing,
+    stepValueModes,
+  ]);
+
+  useEffect(() => {
     const modes: Record<string, SafeValueMode> = {};
     const customValues: Record<string, string> = {};
     for (const step of configurableValueSteps) {
       const suggested = suggestedStepValueOverrides[step.id];
-      modes[step.id] = modeForTemplate(suggested);
+      modes[step.id] =
+        initialDraft?.stepValueModes[step.id] ?? modeForTemplate(suggested);
       if (step.value?.kind === 'safe') customValues[step.id] = step.value.value;
     }
     setStepValueModes(modes);
     setCustomStepValues(customValues);
-  }, [configurableValueSteps, suggestedStepValueOverrides]);
+  }, [configurableValueSteps, initialDraft, suggestedStepValueOverrides]);
 
   useEffect(() => {
     if (criticalStep === null) {
       setExperimentName('');
+      return;
+    }
+    if (
+      !restoredDraftName.current &&
+      initialDraft?.journeyId === journeyId &&
+      initialDraft.experimentName.trim() !== ''
+    ) {
+      restoredDraftName.current = true;
+      setExperimentName(initialDraft.experimentName);
       return;
     }
     setExperimentName(
@@ -354,7 +435,13 @@ export function GuidedTestPanel({
         `${recipe.shortName}: ${outcomeState.criticalAction?.label ?? criticalStep.name}`,
       ),
     );
-  }, [criticalStep, outcomeState.criticalAction?.label, recipe.shortName]);
+  }, [
+    criticalStep,
+    initialDraft,
+    journeyId,
+    outcomeState.criticalAction?.label,
+    recipe.shortName,
+  ]);
 
   const handleOutcomeState = useCallback((state: OutcomeDefinitionState) => {
     setOutcomeState(state);
@@ -562,10 +649,12 @@ export function GuidedTestPanel({
 
   return (
     <div className="guided-test guided-wizard">
-      <header className="panel guided-wizard-header">
+      <header className="guided-wizard-header">
         <div>
-          <p className="eyebrow">Guided repeated-submission test</p>
-          <h2>Define the outcome, check safety, then run</h2>
+          <p className="eyebrow">Test wizard</p>
+          <h2 aria-label="Define the outcome, check safety, then run">
+            {project.name}
+          </h2>
           <p>
             Saved Critical Actions and Outcome Checks remain authoritative.
             Unsaved wizard choices reset when this page is refreshed.
@@ -621,13 +710,13 @@ export function GuidedTestPanel({
 
       <section
         aria-labelledby="guided-expected-title"
-        className="panel guided-wizard-stage"
+        className="guided-wizard-stage guided-wizard-stage-expected"
         hidden={currentStep !== 1}
       >
         <WizardStageHeading
-          description="What visible result should happen when the saved Critical Action succeeds?"
+          description="Define the specific browser-visible or state-based evidence that proves the Critical Action succeeded."
           step="Step 1 of 3"
-          title="Expected Outcome"
+          title="What should be true after this action?"
         />
 
         <div className="guided-context-grid">
@@ -656,7 +745,146 @@ export function GuidedTestPanel({
           />
         </div>
 
-        {journey !== null && outcomeState.checks.length === 0 ? (
+        <nav
+          aria-label="Expected Outcome workspace"
+          className="expected-workspace-tabs"
+          role="tablist"
+        >
+          <button
+            aria-controls="expected-overview-panel"
+            aria-selected={expectedWorkspaceTab === 'overview'}
+            id="expected-overview-tab"
+            onClick={() => setExpectedWorkspaceTab('overview')}
+            role="tab"
+            type="button"
+          >
+            <span>Overview</span>
+            <small>{expectedBlockers.length} remaining</small>
+          </button>
+          <button
+            aria-controls="expected-configuration-panel"
+            aria-selected={expectedWorkspaceTab === 'action'}
+            id="expected-action-tab"
+            onClick={() => setExpectedWorkspaceTab('action')}
+            role="tab"
+            type="button"
+          >
+            <span>Critical Action</span>
+            <small>
+              {outcomeState.criticalAction === null
+                ? 'Needs setup'
+                : 'Configured'}
+            </small>
+          </button>
+          <button
+            aria-controls="expected-configuration-panel"
+            aria-selected={expectedWorkspaceTab === 'checks'}
+            id="expected-checks-tab"
+            onClick={() => setExpectedWorkspaceTab('checks')}
+            role="tab"
+            type="button"
+          >
+            <span>Outcome Checks</span>
+            <small>{outcomeState.checks.length} saved</small>
+          </button>
+        </nav>
+
+        <div
+          aria-labelledby="expected-overview-tab"
+          className="expected-workspace-panel expected-overview-panel"
+          hidden={expectedWorkspaceTab !== 'overview'}
+          id="expected-overview-panel"
+          role="tabpanel"
+        >
+          {outcomeState.loading ? (
+            <StateMessage variant="loading">
+              Loading the saved Critical Action and Outcome Checks…
+            </StateMessage>
+          ) : null}
+          {outcomeState.error !== null ? (
+            <StateMessage variant="error">{outcomeState.error}</StateMessage>
+          ) : null}
+          <div
+            aria-label="Saved Outcome Check coverage"
+            className="guided-outcome-type-grid"
+          >
+            <OutcomeTypeCard
+              count={
+                outcomeState.checks.filter(
+                  (check) =>
+                    check.type === 'matching_item_appears_exactly_once',
+                ).length
+              }
+              description="Proves one browser-visible result matches the approved run-specific identity."
+              title="Exactly one matching record appears"
+            />
+            <OutcomeTypeCard
+              count={
+                outcomeState.checks.filter(
+                  (check) => check.type === 'visible_element_exists',
+                ).length
+              }
+              description="Proves the approved confirmation element is visible after the action."
+              title="A confirmation element appears"
+            />
+            <OutcomeTypeCard
+              count={
+                outcomeState.checks.filter(
+                  (check) => check.type === 'final_pathname_matches',
+                ).length
+              }
+              description="Proves the browser finishes on the approved path without inventing a business result."
+              title="The browser reaches a specific page"
+            />
+          </div>
+
+          <div className="expected-next-task">
+            <div>
+              <p className="eyebrow">Next required task</p>
+              <h3>
+                {outcomeState.criticalAction === null
+                  ? 'Choose the state-changing action'
+                  : outcomeState.checks.length === 0
+                    ? 'Capture a successful baseline'
+                    : 'Expected Outcome is ready'}
+              </h3>
+              <p>
+                {outcomeState.criticalAction === null
+                  ? 'Approve the recorded click or submit that the test will repeat.'
+                  : outcomeState.checks.length === 0
+                    ? 'Replay the saved journey once, then approve at least one browser-visible result.'
+                    : 'The saved Critical Action and Outcome Checks are ready for Safety & Data review.'}
+              </p>
+            </div>
+            {expectedBlockers.length > 0 ? (
+              <Button
+                onClick={() => setExpectedWorkspaceTab('action')}
+                variant="primary"
+              >
+                Open Critical Action
+              </Button>
+            ) : (
+              <StatusBadge tone="pass">Ready</StatusBadge>
+            )}
+          </div>
+
+          {expectedBlockers.length > 0 ? (
+            <BlockingReasons
+              heading="Expected Outcome is incomplete"
+              reasons={expectedBlockers}
+              visible={showValidation || !outcomeState.loading}
+            />
+          ) : (
+            <StateMessage>
+              Every saved Outcome Check will be evaluated by the existing
+              runner.
+            </StateMessage>
+          )}
+        </div>
+
+        {journey !== null &&
+        outcomeState.checks.length === 0 &&
+        expectedWorkspaceTab === 'action' ? (
           <div className="guided-baseline-prerequisites">
             {runtimeRequirements.length > 0 ? (
               <RuntimeInputs
@@ -680,32 +908,35 @@ export function GuidedTestPanel({
             The selected journey version no longer exists.
           </StateMessage>
         ) : (
-          <OutcomeDefinitionPanel
-            confirmProduction={productionConfirmed}
-            disabled={
-              missingRuntime.length > 0 ||
-              productionBlocked ||
-              settings === null
+          <div
+            aria-labelledby={
+              expectedWorkspaceTab === 'checks'
+                ? 'expected-checks-tab'
+                : 'expected-action-tab'
             }
-            environment={project.environment}
-            id="guided-outcome-configuration"
-            journey={journey}
-            onStateChange={handleOutcomeState}
-            presentation="wizard"
-            runtimeValues={runtimeValues}
-          />
-        )}
-
-        {expectedBlockers.length > 0 ? (
-          <BlockingReasons
-            heading="Expected Outcome is incomplete"
-            reasons={expectedBlockers}
-            visible={showValidation || !outcomeState.loading}
-          />
-        ) : (
-          <StateMessage>
-            Every saved Outcome Check will be evaluated by the existing runner.
-          </StateMessage>
+            className="expected-workspace-panel"
+            hidden={expectedWorkspaceTab === 'overview'}
+            id="expected-configuration-panel"
+            role="tabpanel"
+          >
+            <OutcomeDefinitionPanel
+              activeSection={
+                expectedWorkspaceTab === 'checks' ? 'checks' : 'action'
+              }
+              confirmProduction={productionConfirmed}
+              disabled={
+                missingRuntime.length > 0 ||
+                productionBlocked ||
+                settings === null
+              }
+              environment={project.environment}
+              id="guided-outcome-configuration"
+              journey={journey}
+              onStateChange={handleOutcomeState}
+              presentation="wizard"
+              runtimeValues={runtimeValues}
+            />
+          </div>
         )}
 
         <WizardActions>
@@ -724,7 +955,7 @@ export function GuidedTestPanel({
       {currentStep === 2 ? (
         <section
           aria-labelledby="guided-safety-title"
-          className="panel guided-wizard-stage"
+          className="guided-wizard-stage guided-wizard-stage-safety"
         >
           <WizardStageHeading
             description="Can this experiment replay deterministically without hiding its data risks?"
@@ -732,307 +963,348 @@ export function GuidedTestPanel({
             title="Safety & Data"
           />
 
-          <div className="guided-safety-grid">
-            <SafetyCard
-              detail={`${new URL(project.targetUrl).origin} · ${project.environment}`}
-              status={project.environment === 'production' ? 'Review' : 'Ready'}
-              title="Target origin"
-              tone={project.environment === 'production' ? 'warning' : 'pass'}
-            />
-            <SafetyCard
-              detail={
-                settings?.authentication.available === true
-                  ? 'Saved authentication available. The replay browser can restore the captured state.'
-                  : 'No saved authentication. FormCrash may discover during replay that authentication is required.'
-              }
-              status={
-                settings?.authentication.available === true
-                  ? 'Available'
-                  : 'Unknown requirement'
-              }
-              title="Authentication"
-              tone={
-                settings?.authentication.available === true ? 'pass' : 'neutral'
-              }
-            />
-            <SafetyCard
-              detail={
-                missingRuntime.length === 0
-                  ? 'All required values are available without exposing their contents.'
-                  : `${missingRuntime.length} required value${missingRuntime.length === 1 ? '' : 's'} must be provided for this browser session.`
-              }
-              status={missingRuntime.length === 0 ? 'Ready' : 'Missing values'}
-              title="Runtime variables"
-              tone={missingRuntime.length === 0 ? 'pass' : 'warning'}
-            />
-            <SafetyCard
-              detail={recordedEnvironmentSummary(journey)}
-              status={
-                journey?.replayFormat === 'hybrid-v2'
-                  ? 'Recorded trace'
-                  : 'Semantic replay'
-              }
-              title="Recorded environment"
-              tone="browser"
-            />
-          </div>
-
-          {runtimeRequirements.length > 0 ? (
-            <div className="guided-safety-section">
-              <h4>Runtime values required for this run</h4>
-              <p>
-                Names and source types are safe to display. Secret values remain
-                masked and never appear in the review.
-              </p>
-              <RuntimeInputs
-                labelPrefix="Runtime"
-                requirements={runtimeRequirements}
-                runtimeValues={runtimeValues}
-                setRuntimeValues={setRuntimeValues}
-              />
-            </div>
-          ) : (
-            <StateMessage>
-              No unresolved runtime variables are required for this journey.
-            </StateMessage>
-          )}
-
-          {configurableValueSteps.length > 0 ? (
-            <div className="guided-safety-section">
-              <h4>Generated and recorded journey values</h4>
-              <p>
-                Templates persist with the experiment snapshot; resolved
-                run-specific literals do not appear here.
-              </p>
-              <div className="guided-value-grid">
-                {configurableValueSteps.map((step) => {
-                  const mode = stepValueModes[step.id] ?? 'recorded';
-                  return (
-                    <div className="guided-value-card" key={step.id}>
-                      <label>
-                        {step.name}
-                        <select
-                          aria-label={`${step.name} value source`}
-                          value={mode}
-                          onChange={(event) =>
-                            setStepValueModes((current) => ({
-                              ...current,
-                              [step.id]: event.target.value as SafeValueMode,
-                            }))
-                          }
-                        >
-                          <option value="recorded">Recorded saved value</option>
-                          <option value="unique_text">
-                            {'{{unique.text}}'}
-                          </option>
-                          <option value="uuid">{'{{run.id}}'}</option>
-                          <option value="unique_name">
-                            {'{{unique.name}}'}
-                          </option>
-                          <option value="unique_email">
-                            {'{{unique.email}}'}
-                          </option>
-                          <option value="unique_phone">
-                            {'{{unique.phone}}'}
-                          </option>
-                          <option value="custom">
-                            Custom value or template
-                          </option>
-                        </select>
-                      </label>
-                      {mode === 'custom' ? (
-                        <label>
-                          Unsaved value or template
-                          <input
-                            aria-label={`${step.name} custom value`}
-                            autoComplete="off"
-                            value={customStepValues[step.id] ?? ''}
-                            onChange={(event) =>
-                              setCustomStepValues((current) => ({
-                                ...current,
-                                [step.id]: event.target.value,
-                              }))
-                            }
-                          />
-                        </label>
-                      ) : mode !== 'recorded' ? (
-                        <code>{generatedTemplateByMode[mode]}</code>
-                      ) : (
-                        <small>
-                          The stored literal is intentionally not previewed.
-                        </small>
-                      )}
-                    </div>
-                  );
-                })}
+          <div className="guided-safety-layout">
+            <div className="guided-safety-main">
+              <div className="guided-safety-grid">
+                <SafetyCard
+                  detail={`${new URL(project.targetUrl).origin} · ${project.environment}`}
+                  status={
+                    project.environment === 'production' ? 'Review' : 'Ready'
+                  }
+                  title="Target origin"
+                  tone={
+                    project.environment === 'production' ? 'warning' : 'pass'
+                  }
+                />
+                <SafetyCard
+                  detail={
+                    settings?.authentication.available === true
+                      ? 'Saved authentication available. The replay browser can restore the captured state.'
+                      : 'No saved authentication. FormCrash may discover during replay that authentication is required.'
+                  }
+                  status={
+                    settings?.authentication.available === true
+                      ? 'Available'
+                      : 'Unknown requirement'
+                  }
+                  title="Authentication"
+                  tone={
+                    settings?.authentication.available === true
+                      ? 'pass'
+                      : 'neutral'
+                  }
+                />
+                <SafetyCard
+                  detail={
+                    missingRuntime.length === 0
+                      ? 'All required values are available without exposing their contents.'
+                      : `${missingRuntime.length} required value${missingRuntime.length === 1 ? '' : 's'} must be provided for this browser session.`
+                  }
+                  status={
+                    missingRuntime.length === 0 ? 'Ready' : 'Missing values'
+                  }
+                  title="Runtime variables"
+                  tone={missingRuntime.length === 0 ? 'pass' : 'warning'}
+                />
+                <SafetyCard
+                  detail={recordedEnvironmentSummary(journey)}
+                  status={
+                    journey?.replayFormat === 'hybrid-v2'
+                      ? 'Recorded trace'
+                      : 'Semantic replay'
+                  }
+                  title="Recorded environment"
+                  tone="browser"
+                />
               </div>
-            </div>
-          ) : null}
 
-          <div className="guided-safety-section">
-            <div className="section-heading-row compact-heading">
-              <div>
-                <h4>Failure recipe and replay pacing</h4>
+              {runtimeRequirements.length > 0 ? (
+                <div className="guided-safety-section">
+                  <h4>Runtime values required for this run</h4>
+                  <p>
+                    Names and source types are safe to display. Secret values
+                    remain masked and never appear in the review.
+                  </p>
+                  <RuntimeInputs
+                    labelPrefix="Runtime"
+                    requirements={runtimeRequirements}
+                    runtimeValues={runtimeValues}
+                    setRuntimeValues={setRuntimeValues}
+                  />
+                </div>
+              ) : (
+                <StateMessage>
+                  No unresolved runtime variables are required for this journey.
+                </StateMessage>
+              )}
+
+              {configurableValueSteps.length > 0 ? (
+                <div className="guided-safety-section">
+                  <h4>Generated and recorded journey values</h4>
+                  <p>
+                    Templates persist with the experiment snapshot; resolved
+                    run-specific literals do not appear here.
+                  </p>
+                  <div className="guided-value-grid">
+                    {configurableValueSteps.map((step) => {
+                      const mode = stepValueModes[step.id] ?? 'recorded';
+                      return (
+                        <div className="guided-value-card" key={step.id}>
+                          <label>
+                            {step.name}
+                            <select
+                              aria-label={`${step.name} value source`}
+                              value={mode}
+                              onChange={(event) =>
+                                setStepValueModes((current) => ({
+                                  ...current,
+                                  [step.id]: event.target
+                                    .value as SafeValueMode,
+                                }))
+                              }
+                            >
+                              <option value="recorded">
+                                Recorded saved value
+                              </option>
+                              <option value="unique_text">
+                                {'{{unique.text}}'}
+                              </option>
+                              <option value="uuid">{'{{run.id}}'}</option>
+                              <option value="unique_name">
+                                {'{{unique.name}}'}
+                              </option>
+                              <option value="unique_email">
+                                {'{{unique.email}}'}
+                              </option>
+                              <option value="unique_phone">
+                                {'{{unique.phone}}'}
+                              </option>
+                              <option value="custom">
+                                Custom value or template
+                              </option>
+                            </select>
+                          </label>
+                          {mode === 'custom' ? (
+                            <label>
+                              Unsaved value or template
+                              <input
+                                aria-label={`${step.name} custom value`}
+                                autoComplete="off"
+                                value={customStepValues[step.id] ?? ''}
+                                onChange={(event) =>
+                                  setCustomStepValues((current) => ({
+                                    ...current,
+                                    [step.id]: event.target.value,
+                                  }))
+                                }
+                              />
+                            </label>
+                          ) : mode !== 'recorded' ? (
+                            <code>{generatedTemplateByMode[mode]}</code>
+                          ) : (
+                            <small>
+                              The stored literal is intentionally not previewed.
+                            </small>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="guided-safety-section">
+                <div className="section-heading-row compact-heading">
+                  <div>
+                    <h4>Failure recipe and replay pacing</h4>
+                    <p>
+                      Replay pacing affects normal journey steps. It does not
+                      change the repeated-trigger interval.
+                    </p>
+                  </div>
+                </div>
+                <fieldset className="guided-recipe-selector">
+                  <legend>Repeated-submission recipe</legend>
+                  <div className="guided-recipe-grid">
+                    {guidedRecipes.map((item) => (
+                      <label
+                        className={`guided-recipe-card ${
+                          recipeId === item.id
+                            ? 'guided-recipe-card-selected'
+                            : ''
+                        }`}
+                        key={item.id}
+                      >
+                        <input
+                          checked={recipeId === item.id}
+                          name="guided-recipe"
+                          onChange={() => setRecipeId(item.id)}
+                          type="radio"
+                        />
+                        <span>
+                          <strong>{item.name}</strong>
+                          <small>{item.description}</small>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+                <fieldset className="guided-pacing-selector">
+                  <legend>Replay pacing</legend>
+                  <div className="guided-pacing-options">
+                    {(
+                      [
+                        ['recorded', 'Recorded', 'Use captured human pauses.'],
+                        [
+                          'deliberate',
+                          'Deliberate',
+                          'Wait one second at normal steps.',
+                        ],
+                        ['fast', 'Fast', 'Add no normal-step pauses.'],
+                      ] as const
+                    ).map(([value, label, detail]) => (
+                      <label key={value}>
+                        <input
+                          checked={replayPacing === value}
+                          name="guided-replay-pacing"
+                          onChange={() => setReplayPacing(value)}
+                          type="radio"
+                        />
+                        <span>
+                          <strong>{label}</strong>
+                          <small>{detail}</small>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              </div>
+
+              <div className="guided-hook-grid">
+                <HookSummary
+                  hook={settings?.beforeRunHook ?? null}
+                  title="Before hook"
+                />
+                <HookSummary
+                  hook={settings?.afterRunHook ?? null}
+                  title="Cleanup hook"
+                />
+              </div>
+
+              {settings?.afterRunHook === null ? (
+                <StateMessage variant="warning">
+                  Test data may be created or modified. Cleanup is not
+                  guaranteed; remove residue manually when no cleanup hook is
+                  configured.
+                </StateMessage>
+              ) : (
+                <StateMessage>
+                  The saved cleanup hook will run after discovery and experiment
+                  execution, but external cleanup still cannot be guaranteed.
+                </StateMessage>
+              )}
+
+              {project.environment === 'production' ? (
+                <ProductionConfirmation
+                  checked={productionConfirmed}
+                  onChange={setProductionConfirmed}
+                />
+              ) : null}
+
+              <DisclosurePanel
+                description="Known browser and target boundaries"
+                title="CAPTCHA and unsupported interactions"
+              >
                 <p>
-                  Replay pacing affects normal journey steps. It does not change
-                  the repeated-trigger interval.
+                  FormCrash does not evade real CAPTCHA challenges. Use test
+                  keys, a staging bypass, WAF allowlisting, or authorized test
+                  accounts.
+                </p>
+                <p>
+                  File uploads, third-party payment flows, unsupported frames,
+                  shadow DOM, and changed locators may still stop replay. The
+                  saved journey reports{' '}
+                  {journey?.recordingMetadata.warningCount ?? 0} recorder
+                  warning(s), but this contract does not expose their individual
+                  codes.
+                </p>
+              </DisclosurePanel>
+            </div>
+            <aside
+              className="guided-safety-sidebar"
+              aria-label="Safety review and actions"
+            >
+              <div
+                className={`guided-production-summary${project.environment === 'production' ? ' is-production' : ''}`}
+              >
+                <strong>
+                  {project.environment === 'production'
+                    ? 'Production safety'
+                    : 'Controlled target'}
+                </strong>
+                <p>
+                  {project.environment === 'production'
+                    ? 'This test performs real actions against the configured production target.'
+                    : `This run targets the saved ${project.environment} environment.`}
                 </p>
               </div>
-            </div>
-            <fieldset className="guided-recipe-selector">
-              <legend>Repeated-submission recipe</legend>
-              <div className="guided-recipe-grid">
-                {guidedRecipes.map((item) => (
-                  <label
-                    className={`guided-recipe-card ${
-                      recipeId === item.id ? 'guided-recipe-card-selected' : ''
-                    }`}
-                    key={item.id}
+
+              {readiness !== null ? (
+                <div className="guided-readiness-compact">
+                  <StatusBadge
+                    tone={readiness.status === 'blocked' ? 'warning' : 'pass'}
                   >
-                    <input
-                      checked={recipeId === item.id}
-                      name="guided-recipe"
-                      onChange={() => setRecipeId(item.id)}
-                      type="radio"
-                    />
-                    <span>
-                      <strong>{item.name}</strong>
-                      <small>{item.description}</small>
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-            <fieldset className="guided-pacing-selector">
-              <legend>Replay pacing</legend>
-              <div className="guided-pacing-options">
-                {(
-                  [
-                    ['recorded', 'Recorded', 'Use captured human pauses.'],
-                    [
-                      'deliberate',
-                      'Deliberate',
-                      'Wait one second at normal steps.',
-                    ],
-                    ['fast', 'Fast', 'Add no normal-step pauses.'],
-                  ] as const
-                ).map(([value, label, detail]) => (
-                  <label key={value}>
-                    <input
-                      checked={replayPacing === value}
-                      name="guided-replay-pacing"
-                      onChange={() => setReplayPacing(value)}
-                      type="radio"
-                    />
-                    <span>
-                      <strong>{label}</strong>
-                      <small>{detail}</small>
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
+                    {readiness.status === 'blocked'
+                      ? 'Needs required data'
+                      : 'Safety inputs ready'}
+                  </StatusBadge>
+                  <span>
+                    {readiness.blockerCount} blocker(s) ·{' '}
+                    {readiness.warningCount} warning(s)
+                  </span>
+                </div>
+              ) : (
+                <StateMessage variant="loading">
+                  Loading project execution settings…
+                </StateMessage>
+              )}
+
+              {safetyBlockers.length > 0 ? (
+                <BlockingReasons
+                  heading="Safety & Data is incomplete"
+                  reasons={safetyBlockers}
+                  visible
+                />
+              ) : (
+                <StateMessage>
+                  Continuing will replay the Critical Action once to identify
+                  its request. This is the existing Guided analysis behavior and
+                  may create or modify target data.
+                </StateMessage>
+              )}
+
+              <WizardActions>
+                <Button onClick={() => setCurrentStep(1)}>Back</Button>
+                <Button
+                  className="guided-wizard-primary"
+                  disabled={busy !== null || safetyBlockers.length > 0}
+                  onClick={() => void prepareReview()}
+                  variant="primary"
+                >
+                  {busy === 'review'
+                    ? 'Preparing review…'
+                    : 'Continue to Review'}
+                </Button>
+              </WizardActions>
+            </aside>
           </div>
-
-          <div className="guided-hook-grid">
-            <HookSummary
-              hook={settings?.beforeRunHook ?? null}
-              title="Before hook"
-            />
-            <HookSummary
-              hook={settings?.afterRunHook ?? null}
-              title="Cleanup hook"
-            />
-          </div>
-
-          {settings?.afterRunHook === null ? (
-            <StateMessage variant="warning">
-              Test data may be created or modified. Cleanup is not guaranteed;
-              remove residue manually when no cleanup hook is configured.
-            </StateMessage>
-          ) : (
-            <StateMessage>
-              The saved cleanup hook will run after discovery and experiment
-              execution, but external cleanup still cannot be guaranteed.
-            </StateMessage>
-          )}
-
-          {project.environment === 'production' ? (
-            <ProductionConfirmation
-              checked={productionConfirmed}
-              onChange={setProductionConfirmed}
-            />
-          ) : null}
-
-          <DisclosurePanel
-            description="Known browser and target boundaries"
-            title="CAPTCHA and unsupported interactions"
-          >
-            <p>
-              FormCrash does not evade real CAPTCHA challenges. Use test keys, a
-              staging bypass, WAF allowlisting, or authorized test accounts.
-            </p>
-            <p>
-              File uploads, third-party payment flows, unsupported frames,
-              shadow DOM, and changed locators may still stop replay. The saved
-              journey reports {journey?.recordingMetadata.warningCount ?? 0}{' '}
-              recorder warning(s), but this contract does not expose their
-              individual codes.
-            </p>
-          </DisclosurePanel>
-
-          {readiness !== null ? (
-            <div className="guided-readiness-compact">
-              <StatusBadge
-                tone={readiness.status === 'blocked' ? 'warning' : 'pass'}
-              >
-                {readiness.status === 'blocked'
-                  ? 'Needs required data'
-                  : 'Safety inputs ready'}
-              </StatusBadge>
-              <span>
-                {readiness.blockerCount} blocker(s) · {readiness.warningCount}{' '}
-                warning(s)
-              </span>
-            </div>
-          ) : (
-            <StateMessage variant="loading">
-              Loading project execution settings…
-            </StateMessage>
-          )}
-
-          {safetyBlockers.length > 0 ? (
-            <BlockingReasons
-              heading="Safety & Data is incomplete"
-              reasons={safetyBlockers}
-              visible
-            />
-          ) : (
-            <StateMessage>
-              Continuing will replay the Critical Action once to identify its
-              request. This is the existing Guided analysis behavior and may
-              create or modify target data.
-            </StateMessage>
-          )}
-
-          <WizardActions>
-            <Button onClick={() => setCurrentStep(1)}>Back</Button>
-            <Button
-              className="guided-wizard-primary"
-              disabled={busy !== null || safetyBlockers.length > 0}
-              onClick={() => void prepareReview()}
-              variant="primary"
-            >
-              {busy === 'review' ? 'Preparing review…' : 'Continue to Review'}
-            </Button>
-          </WizardActions>
         </section>
       ) : null}
 
       {currentStep === 3 ? (
         <section
           aria-labelledby="guided-review-title"
-          className="panel guided-wizard-stage"
+          className="guided-wizard-stage guided-wizard-stage-review"
         >
           <WizardStageHeading
             description="Review the exact local choices and saved entities the existing runner will use."
@@ -1040,224 +1312,277 @@ export function GuidedTestPanel({
             title="Review & Run"
           />
 
-          <div className="guided-review-callout">
-            <StatusBadge
-              tone={reviewBlockers.length === 0 ? 'pass' : 'warning'}
-            >
-              {reviewBlockers.length === 0 ? 'Ready to run' : 'Blocked'}
-            </StatusBadge>
-            <p>
-              {impatientUserSummary(recipe, outcomeState.criticalAction?.label)}
-            </p>
-          </div>
-
-          <label className="guided-experiment-name">
-            Experiment name
-            <input
-              aria-describedby="guided-experiment-name-note"
-              maxLength={160}
-              value={experimentName}
-              onChange={(event) => setExperimentName(event.target.value)}
-            />
-            <small id="guided-experiment-name-note">
-              Saved only when Run creates the next immutable experiment version.
-            </small>
-          </label>
-
-          <div className="guided-review-grid">
-            <ReviewGroup title="Target and recording">
-              <ReviewRow label="Project" value={project.name} />
-              <ReviewRow label="Target" value={project.targetUrl} technical />
-              <ReviewRow
-                label="Journey"
-                value={`${journey?.name ?? 'Missing'} v${journey?.version ?? '—'}`}
-              />
-              <ReviewRow
-                label="Recorded steps"
-                value={`${journey?.steps.length ?? 0} · ${journey?.replayFormat ?? 'semantic-v1'}`}
-              />
-              <ReviewRow
-                label="Critical Action"
-                value={outcomeState.criticalAction?.label ?? 'Missing'}
-              />
-            </ReviewGroup>
-            <ReviewGroup title="Repeated submission">
-              <ReviewRow label="Recipe" value={recipe.name} />
-              <ReviewRow
-                label="Trigger count"
-                value={String(recipe.triggerCount)}
-              />
-              <ReviewRow
-                label="Trigger interval"
-                value={`${recipe.intervalMs} ms`}
-              />
-              <ReviewRow
-                label="Continuation"
-                value="Stop after Critical Action"
-              />
-              <ReviewRow label="Replay mode" value="Adaptive" />
-              <ReviewRow
-                label="Replay pacing"
-                value={pacingLabel(replayPacing)}
-              />
-            </ReviewGroup>
-            <ReviewGroup title="Readiness">
-              <ReviewRow
-                label="Authentication"
-                value={
-                  settings?.authentication.available === true
-                    ? 'Saved authentication available'
-                    : 'No saved authentication; requirement unknown until replay'
-                }
-              />
-              <ReviewRow
-                label="Runtime variables"
-                value={
-                  missingRuntime.length === 0
-                    ? 'Ready'
-                    : `${missingRuntime.length} missing`
-                }
-              />
-              <ReviewRow
-                label="Generated templates"
-                value={
-                  generatedTemplates.length === 0
-                    ? 'None'
-                    : generatedTemplates.join(', ')
-                }
-                technical
-              />
-              <ReviewRow
-                label="Before hook"
-                value={safeHookSummary(settings?.beforeRunHook ?? null)}
-              />
-              <ReviewRow
-                label="Cleanup"
-                value={safeHookSummary(settings?.afterRunHook ?? null)}
-              />
-              <ReviewRow
-                label="Production confirmation"
-                value={
-                  project.environment !== 'production'
-                    ? 'Not applicable'
-                    : productionConfirmed
-                      ? 'Confirmed for this session'
-                      : 'Required'
-                }
-              />
-            </ReviewGroup>
-          </div>
-
-          <div className="guided-review-outcomes">
-            <div className="section-heading-row compact-heading">
-              <div>
-                <h4>Saved Outcome Checks</h4>
+          <div className="guided-review-layout">
+            <div className="guided-review-main">
+              <div className="guided-review-callout">
+                <StatusBadge
+                  tone={reviewBlockers.length === 0 ? 'pass' : 'warning'}
+                >
+                  {reviewBlockers.length === 0 ? 'Ready to run' : 'Blocked'}
+                </StatusBadge>
                 <p>
-                  All saved checks are evaluated; this runner has no per-run
-                  subset.
+                  {impatientUserSummary(
+                    recipe,
+                    outcomeState.criticalAction?.label,
+                  )}
                 </p>
               </div>
-              <StatusBadge
-                tone={outcomeState.checks.length > 0 ? 'pass' : 'warning'}
+
+              <label className="guided-experiment-name">
+                Experiment name
+                <input
+                  aria-describedby="guided-experiment-name-note"
+                  maxLength={160}
+                  value={experimentName}
+                  onChange={(event) => setExperimentName(event.target.value)}
+                />
+                <small id="guided-experiment-name-note">
+                  Saved only when Run creates the next immutable experiment
+                  version.
+                </small>
+              </label>
+
+              <div className="guided-review-grid">
+                <ReviewGroup title="Target and recording">
+                  <ReviewRow label="Project" value={project.name} />
+                  <ReviewRow
+                    label="Target"
+                    value={project.targetUrl}
+                    technical
+                  />
+                  <ReviewRow
+                    label="Journey"
+                    value={`${journey?.name ?? 'Missing'} v${journey?.version ?? '—'}`}
+                  />
+                  <ReviewRow
+                    label="Recorded steps"
+                    value={`${journey?.steps.length ?? 0} · ${journey?.replayFormat ?? 'semantic-v1'}`}
+                  />
+                  <ReviewRow
+                    label="Critical Action"
+                    value={outcomeState.criticalAction?.label ?? 'Missing'}
+                  />
+                </ReviewGroup>
+                <ReviewGroup title="Repeated submission">
+                  <ReviewRow label="Recipe" value={recipe.name} />
+                  <ReviewRow
+                    label="Trigger count"
+                    value={String(recipe.triggerCount)}
+                  />
+                  <ReviewRow
+                    label="Trigger interval"
+                    value={`${recipe.intervalMs} ms`}
+                  />
+                  <ReviewRow
+                    label="Continuation"
+                    value="Stop after Critical Action"
+                  />
+                  <ReviewRow label="Replay mode" value="Adaptive" />
+                  <ReviewRow
+                    label="Replay pacing"
+                    value={pacingLabel(replayPacing)}
+                  />
+                </ReviewGroup>
+                <ReviewGroup title="Readiness">
+                  <ReviewRow
+                    label="Authentication"
+                    value={
+                      settings?.authentication.available === true
+                        ? 'Saved authentication available'
+                        : 'No saved authentication; requirement unknown until replay'
+                    }
+                  />
+                  <ReviewRow
+                    label="Runtime variables"
+                    value={
+                      missingRuntime.length === 0
+                        ? 'Ready'
+                        : `${missingRuntime.length} missing`
+                    }
+                  />
+                  <ReviewRow
+                    label="Generated templates"
+                    value={
+                      generatedTemplates.length === 0
+                        ? 'None'
+                        : generatedTemplates.join(', ')
+                    }
+                    technical
+                  />
+                  <ReviewRow
+                    label="Before hook"
+                    value={safeHookSummary(settings?.beforeRunHook ?? null)}
+                  />
+                  <ReviewRow
+                    label="Cleanup"
+                    value={safeHookSummary(settings?.afterRunHook ?? null)}
+                  />
+                  <ReviewRow
+                    label="Production confirmation"
+                    value={
+                      project.environment !== 'production'
+                        ? 'Not applicable'
+                        : productionConfirmed
+                          ? 'Confirmed for this session'
+                          : 'Required'
+                    }
+                  />
+                </ReviewGroup>
+              </div>
+
+              <div className="guided-review-outcomes">
+                <div className="section-heading-row compact-heading">
+                  <div>
+                    <h4>Saved Outcome Checks</h4>
+                    <p>
+                      All saved checks are evaluated; this runner has no per-run
+                      subset.
+                    </p>
+                  </div>
+                  <StatusBadge
+                    tone={outcomeState.checks.length > 0 ? 'pass' : 'warning'}
+                  >
+                    {outcomeState.checks.length} saved
+                  </StatusBadge>
+                </div>
+                {outcomeState.checks.length > 0 ? (
+                  <ol>
+                    {outcomeState.checks.map((check) => (
+                      <li key={check.id}>
+                        <strong>{outcomeTypeLabel(check)}</strong>
+                        <span>{readableOutcome(check)}</span>
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <p>No saved Outcome Checks are available.</p>
+                )}
+              </div>
+
+              <StateMessage
+                variant={
+                  settings?.afterRunHook === null ? 'warning' : 'neutral'
+                }
               >
-                {outcomeState.checks.length} saved
-              </StatusBadge>
+                {settings?.afterRunHook === null
+                  ? 'Test data may remain after the run because no cleanup hook is configured.'
+                  : 'The cleanup hook is configured, but cleanup by an external target is not guaranteed.'}
+              </StateMessage>
+
+              <DisclosurePanel
+                description="Existing request matcher and runner assertions"
+                title="Advanced technical configuration"
+              >
+                <p>
+                  Guided analysis selected{' '}
+                  <code>
+                    {selectedCandidate === null
+                      ? 'No request prepared'
+                      : `${selectedCandidate.method} ${selectedCandidate.pathname}`}
+                  </code>{' '}
+                  and prepared {assertions.length} technical runner
+                  assertion(s). These are not Outcome Checks.
+                </p>
+                <Button compact onClick={onOpenAdvanced}>
+                  Open Advanced mode
+                </Button>
+              </DisclosurePanel>
             </div>
-            {outcomeState.checks.length > 0 ? (
-              <ol>
-                {outcomeState.checks.map((check) => (
-                  <li key={check.id}>
-                    <strong>{outcomeTypeLabel(check)}</strong>
-                    <span>{readableOutcome(check)}</span>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <p>No saved Outcome Checks are available.</p>
-            )}
-          </div>
-
-          <StateMessage
-            variant={settings?.afterRunHook === null ? 'warning' : 'neutral'}
-          >
-            {settings?.afterRunHook === null
-              ? 'Test data may remain after the run because no cleanup hook is configured.'
-              : 'The cleanup hook is configured, but cleanup by an external target is not guaranteed.'}
-          </StateMessage>
-
-          <DisclosurePanel
-            description="Existing request matcher and runner assertions"
-            title="Advanced technical configuration"
-          >
-            <p>
-              Guided analysis selected{' '}
-              <code>
-                {selectedCandidate === null
-                  ? 'No request prepared'
-                  : `${selectedCandidate.method} ${selectedCandidate.pathname}`}
-              </code>{' '}
-              and prepared {assertions.length} technical runner assertion(s).
-              These are not Outcome Checks.
-            </p>
-            <Button compact onClick={onOpenAdvanced}>
-              Open Advanced mode
-            </Button>
-          </DisclosurePanel>
-
-          <DisclosurePanel
-            description="CAPTCHA and unsupported browser boundaries"
-            title="Execution boundaries"
-          >
-            <p>
-              FormCrash does not bypass real CAPTCHA challenges. Changed pages,
-              unsupported frames, uploads, payment providers, or brittle
-              locators may stop execution before the checks can be evaluated.
-            </p>
-          </DisclosurePanel>
-
-          {reviewBlockers.length > 0 ? (
-            <BlockingReasons
-              heading="Run is blocked"
-              reasons={reviewBlockers}
-              visible
-            />
-          ) : null}
-
-          {busy === 'run' ? (
-            <StateMessage variant="loading">
-              Creating one immutable experiment version and starting the
-              existing runner…
-            </StateMessage>
-          ) : null}
-          {result !== null ? (
-            <StateMessage>
-              Run accepted. The existing runner returned run{' '}
-              <code>{result.runId}</code>.
-            </StateMessage>
-          ) : null}
-
-          <WizardActions>
-            <Button disabled={busy !== null} onClick={() => setCurrentStep(2)}>
-              Back to Safety &amp; Data
-            </Button>
-            <Button
-              aria-describedby={
-                reviewBlockers.length > 0 ? 'guided-run-blockers' : undefined
-              }
-              className="guided-wizard-primary"
-              disabled={
-                busy !== null || reviewBlockers.length > 0 || result !== null
-              }
-              onClick={() => void saveAndRun()}
-              variant="primary"
+            <aside
+              className="guided-review-sidebar"
+              aria-label="Pre-flight checks and run action"
             >
-              {busy === 'run'
-                ? 'Starting experiment…'
-                : result !== null
-                  ? 'Run accepted'
-                  : 'Run repeated-submission experiment'}
-            </Button>
-          </WizardActions>
+              <h4>Pre-flight checks</h4>
+              <div className="guided-preflight-list">
+                <span>
+                  Runner mode <strong>Adaptive</strong>
+                </span>
+                <span>
+                  Outcome Checks{' '}
+                  <strong>{outcomeState.checks.length} saved</strong>
+                </span>
+                <span>
+                  Runtime values{' '}
+                  <strong>
+                    {missingRuntime.length === 0
+                      ? 'Ready'
+                      : `${missingRuntime.length} missing`}
+                  </strong>
+                </span>
+                <span>
+                  Cleanup{' '}
+                  <strong>
+                    {settings?.afterRunHook === null
+                      ? 'Not configured'
+                      : 'Configured'}
+                  </strong>
+                </span>
+              </div>
+
+              <DisclosurePanel
+                description="CAPTCHA and unsupported browser boundaries"
+                title="Execution boundaries"
+              >
+                <p>
+                  FormCrash does not bypass real CAPTCHA challenges. Changed
+                  pages, unsupported frames, uploads, payment providers, or
+                  brittle locators may stop execution before the checks can be
+                  evaluated.
+                </p>
+              </DisclosurePanel>
+
+              {reviewBlockers.length > 0 ? (
+                <BlockingReasons
+                  heading="Run is blocked"
+                  reasons={reviewBlockers}
+                  visible
+                />
+              ) : null}
+
+              {busy === 'run' ? (
+                <StateMessage variant="loading">
+                  Creating one immutable experiment version and starting the
+                  existing runner…
+                </StateMessage>
+              ) : null}
+              {result !== null ? (
+                <StateMessage>
+                  Run accepted. The existing runner returned run{' '}
+                  <code>{result.runId}</code>.
+                </StateMessage>
+              ) : null}
+
+              <WizardActions>
+                <Button
+                  disabled={busy !== null}
+                  onClick={() => setCurrentStep(2)}
+                >
+                  Back to Safety &amp; Data
+                </Button>
+                <Button
+                  aria-describedby={
+                    reviewBlockers.length > 0
+                      ? 'guided-run-blockers'
+                      : undefined
+                  }
+                  className="guided-wizard-primary"
+                  disabled={
+                    busy !== null ||
+                    reviewBlockers.length > 0 ||
+                    result !== null
+                  }
+                  onClick={() => void saveAndRun()}
+                  variant="primary"
+                >
+                  {busy === 'run'
+                    ? 'Starting experiment…'
+                    : result !== null
+                      ? 'Run accepted'
+                      : 'Run repeated-submission experiment'}
+                </Button>
+              </WizardActions>
+            </aside>
+          </div>
 
           {result !== null ? (
             <ExternalRunResult eyebrow="Guided test result" result={result} />
@@ -1265,6 +1590,27 @@ export function GuidedTestPanel({
         </section>
       ) : null}
     </div>
+  );
+}
+
+function OutcomeTypeCard({
+  count,
+  description,
+  title,
+}: {
+  readonly count: number;
+  readonly description: string;
+  readonly title: string;
+}) {
+  return (
+    <article className={count > 0 ? 'is-configured' : undefined}>
+      <div className="guided-outcome-type-icon" aria-hidden="true">
+        {count > 0 ? '✓' : '○'}
+      </div>
+      <strong>{title}</strong>
+      <p>{description}</p>
+      <span>{count > 0 ? `${count} saved` : 'Not configured'}</span>
+    </article>
   );
 }
 
@@ -1328,16 +1674,20 @@ function WizardStageHeading({
   readonly title: string;
   readonly description: string;
 }) {
-  const id =
-    title === 'Expected Outcome'
-      ? 'guided-expected-title'
-      : title === 'Safety & Data'
-        ? 'guided-safety-title'
-        : 'guided-review-title';
+  const id = step.startsWith('Step 1')
+    ? 'guided-expected-title'
+    : step.startsWith('Step 2')
+      ? 'guided-safety-title'
+      : 'guided-review-title';
   return (
     <div className="guided-wizard-stage-heading">
       <p className="eyebrow">{step}</p>
-      <h3 id={id}>{title}</h3>
+      <h3
+        aria-label={step.startsWith('Step 1') ? 'Expected Outcome' : undefined}
+        id={id}
+      >
+        {title}
+      </h3>
       <p>{description}</p>
     </div>
   );
@@ -1614,6 +1964,12 @@ function nonEmptyValues(
   return Object.fromEntries(
     Object.entries(values).filter(([, value]) => value.trim() !== ''),
   );
+}
+
+function stageForStep(step: WizardStep): GuidedWizardStage {
+  if (step === 1) return 'outcome';
+  if (step === 2) return 'safety';
+  return 'review';
 }
 
 function boundedName(value: string): string {
