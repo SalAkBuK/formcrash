@@ -95,6 +95,12 @@ export function RunDetailView({
         </div>
       </header>
 
+      <nav aria-label="Run result sections" className="run-result-tabs">
+        <span aria-current="page">Summary</span>
+        <span>Persisted evidence</span>
+        <span>{events.length} events</span>
+      </nav>
+
       {!terminal ? (
         <section
           className="panel live-progress"
@@ -167,30 +173,42 @@ export function RunDetailView({
         </div>
       ) : null}
 
-      {terminal && status === 'runner_error' ? (
-        <RunnerProblem run={detail} />
-      ) : terminal ? (
-        <AssertionAndEvidence run={detail} />
-      ) : null}
-      {terminal ? <ScreenshotGallery run={detail} /> : null}
-
-      {detail.evidenceWarnings.length > 0 ? (
-        <section
-          className="panel warnings-panel"
-          aria-labelledby="warnings-title"
-        >
-          <h2 id="warnings-title">Evidence warnings</h2>
-          <ul>
-            {detail.evidenceWarnings.map((warning) => (
-              <li key={`${warning.code}-${warning.label}`}>
-                <strong>{sentenceCase(warning.label)}</strong>:{' '}
-                {warning.message}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-      <EventTimeline events={events} collapsible={terminal} />
+      {terminal ? (
+        <div className="run-result-layout">
+          <div className="run-result-main">
+            {status === 'runner_error' ? (
+              <RunnerProblem run={detail} />
+            ) : (
+              <AssertionAndEvidence run={detail} />
+            )}
+            <EventTimeline events={events} collapsible />
+          </div>
+          <aside
+            className="run-result-rail"
+            aria-label="Run evidence and diagnostics"
+          >
+            <ScreenshotGallery run={detail} />
+            {detail.evidenceWarnings.length > 0 ? (
+              <section
+                className="panel warnings-panel"
+                aria-labelledby="warnings-title"
+              >
+                <h2 id="warnings-title">Evidence warnings</h2>
+                <ul>
+                  {detail.evidenceWarnings.map((warning) => (
+                    <li key={`${warning.code}-${warning.label}`}>
+                      <strong>{sentenceCase(warning.label)}</strong>:{' '}
+                      {warning.message}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null}
+          </aside>
+        </div>
+      ) : (
+        <EventTimeline events={events} />
+      )}
     </main>
   );
 }
@@ -222,7 +240,7 @@ function resultTitle(status: RunStatus): string {
     case 'passed':
       return 'Duplicate protection held';
     case 'failed':
-      return 'Duplicate order protection failed';
+      return 'Vulnerability reproduced';
     case 'incomplete':
       return 'Run incomplete';
     case 'runner_error':

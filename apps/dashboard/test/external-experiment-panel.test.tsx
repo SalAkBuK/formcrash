@@ -21,6 +21,15 @@ const mocks = vi.hoisted(() => ({
   getExternalArtifactUrl: vi.fn(),
   getExternalRun: vi.fn(),
   getProjectSettings: vi.fn(),
+  getActiveOutcomeCapture: vi.fn(),
+  getCriticalAction: vi.fn(),
+  getOutcomeCapture: vi.fn(),
+  listOutcomeChecks: vi.fn(),
+  approveCriticalAction: vi.fn(),
+  approveOutcomeCheck: vi.fn(),
+  closeOutcomeCapture: vi.fn(),
+  deleteOutcomeCheck: vi.fn(),
+  startOutcomeCapture: vi.fn(),
   listExternalExperiments: vi.fn(),
   listExternalRuns: vi.fn(),
   runExternalExperiment: vi.fn(),
@@ -30,6 +39,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../src/features/projects/api/external-experiments', () => mocks);
+vi.mock('../src/features/projects/api/projects', () => mocks);
 
 const project = {
   id: 'project-1',
@@ -165,12 +175,48 @@ const awaitingAuthenticationCapture = {
   completedAt: null,
 };
 
+const criticalAction = {
+  id: 'critical-action-1',
+  journeyId: journey.id,
+  stepId: 'submit-profile',
+  label: 'Submit profile',
+  createdAt: '2026-07-16T00:00:00.000Z',
+  updatedAt: '2026-07-16T00:00:00.000Z',
+};
+
+const outcomeCheck = {
+  id: 'outcome-check-1',
+  journeyId: journey.id,
+  criticalActionId: criticalAction.id,
+  type: 'final_pathname_matches' as const,
+  description: 'The profile page should appear.',
+  expectedPathname: '/profiles/created',
+  createdAt: '2026-07-16T00:00:00.000Z',
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getExternalArtifactUrl.mockReturnValue(
     'http://localhost:4100/api/external-runs/run-1/artifacts/screen-1',
   );
   mocks.getProjectSettings.mockResolvedValue(settings);
+  mocks.getCriticalAction.mockResolvedValue(criticalAction);
+  mocks.listOutcomeChecks.mockResolvedValue([outcomeCheck]);
+  mocks.getActiveOutcomeCapture.mockResolvedValue(null);
+  mocks.getOutcomeCapture.mockResolvedValue({
+    id: 'outcome-capture-1',
+    journeyId: journey.id,
+    criticalActionId: criticalAction.id,
+    generatedInputs: [],
+    status: 'awaiting_selection',
+    selectedTarget: null,
+    selectionWarnings: [],
+    finalPathname: '/profiles/created',
+    errorMessage: null,
+    startedAt: '2026-07-16T00:00:00.000Z',
+    expiresAt: '2026-07-16T00:10:00.000Z',
+    completedAt: null,
+  });
   mocks.startAuthenticationCapture.mockResolvedValue(
     awaitingAuthenticationCapture,
   );
@@ -372,6 +418,181 @@ describe('external experiment dashboard workflow', () => {
     ).toBeVisible();
   });
 
+  it('blocks the first step while Outcome Checks are empty and exposes the existing capture entry', async () => {
+    const user = userEvent.setup();
+    mocks.listOutcomeChecks.mockResolvedValue([]);
+
+    render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
+
+    expect(
+      screen.getByRole('button', { name: 'Continue to Safety & Data' }),
+    ).toBeDisabled();
+    expect(
+      await screen.findByText('Save at least one valid Outcome Check.'),
+    ).toBeVisible();
+    await user.click(
+      await screen.findByRole('tab', { name: /Outcome Checks/u }),
+    );
+    expect(
+      await screen.findByText('No Outcome Checks saved yet.'),
+    ).toBeVisible();
+    await user.click(screen.getByRole('tab', { name: /Critical Action/u }));
+    expect(
+      screen.getByRole('button', { name: 'Start outcome baseline' }),
+    ).toBeVisible();
+  });
+
+  it('renders loading and error states without inventing Outcome Check metadata', async () => {
+    let rejectChecks!: (reason: unknown) => void;
+    mocks.listOutcomeChecks.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectChecks = reject;
+        }),
+    );
+
+    render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
+
+    expect(
+      (await screen.findAllByText(/Loading the saved Critical Action/u))[0],
+    ).toBeVisible();
+    rejectChecks(new Error('Outcome service unavailable'));
+    expect(
+      await screen.findByText(
+        'Saved Outcome Check configuration could not be loaded.',
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByText(/confidence|provenance/u),
+    ).not.toBeInTheDocument();
+  });
+
+  it('contains baseline runner failures and removes terminal escape noise', async () => {
+    const user = userEvent.setup();
+    mocks.listOutcomeChecks.mockResolvedValue([]);
+    mocks.getActiveOutcomeCapture.mockResolvedValue({
+      id: 'failed-outcome-capture',
+      journeyId: journey.id,
+      criticalActionId: criticalAction.id,
+      generatedInputs: [],
+      status: 'runner_error',
+      selectedTarget: null,
+      selectionWarnings: [],
+      finalPathname: null,
+      errorMessage:
+        'page.goto: Target page, context or browser has been closed\nCall log: \u001b[2m - navigating to "https://example.test"\u001b[22m',
+      startedAt: '2026-07-16T00:00:00.000Z',
+      expiresAt: '2026-07-16T00:10:00.000Z',
+      completedAt: '2026-07-16T00:01:00.000Z',
+    });
+
+    render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
+    await user.click(
+      await screen.findByRole('tab', { name: /Critical Action/u }),
+    );
+
+    expect(
+      await screen.findByText('Baseline replay could not complete'),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/controlled browser closed before the saved journey/u),
+    ).toBeVisible();
+    expect(document.body.textContent).not.toContain(String.fromCharCode(27));
+    await user.click(screen.getByText('Technical runner detail'));
+    expect(
+      screen.getByText(
+        'page.goto: Target page, context or browser has been closed',
+      ),
+    ).toBeVisible();
+  });
+
+  it('keeps authentication unknown, redacts runtime values, and requires production confirmation', async () => {
+    const user = userEvent.setup();
+    const productionProject = {
+      ...project,
+      environment: 'production' as const,
+    };
+
+    render(
+      <ExternalExperimentPanel
+        project={productionProject}
+        journeys={[journey]}
+      />,
+    );
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Continue to Safety & Data',
+      }),
+    );
+
+    expect(
+      screen.getByText(
+        'No saved authentication. FormCrash may discover during replay that authentication is required.',
+      ),
+    ).toBeVisible();
+    const runtimeInput = screen.getByLabelText('Runtime SECRET_TOKEN');
+    expect(runtimeInput).toHaveAttribute('type', 'password');
+    await user.type(runtimeInput, 'production-secret');
+    expect(screen.queryByText('production-secret')).not.toBeInTheDocument();
+    const continueButton = screen.getByRole('button', {
+      name: 'Continue to Review',
+    });
+    expect(continueButton).toBeDisabled();
+    await user.click(
+      screen.getByRole('checkbox', {
+        name: /I confirm this test may change production data/u,
+      }),
+    );
+    expect(continueButton).toBeEnabled();
+  });
+
+  it('prevents duplicate run submissions while experiment creation is pending', async () => {
+    const user = userEvent.setup();
+    const journeyWithoutRuntime = {
+      ...journey,
+      steps: journey.steps.filter((step) => step.id !== 'fill-token'),
+    };
+    let resolveCreation!: (created: typeof version) => void;
+    mocks.createExternalExperiment.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCreation = resolve;
+        }),
+    );
+
+    render(
+      <ExternalExperimentPanel
+        project={project}
+        journeys={[journeyWithoutRuntime]}
+      />,
+    );
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Continue to Safety & Data',
+      }),
+    );
+    const continueButton = screen.getByRole('button', {
+      name: 'Continue to Review',
+    });
+    await waitFor(() => expect(continueButton).toBeEnabled());
+    await user.click(continueButton);
+    const runButton = await screen.findByRole('button', {
+      name: 'Run repeated-submission experiment',
+    });
+    await user.click(runButton);
+    await user.click(runButton);
+
+    expect(mocks.createExternalExperiment).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByRole('button', { name: 'Starting experiment…' }),
+    ).toBeDisabled();
+    resolveCreation(version);
+    expect(
+      await screen.findByText(/existing runner returned run/u),
+    ).toBeVisible();
+    expect(mocks.runExternalExperiment).toHaveBeenCalledTimes(1);
+  });
+
   it('offers authentication recapture directly in Guided mode after expiry', async () => {
     const user = userEvent.setup();
     const refreshedSettings = {
@@ -395,18 +616,25 @@ describe('external experiment dashboard workflow', () => {
       .mockResolvedValueOnce(refreshedSettings);
 
     render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Continue to Safety & Data',
+      }),
+    );
     await user.type(
-      await screen.findByLabelText('Guided SECRET_TOKEN'),
+      await screen.findByLabelText('Runtime SECRET_TOKEN'),
       'runtime-only',
     );
-    await user.click(screen.getByRole('button', { name: 'Analyze action' }));
+    await user.click(
+      screen.getByRole('button', { name: 'Continue to Review' }),
+    );
 
     expect(await screen.findByText('Authentication interrupted')).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Sign in again' }));
     expect(mocks.startAuthenticationCapture).toHaveBeenCalledWith(project.id);
     await user.click(
       await screen.findByRole('button', {
-        name: 'I am signed in â€” save session',
+        name: /I am signed in/u,
       }),
     );
 
@@ -415,7 +643,9 @@ describe('external experiment dashboard workflow', () => {
       awaitingAuthenticationCapture.id,
     );
     expect(await screen.findByText(/Authentication was saved/)).toBeVisible();
-    expect(screen.getByText('Auth ready')).toBeVisible();
+    expect(
+      screen.getByText(/Return to Safety & Data and prepare the review again/u),
+    ).toBeVisible();
     expect(
       screen.queryByRole('button', { name: 'Open Advanced mode' }),
     ).toBeVisible();
@@ -459,8 +689,13 @@ describe('external experiment dashboard workflow', () => {
     render(
       <ExternalExperimentPanel project={project} journeys={[parkingJourney]} />,
     );
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Continue to Safety & Data',
+      }),
+    );
     await user.type(
-      await screen.findByLabelText('Guided SECRET_TOKEN'),
+      await screen.findByLabelText('Runtime SECRET_TOKEN'),
       'runtime-only',
     );
     await user.selectOptions(
@@ -470,7 +705,9 @@ describe('external experiment dashboard workflow', () => {
     const customValue = screen.getByLabelText('Fill Parking Slot custom value');
     await user.clear(customValue);
     await user.type(customValue, 'P-204');
-    await user.click(screen.getByRole('button', { name: 'Analyze action' }));
+    await user.click(
+      screen.getByRole('button', { name: 'Continue to Review' }),
+    );
 
     await waitFor(() => expect(mocks.discoverRequests).toHaveBeenCalled());
     expect(mocks.discoverRequests).toHaveBeenCalledWith(
@@ -493,29 +730,32 @@ describe('external experiment dashboard workflow', () => {
 
     expect(
       await screen.findByRole('heading', {
-        name: 'Test a recorded action without configuring the technical details',
+        name: 'Define the outcome, check safety, then run',
       }),
     ).toBeVisible();
-    expect(screen.getByLabelText('Guided target action')).toHaveValue(
-      'submit-profile',
+    await user.click(
+      await screen.findByRole('tab', { name: /Outcome Checks/u }),
     );
     expect(
-      screen.getByText('1 required runtime value(s) are missing'),
+      await screen.findByText('The profile page should appear.'),
     ).toBeVisible();
-    expect(
-      screen.getByRole('button', { name: 'Analyze action' }),
-    ).toBeDisabled();
+    expect(screen.queryByText(/confidence/u)).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole('button', { name: 'Continue to Safety & Data' }),
+    );
     expect(screen.getByText('Accidental double-click')).toBeVisible();
     expect(screen.getByText('Impatient triple-click')).toBeVisible();
     expect(screen.getByText('Server duplicate handling')).toBeVisible();
     await user.click(screen.getByText('Server duplicate handling'));
 
     await user.type(
-      screen.getByLabelText('Guided SECRET_TOKEN'),
+      screen.getByLabelText('Runtime SECRET_TOKEN'),
       'runtime-only',
     );
-    expect(screen.getByText('Required runtime values are ready')).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Analyze action' }));
+    await user.click(screen.getByText('Fast'));
+    await user.click(
+      screen.getByRole('button', { name: 'Continue to Review' }),
+    );
 
     await waitFor(() =>
       expect(mocks.discoverRequests).toHaveBeenCalledWith(
@@ -537,35 +777,18 @@ describe('external experiment dashboard workflow', () => {
       ),
     );
     expect(
-      await screen.findByText('Likely create request — Recommended'),
-    ).toBeVisible();
-    expect(screen.getAllByText('POST /api/profile').length).toBeGreaterThan(0);
-    expect(
-      screen.getByText('No more than two matching requests are sent.'),
+      await screen.findByRole('heading', { name: 'Review & Run' }),
     ).toBeVisible();
     expect(
-      screen.getByText('No matching response returns HTTP 5xx.'),
+      screen.getByText(/trigger Submit profile 2 times, 300 ms apart/u),
     ).toBeVisible();
     expect(
-      screen.getByText('No more than one matching request succeeds.'),
+      screen.getByText('The browser should finish at /profiles/created.'),
     ).toBeVisible();
-    expect(
-      screen.getByText('Every matching response uses 201 or 409.'),
-    ).toBeVisible();
-    const noServerErrors = screen.getByRole('checkbox', {
-      name: 'Enable No matching response returns HTTP 5xx.',
-    });
-    expect(noServerErrors).toBeChecked();
-    await user.click(noServerErrors);
-    const requestMaximum = screen.getByLabelText(
-      'Edit No more than two matching requests are sent.',
-    );
-    await user.clear(requestMaximum);
-    await user.type(requestMaximum, '1');
-
+    expect(screen.queryByText('runtime-only')).not.toBeInTheDocument();
     await user.click(
       screen.getByRole('button', {
-        name: 'Save and run recommended test',
+        name: 'Run repeated-submission experiment',
       }),
     );
 
@@ -604,7 +827,7 @@ describe('external experiment dashboard workflow', () => {
       expect.arrayContaining([
         expect.objectContaining({
           type: 'network_request_max',
-          maximum: 1,
+          maximum: 2,
         }),
         expect.objectContaining({
           type: 'network_success_max',
@@ -618,15 +841,7 @@ describe('external experiment dashboard workflow', () => {
     );
     expect(guidedCreated.assertionSelectionProvenance).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          origin: 'generated_modified',
-          action: 'modified',
-        }),
-        expect.objectContaining({
-          assertionId: null,
-          origin: 'generated',
-          action: 'disabled',
-        }),
+        expect.objectContaining({ origin: 'generated' }),
       ]),
     );
     expect(mocks.runExternalExperiment).toHaveBeenCalledWith(
@@ -636,19 +851,11 @@ describe('external experiment dashboard workflow', () => {
       },
       true,
       'adaptive',
-      'recorded',
+      'fast',
     );
     expect(
-      await screen.findByText(
-        'The action handled the repeated trigger safely.',
-      ),
+      await screen.findByText(/existing runner returned run/u),
     ).toBeVisible();
-    expect(
-      screen.getByRole('heading', {
-        name: 'This run has technical evidence, but no approved Outcome Check was configured.',
-      }),
-    ).toBeVisible();
-    expect(screen.getByText('Technical evidence')).toBeVisible();
   });
 
   it('configures discovery, an immutable version, runtime values and a prominent result', async () => {
@@ -836,66 +1043,25 @@ describe('external experiment dashboard workflow', () => {
     const user = userEvent.setup();
     render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
 
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Continue to Safety & Data',
+      }),
+    );
     await user.type(
-      await screen.findByLabelText('Guided SECRET_TOKEN'),
+      await screen.findByLabelText('Runtime SECRET_TOKEN'),
       'runtime-only',
     );
-    await user.click(screen.getByRole('button', { name: 'Analyze action' }));
-
-    expect(await screen.findByText('Ambiguous requests')).toBeVisible();
-    const profile = screen.getByRole('radio', {
-      name: /POST \/api\/profile/,
-    });
-    const invitation = screen.getByRole('radio', {
-      name: /POST \/api\/invitations/,
-    });
-    expect(profile).not.toBeChecked();
-    expect(invitation).not.toBeChecked();
+    await user.click(
+      screen.getByRole('button', { name: 'Continue to Review' }),
+    );
     expect(
-      screen.queryByRole('button', {
-        name: /Save and run/,
-      }),
-    ).not.toBeInTheDocument();
-
-    await user.click(invitation);
-    await user.click(
-      screen.getByRole('checkbox', {
-        name: 'Enable No more than two matching requests are sent.',
-      }),
-    );
-    await user.click(
-      screen.getByRole('button', { name: 'Save and run selected test' }),
-    );
-
-    await waitFor(() =>
-      expect(mocks.createExternalExperiment).toHaveBeenCalledWith(
-        journey.id,
-        expect.objectContaining({
-          networkMatcher: {
-            method: 'POST',
-            pathname: '/api/invitations',
-            host: 'localhost:4300',
-          },
-        }),
-      ),
-    );
-    expect(lastCreatedExperiment()).toMatchObject({
-      requestSelectionProvenance: {
-        selectionMode: 'manual_override',
-        discoveryOutcome: 'ambiguous',
-        selectedCandidateId: 'request-bbbbbbbbbbbbbbbbbbbbbbbb',
-        recommendedMatcher: null,
-        userOverrodeRecommendation: false,
-      },
-    });
-    expect(lastCreatedExperiment().assertionSelectionProvenance).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          origin: 'generated',
-          action: 'enabled',
-        }),
-      ]),
-    );
+      await screen.findByText(/could not identify one request safely enough/u),
+    ).toBeVisible();
+    expect(mocks.createExternalExperiment).not.toHaveBeenCalled();
+    expect(
+      screen.getAllByRole('button', { name: 'Open Advanced mode' }).length,
+    ).toBeGreaterThan(0);
   });
 
   it('does not fabricate a Guided request matcher when discovery has no suitable candidate', async () => {
@@ -916,20 +1082,22 @@ describe('external experiment dashboard workflow', () => {
     const user = userEvent.setup();
     render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
 
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Continue to Safety & Data',
+      }),
+    );
     await user.type(
-      await screen.findByLabelText('Guided SECRET_TOKEN'),
+      await screen.findByLabelText('Runtime SECRET_TOKEN'),
       'runtime-only',
     );
-    await user.click(screen.getByRole('button', { name: 'Analyze action' }));
-
+    await user.click(
+      screen.getByRole('button', { name: 'Continue to Review' }),
+    );
     expect(
-      await screen.findByRole('heading', {
-        name: 'No suitable request was observed',
-      }),
+      await screen.findByText(/could not identify one request safely enough/u),
     ).toBeVisible();
-    expect(
-      screen.queryByRole('button', { name: /Save and run/ }),
-    ).not.toBeInTheDocument();
+    expect(mocks.createExternalExperiment).not.toHaveBeenCalled();
     expect(
       screen.getAllByRole('button', { name: 'Open Advanced mode' }).length,
     ).toBeGreaterThan(0);

@@ -34,6 +34,10 @@ export async function listProjects(): Promise<readonly Project[]> {
   return (await requestJson('/api/projects', projectListSchema)).items;
 }
 
+export function getProject(projectId: string): Promise<Project> {
+  return requestJson(`/api/projects/${projectId}`, projectSchema);
+}
+
 export async function createProject(
   input: CreateProjectRequest,
 ): Promise<Project> {
@@ -63,6 +67,10 @@ export async function listJourneys(
   return (
     await requestJson(`/api/projects/${projectId}/journeys`, journeyListSchema)
   ).items;
+}
+
+export function getJourney(journeyId: string): Promise<PersistedJourney> {
+  return requestJson(`/api/journeys/${journeyId}`, persistedJourneySchema);
 }
 
 export async function deleteJourney(journeyId: string): Promise<void> {

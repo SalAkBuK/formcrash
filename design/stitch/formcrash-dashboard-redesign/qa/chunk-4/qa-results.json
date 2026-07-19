@@ -1,0 +1,189 @@
+{
+  "generatedAt": "2026-07-18T21:13:59.805Z",
+  "playwrightVersion": "1.61.1",
+  "browserVersion": "149.0.7827.55",
+  "services": {
+    "dashboard": {
+      "connected": true,
+      "status": 200,
+      "startedByHarness": false
+    },
+    "server": {
+      "connected": true,
+      "status": 200,
+      "startedByHarness": false
+    },
+    "sampleCheckout": {
+      "connected": true,
+      "status": 200,
+      "startedByHarness": false
+    },
+    "fixture": {
+      "connected": true,
+      "status": 200,
+      "startedByHarness": true
+    }
+  },
+  "realData": {
+    "projectId": "cdefe107-84cd-4bb2-a7ba-6d93f238dc32",
+    "projectName": "Outcome Walkthrough Fixture",
+    "environment": "local",
+    "targetUrl": "http://127.0.0.1:4300/",
+    "journeyId": "8ba7755c-61ce-41fb-9402-770ebf13bae0",
+    "journeyName": "Create profile",
+    "version": 1,
+    "replayFormat": "semantic-v1",
+    "criticalActionId": "ce960058-846c-4f34-ab25-017adab6825d",
+    "criticalActionLabel": "Save profile",
+    "outcomeCheckIds": [
+      "7edc338f-4dba-45e7-b938-f7e45e6e9eed",
+      "7ebf1989-ef7a-4679-979b-05a80381e9d3",
+      "a5850bf5-b573-4ec6-b7db-1bcfaeeade87"
+    ],
+    "outcomeCheckTypes": [
+      "matching_item_appears_exactly_once",
+      "visible_element_exists",
+      "final_pathname_matches"
+    ],
+    "authenticationAvailable": false
+  },
+  "screenshots": [
+    "step-1-expected-outcome-1440.png",
+    "step-1-expected-outcome-1366.png",
+    "step-1-expected-outcome-1024.png",
+    "step-1-expected-outcome-390.png",
+    "step-2-safety-data-1440.png",
+    "step-2-safety-data-1366.png",
+    "step-2-safety-data-1024.png",
+    "step-2-safety-data-390.png",
+    "step-3-review-run-1440.png",
+    "step-3-review-run-1366.png",
+    "step-3-review-run-1024.png",
+    "step-3-review-run-390.png"
+  ],
+  "checks": {
+    "accessibility": {
+      "mainCount": 1,
+      "nestedMainCount": 0,
+      "currentStepCount": 1,
+      "runActionFocus": {
+        "keyboardReachable": true,
+        "outlineColor": "rgb(244, 201, 93)",
+        "outlineStyle": "solid",
+        "outlineWidth": "3px",
+        "boxShadow": "rgba(115, 183, 255, 0.28) 0px 0px 0px 3px",
+        "visible": true
+      }
+    },
+    "functional": {
+      "expectedOutcome": {
+        "project": "Outcome Walkthrough Fixture",
+        "journey": "Create profile",
+        "version": 1,
+        "criticalAction": "Save profile",
+        "outcomeCheckCount": 3,
+        "captureEntryAvailable": true,
+        "unsupportedMetadataAbsent": true
+      },
+      "safety": {
+        "targetOrigin": "http://127.0.0.1:4300",
+        "environment": "local",
+        "authenticationAvailable": false,
+        "authenticationRequirementPresentedAsUnknown": true,
+        "runtimeLiteralRedacted": true,
+        "pacingAvailable": true,
+        "hooksSummarized": true,
+        "captchaBoundaryAvailable": true
+      },
+      "expectedSafetyBackForward": true,
+      "review": {
+        "everyOutcomeCheckRendered": true,
+        "immutableVersionRendered": true,
+        "technicalAssertionsSeparated": true,
+        "runActionAvailable": true
+      },
+      "reviewBackForward": true,
+      "guidedAndAdvancedAccessible": true,
+      "unsavedWizardStateResetsOnModeSwitch": true
+    },
+    "responsive": {
+      "step1": {
+        "390": {
+          "overflows": false,
+          "scrollWidth": 390,
+          "clientWidth": 390
+        },
+        "1024": {
+          "overflows": false,
+          "scrollWidth": 1024,
+          "clientWidth": 1024
+        },
+        "1366": {
+          "overflows": false,
+          "scrollWidth": 1366,
+          "clientWidth": 1366
+        },
+        "1440": {
+          "overflows": false,
+          "scrollWidth": 1440,
+          "clientWidth": 1440
+        }
+      },
+      "step2": {
+        "390": {
+          "overflows": false,
+          "scrollWidth": 390,
+          "clientWidth": 390
+        },
+        "1024": {
+          "overflows": false,
+          "scrollWidth": 1024,
+          "clientWidth": 1024
+        },
+        "1366": {
+          "overflows": false,
+          "scrollWidth": 1366,
+          "clientWidth": 1366
+        },
+        "1440": {
+          "overflows": false,
+          "scrollWidth": 1440,
+          "clientWidth": 1440
+        }
+      },
+      "step3": {
+        "390": {
+          "overflows": false,
+          "scrollWidth": 390,
+          "clientWidth": 390
+        },
+        "1024": {
+          "overflows": false,
+          "scrollWidth": 1024,
+          "clientWidth": 1024
+        },
+        "1366": {
+          "overflows": false,
+          "scrollWidth": 1366,
+          "clientWidth": 1366
+        },
+        "1440": {
+          "overflows": false,
+          "scrollWidth": 1440,
+          "clientWidth": 1440
+        }
+      }
+    },
+    "visual": {}
+  },
+  "run": {
+    "attempted": true,
+    "target": "http://127.0.0.1:4300",
+    "safeLocalFixture": true,
+    "createRequests": 1,
+    "runRequests": 1,
+    "accepted": true
+  },
+  "consoleErrors": [],
+  "pageErrors": []
+}

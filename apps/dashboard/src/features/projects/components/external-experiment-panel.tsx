@@ -28,6 +28,7 @@ import type {
   ReplayPacing,
   RuntimeVariableDeclarationInput,
 } from '@formcrash/contracts';
+import Link from 'next/link';
 
 import {
   clearAuthentication,
@@ -59,13 +60,23 @@ import {
 } from '../models/assertion-recommendations';
 import { ExternalRunResult } from './external-run-result';
 import { ExternalRunComparison } from './external-run-comparison';
-import { GuidedTestPanel } from './guided-test-panel';
+import {
+  GuidedTestPanel,
+  type GuidedTestDraftV1,
+  type GuidedWizardStage,
+} from './guided-test-panel';
 
 const noCandidates: readonly RankedRequestCandidate[] = [];
 
 interface Props {
   readonly project: Project;
   readonly journeys: readonly PersistedJourney[];
+  readonly selectedJourneyId?: string | null;
+  readonly onSelectedJourneyChange?: (journeyId: string) => void;
+  readonly guidedDraft?: GuidedTestDraftV1 | null;
+  readonly onGuidedDraftChange?: (draft: GuidedTestDraftV1) => void;
+  readonly onGuidedStageChange?: (stage: GuidedWizardStage) => void;
+  readonly onGuidedCompleted?: (result: ExternalRunDetail) => void;
 }
 
 const emptySettings: ProjectExecutionSettingsInput = {
@@ -83,7 +94,16 @@ interface AssertionDraft {
   readonly recommendation: AssertionRecommendation | null;
 }
 
-export function ExternalExperimentPanel({ project, journeys }: Props) {
+export function ExternalExperimentPanel({
+  project,
+  journeys,
+  selectedJourneyId,
+  onSelectedJourneyChange,
+  guidedDraft = null,
+  onGuidedDraftChange,
+  onGuidedStageChange,
+  onGuidedCompleted,
+}: Props) {
   const [workspaceMode, setWorkspaceMode] = useState<'guided' | 'advanced'>(
     'guided',
   );
@@ -201,8 +221,24 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
   useEffect(() => {
     const selected = journeys.find((item) => item.id === journeyId);
     if (selected !== undefined) return;
-    setJourneyId(journeys[0]?.id ?? '');
-  }, [journeyId, journeys]);
+    setJourneyId(
+      journeys.find((item) => item.id === selectedJourneyId)?.id ??
+        journeys[0]?.id ??
+        '',
+    );
+  }, [journeyId, journeys, selectedJourneyId]);
+
+  useEffect(() => {
+    if (
+      selectedJourneyId === null ||
+      selectedJourneyId === undefined ||
+      selectedJourneyId === journeyId ||
+      !journeys.some((item) => item.id === selectedJourneyId)
+    ) {
+      return;
+    }
+    setJourneyId(selectedJourneyId);
+  }, [journeyId, journeys, selectedJourneyId]);
 
   useEffect(() => {
     if (journey === null) {
@@ -489,6 +525,7 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
 
   function handleGuidedCompleted(completed: ExternalRunDetail): void {
     setResult(completed);
+    onGuidedCompleted?.(completed);
     void listExternalRuns(project.id)
       .then((history) => setRunHistory(history.items))
       .catch((reason: unknown) => setError(messageOf(reason)));
@@ -512,9 +549,9 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
           <p className="eyebrow">Testing workspace</p>
           <h2>How do you want to test this project?</h2>
           <p>
-            Guided Test finds the request and creates sensible checks for you.
-            Advanced mode exposes every authentication, runtime, matcher, and
-            assertion control.
+            Guided Test uses the saved Critical Action and Outcome Checks,
+            reviews safety, then prepares the existing repeated-action runner.
+            Advanced mode exposes request matchers and technical assertions.
           </p>
         </div>
         <div
@@ -558,11 +595,16 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
       {workspaceMode === 'guided' ? (
         <>
           <GuidedTestPanel
+            initialDraft={guidedDraft}
             journeys={journeys}
             onAuthenticationRecaptured={handleGuidedAuthenticationRecaptured}
             onCompleted={handleGuidedCompleted}
+            onDraftChange={onGuidedDraftChange}
             onOpenAdvanced={() => setWorkspaceMode('advanced')}
+            onSelectedJourneyChange={onSelectedJourneyChange}
+            onStageChange={onGuidedStageChange}
             project={project}
+            selectedJourneyId={selectedJourneyId}
             settings={settingsState}
           />
           {result !== null ? (
@@ -814,7 +856,10 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
                   Journey
                   <select
                     value={journeyId}
-                    onChange={(event) => setJourneyId(event.target.value)}
+                    onChange={(event) => {
+                      setJourneyId(event.target.value);
+                      onSelectedJourneyChange?.(event.target.value);
+                    }}
                   >
                     {journeys.map((item) => (
                       <option key={item.id} value={item.id}>
@@ -1274,25 +1319,12 @@ export function ExternalExperimentPanel({ project, journeys }: Props) {
                         </span>
                       </div>
                       <div className="journey-card-actions">
-                        <button
+                        <Link
                           className="button button-secondary button-compact"
-                          disabled={busy !== null}
-                          onClick={() => {
-                            setBusy(`history-${runSummary.runId}`);
-                            setError(null);
-                            void getExternalRun(runSummary.runId)
-                              .then(setResult)
-                              .catch((reason: unknown) =>
-                                setError(messageOf(reason)),
-                              )
-                              .finally(() => setBusy(null));
-                          }}
-                          type="button"
+                          href={`/external-runs/${runSummary.runId}`}
                         >
-                          {busy === `history-${runSummary.runId}`
-                            ? 'Loading…'
-                            : 'View result'}
-                        </button>
+                          View result
+                        </Link>
                         <button
                           className="copy-button"
                           disabled={busy !== null}

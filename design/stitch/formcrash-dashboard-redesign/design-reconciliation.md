@@ -56,6 +56,28 @@ The legacy stylesheet conflicted in several places: orange-red `#ff6b35` was the
 
 No UI library or icon package was added. The repository had no icon dependency; three small shell icons are inline SVG, and all feature-page icons remain unchanged until their dedicated chunks.
 
+## Chunk 4 capability reconciliation
+
+The three Stitch wizard screens are implemented as local visual stages inside
+the existing Guided mode, not as routes or new persisted entities. Expected
+Outcome embeds the existing Critical Action and Outcome Check capture/list/delete
+workflow; every saved check remains authoritative and is evaluated. Safety &
+Data uses only current project settings and journey data, masks runtime values,
+reports authentication as saved/available or absent with the requirement unknown
+until replay, and retains the real production confirmation. Review & Run maps
+the local recipe, pacing, hooks, templates, and safety choices into the unchanged
+experiment creation and execution APIs and keeps the existing result component.
+
+Stitch-only Outcome Check recommendations, confidence, provenance,
+generated/manual badges, enable/disable, editing, per-experiment subsets,
+authentication-requirement persistence, secret/test-identity previews, and a new
+live-run architecture are omitted. Existing request discovery and technical
+assertion preparation remain an internal Guided prerequisite; they are disclosed
+as technical runner configuration, never represented as Outcome Checks, and the
+full matcher/assertion controls remain in Advanced mode. Unsaved stage, pacing,
+recipe, runtime, disclosure, and validation state is explicitly allowed to reset
+on refresh or a Guided remount; persisted backend entities remain authoritative.
+
 ## Deliberately deferred conflicts
 
 The existing global stylesheet still contains page-specific hardcoded colors and internal layout rules. Removing them wholesale in Chunk 1 would redesign the feature pages and create unnecessary regression risk. The semantic aliases and shared overrides make those screens coherent now; dedicated chunks own their deeper cleanup. Stitch's fake Settings/Test Data pages, account controls, notifications, search, analytics, security-scanner vocabulary, scheduled runs, database observations, AI recommendations, and hardcoded sample data are rejected because no corresponding product capability exists.

@@ -26,7 +26,7 @@ describe('RunDetailView', () => {
 
     expect(
       screen.getByRole('heading', {
-        name: 'Duplicate order protection failed',
+        name: 'Vulnerability reproduced',
       }),
     ).toBeVisible();
     expect(

@@ -328,7 +328,7 @@ describe('Journey Detail', () => {
       ),
     ).toBeVisible();
     expect(
-      screen.getByRole('link', { name: 'Record new version' }),
+      screen.getByRole('button', { name: 'Record new version' }),
     ).toBeVisible();
   });
 

@@ -29,27 +29,43 @@ export function RunHistoryList({
   onRefresh,
 }: RunHistoryListProps) {
   return (
-    <section
-      className="panel history-panel run-history-panel"
-      aria-labelledby="history-title"
-    >
+    <section className="run-history-panel" aria-labelledby="history-title">
       <div className="run-history-header">
         <div>
-          <p className="eyebrow">Durable evidence</p>
           <h2 id="history-title">Runs</h2>
-          <p>
-            Persisted outcomes from the bundled duplicate-submission experiment.
-          </p>
+          <nav aria-label="Run views" className="run-history-tabs">
+            <span aria-current="page">All runs</span>
+            <span>Persisted evidence</span>
+          </nav>
         </div>
-        <Button
-          compact
-          onClick={onRefresh}
-          disabled={loading}
-          aria-busy={loading}
-        >
-          {loading ? 'Refreshing…' : 'Refresh'}
-        </Button>
+        <div className="run-history-actions">
+          <Button
+            compact
+            onClick={onRefresh}
+            disabled={loading}
+            aria-busy={loading}
+          >
+            {loading ? 'Refreshing…' : 'Refresh'}
+          </Button>
+          <Link className="button button-primary button-compact" href="/">
+            Trigger run
+          </Link>
+        </div>
       </div>
+
+      {runs.length > 0 ? (
+        <div
+          className="run-history-filters"
+          aria-label="Available run statuses"
+        >
+          <span>STATUS</span>
+          {availableStatuses(runs).map(([status, count]) => (
+            <span className={`run-filter run-filter-${status}`} key={status}>
+              {sentenceCase(status)} <strong>{count}</strong>
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       {loading && runs.length === 0 ? (
         <StateMessage variant="loading">
@@ -79,7 +95,7 @@ export function RunHistoryList({
             <thead>
               <tr>
                 <th scope="col">Result</th>
-                <th scope="col">Run</th>
+                <th scope="col">Test</th>
                 <th scope="col">Started</th>
                 <th scope="col">Duration</th>
                 <th scope="col">Observed outcome</th>
@@ -97,7 +113,7 @@ export function RunHistoryList({
                       {sentenceCase(run.status)}
                     </StatusBadge>
                   </td>
-                  <td data-label="Run">
+                  <td data-label="Test">
                     <Link
                       className="run-history-primary-link"
                       href={`/runs/${run.runId}`}
@@ -156,4 +172,14 @@ function runStatusTone(status: PersistedRunSummary['status']): StatusTone {
   if (status === 'failed' || status === 'runner_error') return 'failure';
   if (status === 'incomplete') return 'warning';
   return 'neutral';
+}
+
+function availableStatuses(
+  runs: readonly PersistedRunSummary[],
+): readonly [PersistedRunSummary['status'], number][] {
+  const counts = new Map<PersistedRunSummary['status'], number>();
+  for (const run of runs) {
+    counts.set(run.status, (counts.get(run.status) ?? 0) + 1);
+  }
+  return [...counts.entries()];
 }
