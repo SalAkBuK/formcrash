@@ -38,6 +38,7 @@ describe('SQLite migrations and seeded definitions', () => {
       '0009_outcome_check_execution.sql',
       '0010_hybrid_journey_traces.sql',
       '0011_project_auth_access.sql',
+      '0012_user_confirmed_auth_access.sql',
     ]);
     expect(second).toEqual(first);
     expect(database.connection.pragma('foreign_keys', { simple: true })).toBe(

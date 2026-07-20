@@ -5,6 +5,12 @@
 FormCrash Lab is a pnpm monorepo with three processes that can evolve and fail
 independently while sharing explicit contracts.
 
+This document owns technical boundaries, not dashboard information architecture.
+Current UI direction is defined in
+[`../product/ui-direction.md`](../product/ui-direction.md), and known behavioral
+and verification gaps are tracked in
+[`../product/active-bugs.md`](../product/active-bugs.md).
+
 1. **Dashboard (`apps/dashboard`)** — a Next.js user interface. It sends REST
    commands to the server and subscribes to Server-Sent Events (SSE). It does
    not own Playwright, SQLite, run orchestration, or evidence files.
@@ -68,6 +74,9 @@ and make the guaranteed demo path less representative.
 The dashboard homepage exposes the seeded Sample Checkout runner directly.
 `/projects` exposes the generic external-project recorder and experiment
 workflow. These paths intentionally use separate current read models:
+
+These are technical capability entry points, not separate application identities
+or a required navigation sequence.
 
 - Sample definitions are server-seeded and execute through the sample-run API,
   persisted sample runs, and sample SSE.

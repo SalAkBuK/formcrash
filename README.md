@@ -1,12 +1,18 @@
 # FormCrash Lab
 
-FormCrash Lab is a local pre-production resilience-testing workbench for
-transactional web journeys. It is designed to replay a controlled journey,
-introduce one deliberate failure, evaluate explicit recovery expectations, and
-compare behavior before and after an application fix.
+FormCrash Lab is a local, persistent operational application for managing
+pre-production resilience-testing projects, journeys, scenarios, experiments,
+and runs. Its browser runner replays controlled journeys, introduces deliberate
+failures, evaluates explicit recovery expectations, and compares behavior before
+and after an application fix.
 
-The locked product requirements are in [`docs/product/prd.md`](docs/product/prd.md).
-Priority 0 is the duplicate checkout-submission demonstration described there.
+Product scope and behavior are locked in
+[`docs/product/prd.md`](docs/product/prd.md). Dashboard identity and information
+architecture are governed by
+[`docs/product/ui-direction.md`](docs/product/ui-direction.md). Known behavioral
+defects and verification gaps remain tracked in
+[`docs/product/active-bugs.md`](docs/product/active-bugs.md). Priority 0 is the
+duplicate checkout-submission demonstration described in the PRD.
 
 ## Repository boundaries
 

@@ -24,6 +24,7 @@ const experimentApi = vi.hoisted(() => ({
   clearAuthentication: vi.fn(),
   compareExternalRuns: vi.fn(),
   confirmAuthenticationCapture: vi.fn(),
+  continueWithoutAuthentication: vi.fn(),
   getProjectSettings: vi.fn(),
   listExternalRuns: vi.fn(),
   listProjectExternalExperiments: vi.fn(),
@@ -213,7 +214,7 @@ describe('CRM project surfaces', () => {
       'href',
       `/projects/${project.id}/tests/${configuration.id}`,
     );
-    expect(screen.getByText('Saved and available')).toBeVisible();
+    expect(screen.getAllByText('Signed in').length).toBeGreaterThan(0);
     expect(screen.getAllByText(selectedJourney.name).length).toBeGreaterThan(0);
     expect(screen.getByText('Project controls')).toBeVisible();
     expect(screen.queryByLabelText('Project metrics')).not.toBeInTheDocument();
@@ -221,7 +222,7 @@ describe('CRM project surfaces', () => {
       screen.queryByText(/security score|notification/i),
     ).not.toBeInTheDocument();
     expect(screen.getAllByRole('main')).toHaveLength(1);
-    expect(screen.getByText('Connected')).toBeVisible();
+    expect(screen.getAllByText('Signed in').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: 'Test session' })).toBeVisible();
   });
 
@@ -247,7 +248,9 @@ describe('CRM project surfaces', () => {
 
     render(<ProjectOverviewScreen projectId={project.id} />);
 
-    expect(await screen.findByText('Required')).toBeVisible();
+    expect(
+      (await screen.findAllByText('Sign-in required')).length,
+    ).toBeGreaterThan(0);
     expect(
       screen.getByText(
         'Required before FormCrash can record or replay protected journeys.',
@@ -258,7 +261,7 @@ describe('CRM project surfaces', () => {
     ).toBeVisible();
   });
 
-  it('verifies a public target before marking authentication not required', async () => {
+  it('requires an explicit confirmation before continuing without sign-in', async () => {
     const user = userEvent.setup();
     const publicSettings: ProjectExecutionSettings = {
       ...settings,
@@ -267,9 +270,9 @@ describe('CRM project surfaces', () => {
         available: false,
         capturedAt: null,
         missingReason: null,
-        requirement: 'not_required',
-        verification: 'valid',
-        lastCheckedAt: '2026-07-01T01:00:00.000Z',
+        requirement: 'user_confirmed_public',
+        verification: 'not_checked',
+        lastCheckedAt: null,
       },
     };
     crmApi.loadProjectCrmData.mockResolvedValue({
@@ -286,25 +289,74 @@ describe('CRM project surfaces', () => {
         },
       },
     });
-    experimentApi.getProjectSettings.mockResolvedValue(publicSettings);
-    experimentApi.testAuthentication.mockResolvedValue({
-      projectId: project.id,
-      status: 'valid',
-      outcome: 'public',
-      currentUrl: project.targetUrl,
-      message: 'The target loaded without a sign-in redirect.',
-      checkedAt: '2026-07-01T01:00:00.000Z',
-    });
+    experimentApi.continueWithoutAuthentication.mockResolvedValue(
+      publicSettings,
+    );
 
     render(<ProjectOverviewScreen projectId={project.id} />);
+    expect(
+      (await screen.findAllByText('Not configured')).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getByText('Does the journey you want to test require sign-in?'),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Capture sign-in' }),
+    ).toBeVisible();
     await user.click(
       await screen.findByRole('button', {
-        name: 'This application does not require authentication',
+        name: 'Continue without sign-in',
       }),
     );
 
-    expect(await screen.findByText('Not required')).toBeVisible();
-    expect(experimentApi.testAuthentication).toHaveBeenCalledOnce();
+    expect(await screen.findByText('Continue without sign-in?')).toBeVisible();
+    expect(experimentApi.continueWithoutAuthentication).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(experimentApi.continueWithoutAuthentication).not.toHaveBeenCalled();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Continue without sign-in' }),
+    );
+    await user.click(
+      screen.getAllByRole('button', { name: 'Continue without sign-in' })[0]!,
+    );
+
+    expect(
+      (await screen.findAllByText('Continuing without sign-in')).length,
+    ).toBeGreaterThan(0);
+    expect(experimentApi.continueWithoutAuthentication).toHaveBeenCalledOnce();
+    expect(
+      screen.getByRole('button', { name: 'Capture sign-in' }),
+    ).toBeVisible();
+  });
+
+  it('treats a legacy inferred public state as not configured', async () => {
+    crmApi.loadProjectCrmData.mockResolvedValue({
+      ...projectData(),
+      settings: {
+        status: 'available',
+        value: {
+          ...settings,
+          authentication: {
+            configured: false,
+            available: false,
+            capturedAt: null,
+            missingReason: null,
+            requirement: 'not_required',
+            verification: 'valid',
+            lastCheckedAt: '2026-07-01T01:00:00.000Z',
+          },
+        },
+      },
+    });
+
+    render(<ProjectOverviewScreen projectId={project.id} />);
+
+    expect(
+      (await screen.findAllByText('Not configured')).length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText('Not required')).not.toBeInTheDocument();
+    expect(experimentApi.testAuthentication).not.toHaveBeenCalled();
   });
 
   it('renders Scenario columns and preserves partial rows truthfully', async () => {

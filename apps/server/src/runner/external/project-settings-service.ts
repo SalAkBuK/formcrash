@@ -62,4 +62,12 @@ export class ProjectSettingsService {
     this.authStore.clear(projectId);
     return this.get(projectId);
   }
+
+  continueWithoutAuthentication(projectId: string): ProjectExecutionSettings {
+    if (this.projects.getProject(projectId) === null) {
+      throw new Error('Project was not found.');
+    }
+    this.authStore.confirmPublicJourney(projectId);
+    return this.get(projectId);
+  }
 }

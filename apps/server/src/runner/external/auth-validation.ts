@@ -91,22 +91,28 @@ export class AuthValidationService {
           checkedAt,
         );
       }
+      const previous = this.store.status(projectId);
       const outcome = authenticationRequired
         ? storageStatePath === null
           ? 'authentication_required'
           : 'authentication_expired'
         : storageStatePath === null
-          ? 'public'
+          ? 'target_accessible'
           : 'authenticated';
       this.store.recordAccess({
         projectId,
-        requirement: outcome === 'public' ? 'not_required' : 'required',
+        requirement:
+          outcome === 'target_accessible'
+            ? normalizeRequirement(previous.requirement)
+            : 'required',
         verification:
           outcome === 'authentication_expired'
             ? 'expired'
             : outcome === 'authentication_required'
               ? 'not_checked'
-              : 'valid',
+              : outcome === 'target_accessible'
+                ? 'not_checked'
+                : 'valid',
         lastCheckedAt: checkedAt,
       });
       return result(
@@ -120,7 +126,7 @@ export class AuthValidationService {
                 ? 'The configured target redirected to a login or authentication page.'
                 : 'The saved session was redirected to a login or authentication page.'))
           : storageStatePath === null
-            ? 'The configured target loaded without an obvious login redirect.'
+            ? 'The configured URL loaded without redirecting to a recognized sign-in page. Protected areas may still require authentication.'
             : 'The saved browser state reached the configured target without an obvious login redirect.',
         checkedAt,
       );
@@ -145,6 +151,14 @@ export class AuthValidationService {
       release();
     }
   }
+}
+
+function normalizeRequirement(
+  requirement: ReturnType<AuthStateStore['status']>['requirement'],
+): 'unknown' | 'user_confirmed_public' | 'required' {
+  return requirement === 'user_confirmed_public' || requirement === 'required'
+    ? requirement
+    : 'unknown';
 }
 
 function result(

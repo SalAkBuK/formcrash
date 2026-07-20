@@ -1,5 +1,11 @@
 # FormCrash Stitch route and component mapping
 
+> **Historical provenance notice:** This implementation mapping is retained as
+> design history. It is not current UI authority;
+> `docs/product/ui-direction.md` governs current information architecture.
+> Verified historical behavior and regression evidence in this document must
+> still be preserved.
+
 Project: **FormCrash Dashboard Redesign** (`4677329075423301517`)
 
 This mapping treats Stitch as a visual reference, not as an executable product specification. The generated screens contain security-scanner vocabulary, account UI, fake data, and routes that FormCrash does not support. Those elements must not enter production.

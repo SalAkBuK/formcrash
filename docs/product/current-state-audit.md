@@ -1,5 +1,11 @@
 # FormCrash Lab current-state product and technical audit
 
+> **Historical provenance notice:** This point-in-time audit is retained as
+> repository evidence. It is not current UI authority;
+> `docs/product/ui-direction.md` governs current information architecture.
+> Verified historical behavior and regression evidence in this document must
+> still be preserved.
+
 **Audit date:** 2026-07-16  
 **Branch:** `main`  
 **Scope:** Repository and local runtime as inspected on the audit date  

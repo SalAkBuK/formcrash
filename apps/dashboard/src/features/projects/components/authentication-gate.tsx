@@ -11,6 +11,7 @@ import { StateMessage } from '../../../components/ui/state-message';
 import {
   cancelAuthenticationCapture,
   confirmAuthenticationCapture,
+  continueWithoutAuthentication,
   getProjectSettings,
   startAuthenticationCapture,
   testAuthentication,
@@ -41,7 +42,8 @@ export type PendingProtectedOperation =
       readonly journeyId?: string;
     };
 
-type RecoveryReason = 'required' | 'expired' | 'verification_failed';
+type RecoveryReason =
+  'not_configured' | 'required' | 'expired' | 'verification_failed';
 
 export interface AuthenticationGate {
   readonly busy: boolean;
@@ -58,6 +60,7 @@ export interface AuthenticationGate {
   ) => void;
   readonly startCapture: () => Promise<void>;
   readonly confirmCapture: () => Promise<void>;
+  readonly continueWithoutSignIn: () => Promise<void>;
   readonly cancel: () => Promise<void>;
   readonly complete: () => void;
 }
@@ -93,6 +96,7 @@ export function useAuthenticationGate({
   const refreshSettings = useCallback(async () => {
     const settings = await getProjectSettings(projectId);
     onSettingsChange?.(settings);
+    return settings;
   }, [onSettingsChange, projectId]);
 
   const ensure = useCallback(
@@ -103,15 +107,15 @@ export function useAuthenticationGate({
       setError(null);
       try {
         const validation = await testAuthentication(projectId);
-        await refreshSettings();
-        if (accessAllowed(validation)) {
+        const settings = await refreshSettings();
+        if (accessAllowed(validation, settings)) {
           setPending(null);
           setReason(null);
           setReadyToRetry(false);
           return true;
         }
         setPending(operation);
-        setReason(recoveryReason(validation));
+        setReason(recoveryReason(validation, settings));
         setReadyToRetry(false);
         return false;
       } catch (cause: unknown) {
@@ -149,12 +153,12 @@ export function useAuthenticationGate({
     setError(null);
     try {
       const validation = await testAuthentication(projectId);
-      await refreshSettings();
-      if (accessAllowed(validation)) {
+      const settings = await refreshSettings();
+      if (accessAllowed(validation, settings)) {
         setReason(null);
         setReadyToRetry(true);
       } else {
-        setReason(recoveryReason(validation));
+        setReason(recoveryReason(validation, settings));
         setReadyToRetry(false);
         if (validation.outcome === 'target_unavailable') {
           setError(validation.message);
@@ -203,9 +207,12 @@ export function useAuthenticationGate({
         return;
       }
       const validation = await testAuthentication(projectId);
-      await refreshSettings();
-      if (!accessAllowed(validation) || validation.outcome === 'public') {
-        setReason(recoveryReason(validation));
+      const settings = await refreshSettings();
+      if (
+        !accessAllowed(validation, settings) ||
+        validation.outcome !== 'authenticated'
+      ) {
+        setReason(recoveryReason(validation, settings));
         setError(validation.message);
         return;
       }
@@ -218,6 +225,24 @@ export function useAuthenticationGate({
       setBusy(false);
     }
   }, [capture, projectId, refreshSettings]);
+
+  const continueWithoutSignIn = useCallback(async () => {
+    if (actionActive.current || pending === null) return;
+    actionActive.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      const settings = await continueWithoutAuthentication(projectId);
+      onSettingsChange?.(settings);
+      setReadyToRetry(true);
+      setReason(null);
+    } catch (cause: unknown) {
+      setError(messageOf(cause));
+    } finally {
+      actionActive.current = false;
+      setBusy(false);
+    }
+  }, [onSettingsChange, pending, projectId]);
 
   const cancel = useCallback(async () => {
     if (actionActive.current) return;
@@ -261,6 +286,7 @@ export function useAuthenticationGate({
     requireRecovery,
     startCapture,
     confirmCapture,
+    continueWithoutSignIn,
     cancel,
     complete,
   };
@@ -273,28 +299,72 @@ export function AuthenticationRecoveryPanel({
   readonly gate: AuthenticationGate;
   readonly onRetry: (operation: PendingProtectedOperation) => void;
 }) {
+  const [confirmingPublicChoice, setConfirmingPublicChoice] = useState(false);
+  useEffect(() => {
+    if (gate.pending === null) setConfirmingPublicChoice(false);
+  }, [gate.pending]);
   if (gate.pending === null) return null;
   const awaitingConfirmation = gate.capture?.status === 'awaiting_confirmation';
+  const authenticationSaved = gate.capture?.status === 'completed';
   const heading = gate.readyToRetry
-    ? 'Authentication saved'
+    ? authenticationSaved
+      ? 'Authentication saved'
+      : 'Ready to continue'
     : gate.reason === 'expired'
       ? 'Authentication expired'
       : gate.reason === 'verification_failed'
         ? 'Authentication check failed'
-        : 'Sign-in required';
+        : gate.reason === 'not_configured'
+          ? 'Choose authentication setup'
+          : 'Sign-in required';
   const message = gate.readyToRetry
-    ? 'Your browser session is ready.'
+    ? authenticationSaved
+      ? 'Your browser session is ready.'
+      : 'You chose to continue without sign-in for this journey.'
     : gate.reason === 'expired'
       ? 'FormCrash reached the login page instead of the recorded application state. Capture a new sign-in session before continuing.'
       : gate.reason === 'verification_failed'
         ? 'FormCrash could not confirm whether the target is accessible. Check the target and try again.'
-        : 'This application redirected FormCrash to a login page. Sign in once so FormCrash can save the browser session. Your credentials will not be stored.';
+        : gate.reason === 'not_configured'
+          ? 'Capture a signed-in browser session when this journey requires an account, or continue without one for a public flow.'
+          : 'This application redirected FormCrash to a login page. Sign in once so FormCrash can save the browser session. Your credentials will not be stored.';
 
   return (
     <StateMessage variant={gate.readyToRetry ? 'neutral' : 'warning'}>
       <strong>{heading}</strong>
       <p>{message}</p>
       {gate.error === null ? null : <p>{gate.error}</p>}
+      {confirmingPublicChoice ? (
+        <StateMessage variant="warning">
+          <strong>Continue without sign-in?</strong>
+          <p>
+            Choose this when the complete journey you want to record is publicly
+            accessible. If FormCrash reaches a login page later, you can capture
+            a signed-in session then.
+          </p>
+          <div className="guided-action-row">
+            <button
+              className="button button-primary button-compact"
+              disabled={gate.busy}
+              onClick={() => {
+                setConfirmingPublicChoice(false);
+                void gate.continueWithoutSignIn();
+              }}
+              type="button"
+            >
+              Continue without sign-in
+            </button>
+            <button
+              className="button button-secondary button-compact"
+              disabled={gate.busy}
+              onClick={() => setConfirmingPublicChoice(false)}
+              type="button"
+            >
+              Cancel
+            </button>
+          </div>
+        </StateMessage>
+      ) : null}
       <div className="guided-action-row">
         {gate.readyToRetry ? (
           <button
@@ -324,23 +394,38 @@ export function AuthenticationRecoveryPanel({
             {gate.busy ? 'Checking access…' : 'Check access again'}
           </button>
         ) : (
-          <button
-            className="button button-primary button-compact"
-            disabled={gate.busy}
-            onClick={() => void gate.startCapture()}
-            type="button"
-          >
-            {gate.busy
-              ? 'Opening browser…'
-              : gate.reason === 'expired'
-                ? 'Capture sign-in again'
-                : 'Capture sign-in'}
-          </button>
+          <>
+            <button
+              className="button button-primary button-compact"
+              disabled={gate.busy}
+              onClick={() => void gate.startCapture()}
+              type="button"
+            >
+              {gate.busy
+                ? 'Opening browser…'
+                : gate.reason === 'expired'
+                  ? 'Capture sign-in again'
+                  : 'Capture sign-in'}
+            </button>
+            {gate.reason === 'not_configured' ? (
+              <button
+                className="button button-secondary button-compact"
+                disabled={gate.busy}
+                onClick={() => setConfirmingPublicChoice(true)}
+                type="button"
+              >
+                Continue without sign-in
+              </button>
+            ) : null}
+          </>
         )}
         <button
           className="button button-secondary button-compact"
           disabled={gate.busy}
-          onClick={() => void gate.cancel()}
+          onClick={() => {
+            setConfirmingPublicChoice(false);
+            void gate.cancel();
+          }}
           type="button"
         >
           Cancel
@@ -350,17 +435,36 @@ export function AuthenticationRecoveryPanel({
   );
 }
 
-function accessAllowed(result: AuthValidationResult): boolean {
-  return (
-    result.status === 'valid' &&
-    (result.outcome === undefined ||
-      result.outcome === 'public' ||
-      result.outcome === 'authenticated')
-  );
+function accessAllowed(
+  result: AuthValidationResult,
+  settings: ProjectExecutionSettings,
+): boolean {
+  if (result.status !== 'valid') return false;
+  if (result.outcome === 'authenticated') return true;
+  if (
+    result.outcome === 'target_accessible' ||
+    result.outcome === 'public' ||
+    result.outcome === undefined
+  ) {
+    return (
+      settings.authentication.requirement === 'user_confirmed_public' ||
+      settings.authentication.available
+    );
+  }
+  return false;
 }
 
-function recoveryReason(result: AuthValidationResult): RecoveryReason {
+function recoveryReason(
+  result: AuthValidationResult,
+  settings: ProjectExecutionSettings,
+): RecoveryReason {
   if (result.outcome === 'authentication_expired') return 'expired';
+  if (
+    result.status === 'valid' &&
+    (result.outcome === 'target_accessible' || result.outcome === 'public') &&
+    settings.authentication.requirement !== 'user_confirmed_public'
+  )
+    return 'not_configured';
   if (
     result.outcome === 'authentication_required' ||
     result.status === 'invalid'

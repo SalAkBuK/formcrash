@@ -582,7 +582,9 @@ export const projectAuthStatusSchema = z.object({
   available: z.boolean(),
   capturedAt: z.iso.datetime({ offset: true }).nullable(),
   missingReason: z.string().nullable(),
-  requirement: z.enum(['unknown', 'not_required', 'required']).optional(),
+  requirement: z
+    .enum(['unknown', 'not_required', 'user_confirmed_public', 'required'])
+    .optional(),
   verification: z
     .enum(['not_checked', 'valid', 'expired', 'failed', 'inconclusive'])
     .optional(),
@@ -623,6 +625,7 @@ export const authValidationResultSchema = z.object({
   outcome: z
     .enum([
       'public',
+      'target_accessible',
       'authenticated',
       'authentication_required',
       'authentication_expired',

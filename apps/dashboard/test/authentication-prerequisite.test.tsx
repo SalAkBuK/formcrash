@@ -32,6 +32,7 @@ const projectsApi = vi.hoisted(() => ({
 const authenticationApi = vi.hoisted(() => ({
   cancelAuthenticationCapture: vi.fn(),
   confirmAuthenticationCapture: vi.fn(),
+  continueWithoutAuthentication: vi.fn(),
   getProjectSettings: vi.fn(),
   startAuthenticationCapture: vi.fn(),
   testAuthentication: vi.fn(),
@@ -133,8 +134,18 @@ const authenticated = {
 };
 const publicAccess = {
   ...authenticated,
-  outcome: 'public' as const,
-  message: 'No authentication is required.',
+  outcome: 'target_accessible' as const,
+  message:
+    'The configured URL loaded without redirecting to a recognized sign-in page. Protected areas may still require authentication.',
+};
+const userConfirmedPublicSettings = {
+  ...settings,
+  authentication: {
+    ...settings.authentication,
+    requirement: 'user_confirmed_public' as const,
+    verification: 'not_checked' as const,
+    lastCheckedAt: null,
+  },
 };
 const capture = {
   id: 'capture-auth',
@@ -184,6 +195,9 @@ beforeEach(() => {
     status: 'completed',
     completedAt: '2026-07-19T00:01:00.000Z',
   });
+  authenticationApi.continueWithoutAuthentication.mockResolvedValue(
+    userConfirmedPublicSettings,
+  );
 });
 
 describe('authentication prerequisites', () => {
@@ -217,9 +231,12 @@ describe('authentication prerequisites', () => {
     );
   });
 
-  it('allows a verified public target and starts recording exactly once in Strict Mode', async () => {
+  it('allows only a user-confirmed public journey and starts recording exactly once in Strict Mode', async () => {
     const user = userEvent.setup();
     authenticationApi.testAuthentication.mockResolvedValue(publicAccess);
+    authenticationApi.getProjectSettings.mockResolvedValue(
+      userConfirmedPublicSettings,
+    );
 
     render(
       <StrictMode>
@@ -234,6 +251,54 @@ describe('authentication prerequisites', () => {
       expect(projectsApi.startRecording).toHaveBeenCalledOnce(),
     );
     expect(authenticationApi.testAuthentication).toHaveBeenCalledOnce();
+  });
+
+  it('does not infer a public decision and preserves recording for explicit retry', async () => {
+    const user = userEvent.setup();
+    authenticationApi.testAuthentication.mockResolvedValue(publicAccess);
+    authenticationApi.getProjectSettings.mockResolvedValue({
+      ...settings,
+      authentication: {
+        ...settings.authentication,
+        requirement: 'unknown',
+      },
+    });
+
+    render(<JourneyRecordingScreen projectId={project.id} />);
+    await user.click(
+      await screen.findByRole('button', { name: 'Start recording' }),
+    );
+
+    expect(
+      await screen.findByText('Choose authentication setup'),
+    ).toBeVisible();
+    expect(projectsApi.startRecording).not.toHaveBeenCalled();
+    expect(
+      authenticationApi.continueWithoutAuthentication,
+    ).not.toHaveBeenCalled();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Continue without sign-in' }),
+    );
+    expect(await screen.findByText('Continue without sign-in?')).toBeVisible();
+    expect(
+      authenticationApi.continueWithoutAuthentication,
+    ).not.toHaveBeenCalled();
+    await user.click(
+      screen.getAllByRole('button', { name: 'Continue without sign-in' })[0]!,
+    );
+
+    expect(await screen.findByText('Ready to continue')).toBeVisible();
+    expect(
+      authenticationApi.continueWithoutAuthentication,
+    ).toHaveBeenCalledOnce();
+    expect(projectsApi.startRecording).not.toHaveBeenCalled();
+    await user.click(
+      screen.getAllByRole('button', { name: 'Start recording' })[0]!,
+    );
+    await waitFor(() =>
+      expect(projectsApi.startRecording).toHaveBeenCalledOnce(),
+    );
   });
 
   it('uses valid saved authentication to proceed directly to recording', async () => {

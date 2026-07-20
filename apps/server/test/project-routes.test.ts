@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { projectListSchema, projectSchema } from '@formcrash/contracts';
+import {
+  projectExecutionSettingsSchema,
+  projectListSchema,
+  projectSchema,
+} from '@formcrash/contracts';
 
 import { createApp } from '../src/app/create-app.js';
 import { createTemporaryTestConfig } from './fixtures.js';
@@ -102,6 +106,66 @@ describe('project API', () => {
         message: 'Project was not found.',
       },
     });
+  });
+
+  it('persists continuing without sign-in only after the explicit mutation', async () => {
+    const temporary = createTemporaryTestConfig();
+    cleanups.push(temporary.cleanup);
+    let app = createApp({ config: temporary.config, logger: false });
+    apps.push(app);
+    const project = projectSchema.parse(
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/projects',
+          payload: {
+            name: 'Public journey choice',
+            targetUrl: 'http://localhost:4300',
+          },
+        })
+      ).json(),
+    );
+
+    const initial = projectExecutionSettingsSchema.parse(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/api/projects/${project.id}/settings`,
+        })
+      ).json(),
+    );
+    expect(initial.authentication.requirement).toBe('unknown');
+
+    const chosen = projectExecutionSettingsSchema.parse(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/api/projects/${project.id}/authentication/continue-without-sign-in`,
+        })
+      ).json(),
+    );
+    expect(chosen.authentication).toMatchObject({
+      configured: false,
+      available: false,
+      requirement: 'user_confirmed_public',
+      verification: 'not_checked',
+    });
+
+    await app.close();
+    apps.splice(apps.indexOf(app), 1);
+    app = createApp({ config: temporary.config, logger: false });
+    apps.push(app);
+    const afterRestart = projectExecutionSettingsSchema.parse(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/api/projects/${project.id}/settings`,
+        })
+      ).json(),
+    );
+    expect(afterRestart.authentication.requirement).toBe(
+      'user_confirmed_public',
+    );
   });
 
   it('deletes an empty external project and removes it from the list', async () => {

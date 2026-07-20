@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   approveOutcomeCheck: vi.fn(),
   closeOutcomeCapture: vi.fn(),
   confirmAuthenticationCapture: vi.fn(),
+  continueWithoutAuthentication: vi.fn(),
   createProject: vi.fn(),
   deleteOutcomeCheck: vi.fn(),
   deleteJourney: vi.fn(),
@@ -37,6 +38,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../src/features/projects/api/projects', () => mocks);
 vi.mock('../src/features/projects/api/external-experiments', () => ({
   confirmAuthenticationCapture: mocks.confirmAuthenticationCapture,
+  continueWithoutAuthentication: mocks.continueWithoutAuthentication,
   getProjectSettings: mocks.getProjectSettings,
   listExternalExperiments: mocks.listExternalExperiments,
   listExternalRuns: mocks.listExternalRuns,
@@ -121,7 +123,7 @@ beforeEach(() => {
   mocks.testAuthentication.mockResolvedValue({
     projectId: project.id,
     status: 'valid',
-    outcome: 'public',
+    outcome: 'target_accessible',
     currentUrl: project.targetUrl,
     message: 'Public target.',
     checkedAt: '2026-07-16T00:00:00.000Z',
@@ -136,6 +138,9 @@ beforeEach(() => {
       available: false,
       capturedAt: null,
       missingReason: null,
+      requirement: 'user_confirmed_public',
+      verification: 'not_checked',
+      lastCheckedAt: null,
     },
     updatedAt: '2026-07-16T00:00:00.000Z',
   });

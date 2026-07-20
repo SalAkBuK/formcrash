@@ -1,5 +1,10 @@
 # Chunk 2 automated visual QA
 
+> **QA provenance notice:** This document is retained as historical verification
+> evidence. It is not current UI authority; `docs/product/ui-direction.md`
+> governs current information architecture. Verified behavior and regression
+> evidence recorded here must still be preserved.
+
 Date: 2026-07-18
 
 ## Scope and environment

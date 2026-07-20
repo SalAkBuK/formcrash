@@ -1,5 +1,10 @@
 # Chunk 4 automated Guided Test wizard QA
 
+> **QA provenance notice:** This document is retained as historical verification
+> evidence. It is not current UI authority; `docs/product/ui-direction.md`
+> governs current information architecture. Verified behavior and regression
+> evidence recorded here must still be preserved.
+
 This directory contains the Playwright 1.61.1 visual and functional QA harness
 for the three-step Guided Test wizard on `/projects`.
 

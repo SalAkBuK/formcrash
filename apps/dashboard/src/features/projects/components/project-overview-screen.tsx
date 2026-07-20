@@ -19,6 +19,7 @@ import { getProject } from '../api/projects';
 import {
   clearAuthentication,
   confirmAuthenticationCapture,
+  continueWithoutAuthentication,
   getProjectSettings,
   startAuthenticationCapture,
   testAuthentication,
@@ -43,6 +44,7 @@ export function ProjectOverviewScreen({
   );
   const [authBusy, setAuthBusy] = useState<string | null>(null);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const [confirmPublicChoice, setConfirmPublicChoice] = useState(false);
   const authActionActive = useRef(false);
   const verifiedSavedAuthentication = useRef<string | null>(null);
 
@@ -161,6 +163,22 @@ export function ProjectOverviewScreen({
     }
   }
 
+  async function confirmContinueWithoutSignIn(): Promise<void> {
+    if (authActionActive.current) return;
+    authActionActive.current = true;
+    setAuthBusy('continue');
+    setAuthMessage(null);
+    try {
+      updateSettings(await continueWithoutAuthentication(projectId));
+      setConfirmPublicChoice(false);
+    } catch (reason: unknown) {
+      setAuthMessage(messageOf(reason));
+    } finally {
+      authActionActive.current = false;
+      setAuthBusy(null);
+    }
+  }
+
   useEffect(() => {
     const authentication =
       data?.settings.status === 'available'
@@ -224,16 +242,19 @@ export function ProjectOverviewScreen({
           tone={
             settings === null
               ? 'neutral'
-              : settings.authentication.available
+              : authenticationState(settings.authentication, authCapture) ===
+                    'connected' ||
+                  authenticationState(settings.authentication, authCapture) ===
+                    'user_confirmed_public'
                 ? 'pass'
                 : 'warning'
           }
           value={
             settings === null
               ? 'Unavailable'
-              : settings.authentication.available
-                ? 'Saved and available'
-                : 'No saved authentication'
+              : authenticationLabel(
+                  authenticationState(settings.authentication, authCapture),
+                )
           }
         />
         <StatusFact
@@ -276,10 +297,14 @@ export function ProjectOverviewScreen({
           authentication={settings.authentication}
           busy={authBusy}
           capture={authCapture}
+          confirmingPublicChoice={confirmPublicChoice}
           message={authMessage}
           onCapture={() => void startAuthCapture()}
           onClear={() => void removeAuthentication()}
           onConfirm={() => void confirmAuthCapture()}
+          onConfirmPublic={() => void confirmContinueWithoutSignIn()}
+          onContinueWithoutSignIn={() => setConfirmPublicChoice(true)}
+          onCancelPublic={() => setConfirmPublicChoice(false)}
           onTest={() => void checkAccess()}
         />
       )}
@@ -308,9 +333,9 @@ export function ProjectOverviewScreen({
               value={
                 settings === null
                   ? 'Unavailable'
-                  : settings.authentication.available
-                    ? 'Saved authentication available'
-                    : 'No saved authentication'
+                  : authenticationLabel(
+                      authenticationState(settings.authentication, authCapture),
+                    )
               }
             />
             <RailFact
@@ -370,25 +395,34 @@ function AuthenticationOverviewCard({
   authentication,
   busy,
   capture,
+  confirmingPublicChoice,
   message,
   onCapture,
   onClear,
   onConfirm,
+  onConfirmPublic,
+  onContinueWithoutSignIn,
+  onCancelPublic,
   onTest,
 }: {
   readonly authentication: ProjectAuthStatus;
   readonly busy: string | null;
   readonly capture: AuthCaptureSession | null;
+  readonly confirmingPublicChoice: boolean;
   readonly message: string | null;
   readonly onCapture: () => void;
   readonly onClear: () => void;
   readonly onConfirm: () => void;
+  readonly onConfirmPublic: () => void;
+  readonly onContinueWithoutSignIn: () => void;
+  readonly onCancelPublic: () => void;
   readonly onTest: () => void;
 }) {
   const state = authenticationState(authentication, capture);
-  const connected = state === 'Connected';
-  const expired = state === 'Expired';
-  const required = state === 'Required';
+  const connected = state === 'connected';
+  const expired = state === 'expired';
+  const required = state === 'authentication_required';
+  const userConfirmedPublic = state === 'user_confirmed_public';
   return (
     <section
       aria-labelledby="project-authentication-title"
@@ -399,17 +433,20 @@ function AuthenticationOverviewCard({
         <h2 id="project-authentication-title">Authentication</h2>
         <StatusBadge
           tone={
-            connected || state === 'Not required'
+            connected || userConfirmedPublic
               ? 'pass'
-              : expired || required || state === 'Verification failed'
+              : expired || required || state === 'verification_failed'
                 ? 'warning'
                 : 'neutral'
           }
         >
-          {state}
+          {authenticationLabel(state)}
         </StatusBadge>
       </div>
       <div>
+        {state === 'not_configured' ? (
+          <p>Does the journey you want to test require sign-in?</p>
+        ) : null}
         <p>{authenticationDescription(state)}</p>
         {connected ? (
           <p>
@@ -420,6 +457,36 @@ function AuthenticationOverviewCard({
           </p>
         ) : null}
         {message === null ? null : <p className="technical-note">{message}</p>}
+        {confirmingPublicChoice ? (
+          <StateMessage variant="warning">
+            <strong>Continue without sign-in?</strong>
+            <p>
+              Choose this when the complete journey you want to record is
+              publicly accessible. If FormCrash reaches a login page later, you
+              can capture a signed-in session then.
+            </p>
+            <div className="guided-action-row">
+              <button
+                className="button button-primary button-compact"
+                disabled={busy !== null}
+                onClick={onConfirmPublic}
+                type="button"
+              >
+                {busy === 'continue'
+                  ? 'Saving choice…'
+                  : 'Continue without sign-in'}
+              </button>
+              <button
+                className="button button-secondary button-compact"
+                disabled={busy !== null}
+                onClick={onCancelPublic}
+                type="button"
+              >
+                Cancel
+              </button>
+            </div>
+          </StateMessage>
+        ) : null}
         <div className="crm-form-actions">
           {capture?.status === 'awaiting_confirmation' ? (
             <button
@@ -457,37 +524,42 @@ function AuthenticationOverviewCard({
                 Clear
               </button>
             </>
-          ) : required || expired ? (
-            <button
-              className="button button-primary"
-              disabled={busy !== null}
-              onClick={onCapture}
-              type="button"
-            >
-              {busy === 'capture'
-                ? 'Opening browser…'
-                : expired
-                  ? 'Capture sign-in again'
-                  : 'Capture sign-in'}
-            </button>
           ) : (
             <>
               <button
                 className="button button-primary"
                 disabled={busy !== null}
-                onClick={onTest}
+                onClick={onCapture}
                 type="button"
               >
-                {busy === 'check' ? 'Checking access…' : 'Check target access'}
+                {busy === 'capture'
+                  ? 'Opening browser…'
+                  : expired
+                    ? 'Capture sign-in again'
+                    : 'Capture sign-in'}
               </button>
-              <button
-                className="button button-secondary"
-                disabled={busy !== null}
-                onClick={onTest}
-                type="button"
-              >
-                This application does not require authentication
-              </button>
+              {!expired ? (
+                <button
+                  className="button button-secondary"
+                  disabled={busy !== null}
+                  onClick={onContinueWithoutSignIn}
+                  type="button"
+                >
+                  Continue without sign-in
+                </button>
+              ) : null}
+              {userConfirmedPublic ? (
+                <button
+                  className="button button-secondary"
+                  disabled={busy !== null}
+                  onClick={onTest}
+                  type="button"
+                >
+                  {busy === 'check'
+                    ? 'Checking access…'
+                    : 'Check target access'}
+                </button>
+              ) : null}
             </>
           )}
         </div>
@@ -496,48 +568,62 @@ function AuthenticationOverviewCard({
   );
 }
 
+type AuthenticationPresentationState =
+  | 'not_configured'
+  | 'capture_in_progress'
+  | 'connected'
+  | 'expired'
+  | 'user_confirmed_public'
+  | 'authentication_required'
+  | 'verification_failed';
+
 function authenticationState(
   authentication: ProjectAuthStatus,
   capture: AuthCaptureSession | null,
-):
-  | 'Not checked'
-  | 'Not required'
-  | 'Required'
-  | 'Capture in progress'
-  | 'Connected'
-  | 'Expired'
-  | 'Verification failed' {
-  if (capture?.status === 'awaiting_confirmation') return 'Capture in progress';
-  if (authentication.verification === 'expired') return 'Expired';
+): AuthenticationPresentationState {
+  if (capture?.status === 'awaiting_confirmation') return 'capture_in_progress';
+  if (authentication.verification === 'expired') return 'expired';
   if (
     authentication.verification === 'failed' ||
     authentication.verification === 'inconclusive'
   )
-    return 'Verification failed';
+    return 'verification_failed';
   if (authentication.available && authentication.verification === 'valid')
-    return 'Connected';
-  if (authentication.requirement === 'not_required') return 'Not required';
-  if (authentication.requirement === 'required') return 'Required';
-  if (authentication.available) return 'Connected';
-  return 'Not checked';
+    return 'connected';
+  if (authentication.requirement === 'user_confirmed_public')
+    return 'user_confirmed_public';
+  if (authentication.requirement === 'required')
+    return 'authentication_required';
+  if (authentication.available) return 'connected';
+  return 'not_configured';
+}
+
+function authenticationLabel(state: AuthenticationPresentationState): string {
+  if (state === 'connected') return 'Signed in';
+  if (state === 'expired') return 'Sign-in expired';
+  if (state === 'user_confirmed_public') return 'Continuing without sign-in';
+  if (state === 'authentication_required') return 'Sign-in required';
+  if (state === 'verification_failed') return 'Could not verify session';
+  if (state === 'capture_in_progress') return 'Capture in progress';
+  return 'Not configured';
 }
 
 function authenticationDescription(
-  state: ReturnType<typeof authenticationState>,
+  state: AuthenticationPresentationState,
 ): string {
-  if (state === 'Connected')
-    return 'FormCrash can restore the saved browser session for protected operations.';
-  if (state === 'Not required')
-    return 'The target loaded normally without reaching an obvious sign-in route.';
-  if (state === 'Required')
+  if (state === 'connected')
+    return 'FormCrash will use this saved browser session for protected journeys.';
+  if (state === 'user_confirmed_public')
+    return 'You chose to continue without a saved browser session. Capture sign-in at any time if a protected step requires it.';
+  if (state === 'authentication_required')
     return 'Required before FormCrash can record or replay protected journeys.';
-  if (state === 'Expired')
+  if (state === 'expired')
     return 'FormCrash reached the login page instead of the application.';
-  if (state === 'Capture in progress')
+  if (state === 'capture_in_progress')
     return 'Sign in inside the visible Chromium window, then save the session.';
-  if (state === 'Verification failed')
+  if (state === 'verification_failed')
     return 'FormCrash could not verify target access. Retry the bounded access check.';
-  return 'Check whether the target can be used without a saved browser session.';
+  return 'Capture a signed-in browser session when the journey you want to test requires an account. You can continue without one for public flows.';
 }
 
 function OverviewScenarios({
