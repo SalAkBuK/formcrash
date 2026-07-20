@@ -34,9 +34,13 @@ let fixtureUrl: string;
 let database: FormCrashDatabase;
 
 beforeAll(async () => {
-  fixtureServer = createServer((_request, response) => {
+  fixtureServer = createServer((request, response) => {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    response.end(externalHtml);
+    response.end(
+      request.url?.startsWith('/outcome-passive') === true
+        ? passiveOutcomeHtml
+        : externalHtml,
+    );
   });
   fixtureServer.listen(0, '127.0.0.1');
   await once(fixtureServer, 'listening');
@@ -133,8 +137,17 @@ describe.sequential('real Chromium Outcome Check capture', () => {
     const capture = await manager.start(journey.id, {});
     expect(capture.status).toBe('awaiting_selection');
     if (page === null) throw new Error('Replay page was not exposed.');
+    expect(
+      await (page as Page).getByText(/FormCrash outcome capture:/u).isVisible(),
+    ).toBe(true);
     await (page as Page).locator('[data-formcrash="profile-result"]').click();
     const selected = await waitForSelection(manager, capture.id);
+
+    expect(
+      await (page as Page)
+        .getByText(/Result selected\. Return to the dashboard/u)
+        .isVisible(),
+    ).toBe(true);
 
     expect(selected.selectedTarget?.locator).toEqual({
       strategy: 'data-formcrash',
@@ -158,11 +171,105 @@ describe.sequential('real Chromium Outcome Check capture', () => {
     await manager.close(capture.id);
     expect(ownership.activeWorkload).toBeNull();
   }, 20_000);
+
+  it('captures passive result text after full-page and SPA navigation', async () => {
+    const projects = new ProjectJourneyRepository(database.connection);
+    const settings = new ProjectSettingsRepository(database.connection);
+    const outcomes = new OutcomeCheckRepository(database.connection);
+    const project = projects.createProject({
+      name: 'Passive outcome fixture',
+      targetUrl: fixtureUrl,
+      description: '',
+    });
+    const journey = projects.saveJourney({
+      projectId: project.id,
+      name: 'Open passive outcome',
+      steps: [
+        {
+          id: 'open-details',
+          name: 'Open profile form',
+          type: 'click',
+          timestamp: 1,
+          url: fixtureUrl,
+          locator: { strategy: 'data-testid', value: 'details-link' },
+          fingerprint: fingerprint('a', 'details-link', 'Open profile form'),
+          value: null,
+          sensitive: false,
+        },
+      ],
+      metadata: {
+        recordingSessionId: null,
+        recordedAt: '2026-07-20T00:00:00.000Z',
+        warningCount: 0,
+        normalizationRule: 'Passive outcome integration journey.',
+      },
+    });
+    outcomes.approveCriticalAction(journey, {
+      stepId: 'open-details',
+      label: 'Open profile form',
+    });
+    let page: Page | null = null;
+    const ownership = new BrowserOwnership();
+    const manager = new OutcomeCaptureManager(
+      temporary.config,
+      projects,
+      settings,
+      new AuthStateStore(temporary.config.artifactRoot, settings),
+      outcomes,
+      ownership,
+      new PlaywrightExternalBrowserOwner(undefined, (created) => {
+        page = created;
+      }),
+    );
+
+    const capture = await manager.start(journey.id, {});
+    expect(capture.status).toBe('awaiting_selection');
+    if (page === null) throw new Error('Replay page was not exposed.');
+
+    await (page as Page).goto(`${fixtureUrl}/outcome-passive`);
+    await (page as Page)
+      .getByRole('cell', { name: 'Northwind tenant' })
+      .click();
+    const fullPageSelection = await waitForSelection(
+      manager,
+      capture.id,
+      'Northwind tenant',
+    );
+    expect(fullPageSelection.status).toBe('selection_ready');
+    expect(fullPageSelection.selectedTarget?.locator).toEqual({
+      strategy: 'role',
+      role: 'cell',
+      name: 'Northwind tenant',
+    });
+
+    await (page as Page).evaluate(() => {
+      window.history.pushState({}, '', '/outcome-spa');
+      document.body.innerHTML =
+        '<main><section><span>Release candidate ready</span></section></main>';
+    });
+    await (page as Page)
+      .getByText('Release candidate ready', { exact: true })
+      .click();
+    const spaSelection = await waitForSelection(
+      manager,
+      capture.id,
+      'Release candidate ready',
+    );
+    expect(spaSelection.status).toBe('selection_ready');
+    expect(spaSelection.selectedTarget?.locator).toEqual({
+      strategy: 'text',
+      value: 'Release candidate ready',
+    });
+
+    await manager.close(capture.id);
+    expect(ownership.activeWorkload).toBeNull();
+  }, 20_000);
 });
 
 async function waitForSelection(
   manager: OutcomeCaptureManager,
   captureId: string,
+  expectedPreview?: string,
 ) {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
@@ -171,12 +278,28 @@ async function waitForSelection(
       capture?.status === 'selection_ready' ||
       capture?.status === 'selection_rejected'
     ) {
-      return capture;
+      if (
+        expectedPreview === undefined ||
+        capture.selectedTarget?.preview.includes(expectedPreview) === true
+      ) {
+        return capture;
+      }
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error('Outcome selection did not arrive.');
 }
+
+const passiveOutcomeHtml = `<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Passive outcome fixture</title></head>
+  <body>
+    <main>
+      <h1>Tenant results</h1>
+      <table><tbody><tr><td>Northwind tenant</td></tr></tbody></table>
+    </main>
+  </body>
+</html>`;
 
 function fingerprint(tagName: string, id: string, label: string) {
   return {

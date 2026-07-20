@@ -83,6 +83,39 @@ describe('server-owned request recommendation', () => {
     );
   });
 
+  it('keeps a Towerdesk-shaped cross-origin resident mutation available for review', () => {
+    const result = rankRequestCandidates({
+      candidates: [
+        candidate(
+          'POST',
+          '/api/org/buildings/building-1/residents',
+          201,
+          4,
+          'https://api.towerdeskpro.com',
+        ),
+      ],
+      targetOrigin: 'https://towerdesk.netlify.app',
+      journeyName: 'Add Tenant Flow',
+      targetStepName: 'Submit form',
+      targetPathname: '/portal/residents',
+    });
+
+    expect(result.recommendation).toMatchObject({
+      outcome: 'review',
+      recommendedCandidateId: null,
+    });
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]).toMatchObject({
+      rank: 1,
+      score: 74,
+      classification: 'likely_business_mutation',
+      confidence: 'review',
+      recommended: false,
+      failed: false,
+      status: 201,
+    });
+  });
+
   it('penalizes failed candidates and keeps status evidence explicit', () => {
     const result = rank([
       { ...candidate('POST', '/api/tenants', 500, 10), failed: true },

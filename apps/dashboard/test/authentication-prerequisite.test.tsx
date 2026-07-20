@@ -376,7 +376,7 @@ describe('authentication prerequisites', () => {
     );
 
     const baseline = await screen.findByRole('button', {
-      name: 'Start outcome baseline',
+      name: 'Replay and choose result',
     });
     await waitFor(() => expect(baseline).toBeEnabled());
     await user.click(baseline);

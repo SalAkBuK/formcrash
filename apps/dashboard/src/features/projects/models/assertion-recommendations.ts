@@ -35,6 +35,16 @@ export function recommendationSelections(
   }));
 }
 
+export function approveRequestRecommendationSelections(
+  set: AssertionRecommendationSet,
+): readonly RecommendationSelection[] {
+  return recommendationSelections(set).map((selection) => ({
+    ...selection,
+    enabled:
+      selection.enabled || selection.assertion.type.startsWith('network_'),
+  }));
+}
+
 export function selectedAssertions(
   selections: readonly RecommendationSelection[],
 ): readonly ExternalAssertion[] {

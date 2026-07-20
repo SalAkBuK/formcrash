@@ -847,18 +847,29 @@ class PlaywrightExternalSession
     await this.context.exposeBinding(
       '__formcrashSelectOutcome',
       ({ frame }, payload: unknown) => {
-        void this.handleOutcomeSelection(frame, payload, onSelection).catch(
-          () => undefined,
-        );
+        return this.handleOutcomeSelection(frame, payload, onSelection);
       },
     );
     const script = buildOutcomeSelectorInitScript();
     await this.context.addInitScript({ content: script });
+    await this.page.mainFrame().evaluate(script);
     await Promise.all(
-      this.page.frames().map(async (frame) => {
+      this.page
+        .frames()
+        .filter((frame) => frame !== this.page.mainFrame())
+        .map(async (frame) => {
         await frame.evaluate(script).catch(() => undefined);
-      }),
+        }),
     );
+    const ready = await this.page.evaluate<boolean>(
+      `globalThis.__formcrashOutcomeSelectorReady === true &&
+       document.querySelector('[data-formcrash-outcome-banner="true"]') !== null`,
+    );
+    if (!ready) {
+      throw new Error(
+        'Chromium could not enter Outcome Check selection mode. Start a new baseline replay.',
+      );
+    }
   }
 
   onClosed(callback: () => void): void {
@@ -925,13 +936,15 @@ class PlaywrightExternalSession
     onSelection: (selection: OutcomeElementSelection) => void,
   ): Promise<void> {
     const parsed = rawOutcomeSelectionSchema.safeParse(payload);
-    if (!parsed.success) return;
+    if (!parsed.success) {
+      throw new Error('FormCrash could not read the selected result element.');
+    }
     const locatorResult = replayLocatorSchema.safeParse(parsed.data.locator);
     const locator = locatorResult.success ? locatorResult.data : null;
     let matchCount = 0;
     let visibleMatchCount = 0;
     if (locator !== null) {
-      const matches = resolveLocator(this.page, locator);
+      const matches = resolveLocator(frame, locator);
       matchCount = await matches.count();
       for (let index = 0; index < Math.min(matchCount, 100); index += 1) {
         if (
@@ -1407,8 +1420,14 @@ const rawOutcomeSelectionSchema = z.object({
   value: z.string().max(1_000).nullable(),
 });
 
-function buildOutcomeSelectorInitScript(): string {
-  return `(${installOutcomeSelector.toString()})();`;
+export function buildOutcomeSelectorInitScript(
+  selectorSource: string = installOutcomeSelector.toString(),
+): string {
+  return `(() => {
+    const __name = (target, value) =>
+      Object.defineProperty(target, "name", { value, configurable: true });
+    (${selectorSource})();
+  })();`;
 }
 
 function installOutcomeSelector(): void {
@@ -1419,6 +1438,46 @@ function installOutcomeSelector(): void {
   };
   if (bindings.__formcrashOutcomeSelectorReady === true) return;
   bindings.__formcrashOutcomeSelectorReady = true;
+
+  const helper = document.createElement('div');
+  helper.setAttribute('data-formcrash-outcome-ui', 'true');
+  helper.setAttribute('data-formcrash-outcome-banner', 'true');
+  helper.setAttribute('role', 'status');
+  helper.textContent =
+    'FormCrash outcome capture: click the tenant row, confirmation, or other visible result that proves success. Do not close this window.';
+  const helperStyles: Readonly<Record<string, string>> = {
+    display: 'block',
+    position: 'fixed',
+    'z-index': '2147483647',
+    inset: '12px 12px auto 12px',
+    padding: '12px 16px',
+    border: '2px solid #2563eb',
+    'border-radius': '8px',
+    background: '#eff6ff',
+    color: '#172554',
+    font: '600 14px/1.4 system-ui, sans-serif',
+    'box-shadow': '0 8px 24px rgb(15 23 42 / 24%)',
+    'pointer-events': 'none',
+    opacity: '1',
+    visibility: 'visible',
+  };
+  for (const [property, value] of Object.entries(helperStyles)) {
+    helper.style.setProperty(property, value, 'important');
+  }
+  const cursorStyles = document.createElement('style');
+  cursorStyles.setAttribute('data-formcrash-outcome-ui', 'true');
+  cursorStyles.textContent =
+    'html, body, body * { cursor: crosshair !important; }';
+  const mountHelper = (): void => {
+    if (document.documentElement === null) return;
+    document.documentElement.append(cursorStyles);
+    document.documentElement.append(helper);
+  };
+  if (document.documentElement === null) {
+    document.addEventListener('DOMContentLoaded', mountHelper, { once: true });
+  } else {
+    mountHelper();
+  }
 
   const clean = (
     value: string | null | undefined,
@@ -1470,7 +1529,16 @@ function installOutcomeSelector(): void {
     if (element instanceof HTMLInputElement) return 'textbox';
     if (element instanceof HTMLSelectElement) return 'combobox';
     if (element instanceof HTMLTableRowElement) return 'row';
+    if (element instanceof HTMLTableCellElement) {
+      if (element.tagName.toLowerCase() === 'th') {
+        return element.getAttribute('scope') === 'row'
+          ? 'rowheader'
+          : 'columnheader';
+      }
+      return 'cell';
+    }
     if (element instanceof HTMLLIElement) return 'listitem';
+    if (/^h[1-6]$/u.test(element.tagName.toLowerCase())) return 'heading';
     return null;
   };
   const accessibleNameFor = (
@@ -1488,14 +1556,24 @@ function installOutcomeSelector(): void {
               .join(' '),
             240,
           );
+    const nameFromContent =
+      role !== null &&
+      [
+        'button',
+        'link',
+        'row',
+        'cell',
+        'rowheader',
+        'columnheader',
+        'listitem',
+        'heading',
+      ].includes(role);
     return (
       clean(element.getAttribute('aria-label'), 240) ??
       labelledByText ??
       labelFor(element) ??
       clean(element.getAttribute('title'), 240) ??
-      (role === 'row' || role === 'listitem'
-        ? clean(element.textContent, 240)
-        : null)
+      (nameFromContent ? clean(element.textContent, 240) : null)
     );
   };
   const describe = (element: Element) => {
@@ -1505,6 +1583,7 @@ function installOutcomeSelector(): void {
     const name = clean(element.getAttribute('name'), 160);
     const role = roleFor(element);
     const accessibleName = accessibleNameFor(element, role);
+    const exactText = clean(element.textContent, 240);
     const locator =
       dataFormcrash !== null
         ? { strategy: 'data-formcrash', value: dataFormcrash }
@@ -1516,7 +1595,12 @@ function installOutcomeSelector(): void {
               ? { strategy: 'name', value: name }
               : role !== null && accessibleName !== null
                 ? { strategy: 'role', role, name: accessibleName }
-                : { strategy: 'css', value: cssPath(element) };
+                : exactText !== null
+                  ? {
+                      strategy: 'text',
+                      value: exactText,
+                    }
+                  : { strategy: 'css', value: cssPath(element) };
     return {
       locator,
       fingerprint: {
@@ -1552,15 +1636,54 @@ function installOutcomeSelector(): void {
   const select = (event: MouseEvent): void => {
     const target = event.composedPath()[0];
     if (!(target instanceof Element)) return;
+    if (target.closest('[data-formcrash-outcome-ui]') !== null) return;
     event.preventDefault();
     event.stopImmediatePropagation();
+    const stableAncestor = target.closest(
+      '[data-formcrash], [data-testid], [id], [name], [role]',
+    );
     const selectable =
-      target.closest('[data-formcrash], [data-testid], [id], [name], [role]') ??
+      stableAncestor ??
+      event
+        .composedPath()
+        .find(
+          (candidate): candidate is Element =>
+            candidate instanceof Element &&
+            describe(candidate).locator.strategy !== 'css',
+        ) ??
       target;
-    void bindings.__formcrashSelectOutcome?.(describe(selectable));
+    selectable.setAttribute('data-formcrash-outcome-selected', 'true');
+    const previousOutline = (selectable as HTMLElement).style?.outline ?? '';
+    const previousOutlineOffset =
+      (selectable as HTMLElement).style?.outlineOffset ?? '';
+    if (selectable instanceof HTMLElement || selectable instanceof SVGElement) {
+      selectable.style.outline = '3px solid #2563eb';
+      selectable.style.outlineOffset = '2px';
+    }
+    helper.textContent = 'Checking the selected result with FormCrash…';
+    const binding = bindings.__formcrashSelectOutcome;
+    if (binding === undefined) {
+      helper.textContent =
+        'The FormCrash selection connection is unavailable. Return to the dashboard and start a new baseline capture.';
+      return;
+    }
+    void binding(describe(selectable)).then(
+      () => {
+        helper.textContent =
+          'Result selected. Return to the dashboard to review and approve it. Keep this window open.';
+      },
+      () => {
+        if (selectable instanceof HTMLElement || selectable instanceof SVGElement) {
+          selectable.style.outline = previousOutline;
+          selectable.style.outlineOffset = previousOutlineOffset;
+        }
+        selectable.removeAttribute('data-formcrash-outcome-selected');
+        helper.textContent =
+          'FormCrash could not receive that selection. Return to the dashboard and start a new baseline capture, or click another result.';
+      },
+    );
   };
   document.addEventListener('click', select, true);
-  document.documentElement.style.cursor = 'crosshair';
 }
 
 export function buildBrowserRecorderInitScript(

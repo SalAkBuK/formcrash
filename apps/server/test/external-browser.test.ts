@@ -7,6 +7,7 @@ import { recordedInteractionSchema } from '@formcrash/contracts';
 
 import {
   buildBrowserRecorderInitScript,
+  buildOutcomeSelectorInitScript,
   PlaywrightExternalBrowserOwner,
 } from '../src/runner/recording/external-browser.js';
 import { executeRecordedStep } from '../src/runner/external/journey-actions.js';
@@ -249,6 +250,27 @@ describe('external browser recorder injection', () => {
 
     expect(
       await page.evaluate<number>('globalThis.__recorderHelperResult'),
+    ).toBe(42);
+    await context.close();
+    await browser.close();
+  });
+
+  it('provides the build helper required by tsx-serialized Outcome selectors', async () => {
+    const browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext();
+    await context.addInitScript({
+      content: buildOutcomeSelectorInitScript(`function selector() {
+        const result = __name(() => 42, "result");
+        globalThis.__outcomeSelectorHelperResult = result();
+      }`),
+    });
+    const page = await context.newPage();
+    await page.goto(targetUrl);
+
+    expect(
+      await page.evaluate<number>(
+        'globalThis.__outcomeSelectorHelperResult',
+      ),
     ).toBe(42);
     await context.close();
     await browser.close();

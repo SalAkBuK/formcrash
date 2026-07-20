@@ -1,6 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import type {
   ApproveOutcomeCheckRequest,
   CriticalAction,
@@ -26,6 +32,11 @@ import {
   startOutcomeCapture,
 } from '../api/projects';
 import {
+  defaultOutcomeCheckDescription,
+  describeOutcomeCheck,
+  outcomeCheckTypeLabel,
+} from '../models/outcome-check-presentation';
+import {
   AuthenticationRecoveryPanel,
   useAuthenticationGate,
 } from './authentication-gate';
@@ -40,8 +51,10 @@ export function OutcomeDefinitionPanel({
   expanded,
   id = 'journey-outcome-configuration',
   onExpandedChange,
+  onReviewRequested,
   onStateChange,
   presentation = 'disclosure',
+  productionConfirmation,
 }: {
   readonly journey: PersistedJourney;
   readonly runtimeValues: EphemeralRuntimeValues;
@@ -52,8 +65,10 @@ export function OutcomeDefinitionPanel({
   readonly expanded?: boolean;
   readonly id?: string;
   readonly onExpandedChange?: (expanded: boolean) => void;
+  readonly onReviewRequested?: () => void;
   readonly onStateChange?: (state: OutcomeDefinitionState) => void;
   readonly presentation?: 'disclosure' | 'wizard';
+  readonly productionConfirmation?: ReactNode;
 }) {
   const compatibleSteps = useMemo(
     () =>
@@ -116,6 +131,9 @@ export function OutcomeDefinitionPanel({
         setBindingExpression(
           activeCapture?.selectedTarget?.generatedBindings[0]?.expression ?? '',
         );
+        if (activeCapture?.status === 'selection_ready') {
+          onReviewRequested?.();
+        }
         if (action !== null) {
           setStepId(action.stepId);
           setActionLabel(action.label);
@@ -135,7 +153,7 @@ export function OutcomeDefinitionPanel({
     return () => {
       active = false;
     };
-  }, [journey, recommended]);
+  }, [journey, onReviewRequested, recommended]);
 
   useEffect(() => {
     onStateChange?.({ checks, criticalAction, error, loading });
@@ -161,11 +179,17 @@ export function OutcomeDefinitionPanel({
           const firstBinding =
             next.selectedTarget?.generatedBindings[0]?.expression ?? '';
           if (firstBinding !== '') setBindingExpression(firstBinding);
+          if (
+            next.status === 'selection_ready' &&
+            capture.status !== 'selection_ready'
+          ) {
+            onReviewRequested?.();
+          }
         })
         .catch((reason: unknown) => setError(messageOf(reason)));
     }, 700);
     return () => window.clearInterval(timer);
-  }, [capture?.id, capture?.status]);
+  }, [capture?.id, capture?.status, onReviewRequested]);
 
   async function saveCriticalAction(): Promise<void> {
     setBusy('action');
@@ -201,6 +225,9 @@ export function OutcomeDefinitionPanel({
       setBindingExpression(
         started.selectedTarget?.generatedBindings[0]?.expression ?? '',
       );
+      setDescription(
+        defaultOutcomeCheckDescription(checkType, started.finalPathname),
+      );
       return true;
     } catch (reason: unknown) {
       if (
@@ -228,6 +255,12 @@ export function OutcomeDefinitionPanel({
       );
       const saved = await approveOutcomeCheck(capture.id, input);
       setChecks((current) => [...current, saved]);
+      if (
+        capture.status === 'selection_cancelled' &&
+        checkType === 'final_pathname_matches'
+      ) {
+        setCapture({ ...capture, status: 'completed', errorMessage: null });
+      }
     } catch (reason: unknown) {
       setError(messageOf(reason));
     } finally {
@@ -271,11 +304,30 @@ export function OutcomeDefinitionPanel({
   const target = capture?.selectedTarget ?? null;
   const captureActive =
     capture !== null &&
-    !['completed', 'expired', 'runner_error'].includes(capture.status);
+    ![
+      'completed',
+      'expired',
+      'runner_error',
+      'selection_cancelled',
+    ].includes(capture.status);
   const requiresTarget = checkType !== 'final_pathname_matches';
   const requiresBinding = checkType === 'matching_item_appears_exactly_once';
   const selectedStep =
     compatibleSteps.find((step) => step.id === stepId) ?? null;
+
+  function useFinalPage(): void {
+    if (capture?.finalPathname === null || capture?.finalPathname === undefined) {
+      return;
+    }
+    setCheckType('final_pathname_matches');
+    setDescription(
+      defaultOutcomeCheckDescription(
+        'final_pathname_matches',
+        capture.finalPathname,
+      ),
+    );
+    onReviewRequested?.();
+  }
 
   return (
     <details
@@ -410,6 +462,16 @@ export function OutcomeDefinitionPanel({
                 possible. Existing preparation, authentication, production
                 confirmation, and cleanup settings apply to this replay.
               </p>
+              {productionConfirmation}
+              <div className="guided-ready-note">
+                <strong>After the replay succeeds, Chromium stays open.</strong>
+                <span>
+                  In Chromium, click the tenant row, confirmation, or other
+                  visible result that proves success. The click is captured by
+                  FormCrash and may not visibly change the target page. Keep
+                  Chromium open, then return here to approve the check.
+                </span>
+              </div>
               <div className="guided-action-row">
                 <button
                   className={`button button-compact ${
@@ -429,17 +491,69 @@ export function OutcomeDefinitionPanel({
                 >
                   {busy === 'capture'
                     ? 'Replaying baseline…'
-                    : 'Start outcome baseline'}
+                    : 'Replay and choose result'}
                 </button>
                 {capture === null ? null : (
                   <span>{captureStatusLabel(capture.status)}</span>
                 )}
               </div>
               {capture?.status === 'awaiting_selection' ? (
-                <p className="guided-ready-note">
-                  Chromium is waiting. Click the visible result element you want
-                  FormCrash to capture.
-                </p>
+                <div className="guided-ready-note" role="status">
+                  <strong>Baseline succeeded. Choose the proof in Chromium.</strong>
+                  <span>
+                    Leave Chromium open and click the visible result that proves
+                    this journey succeeded. Then return here. If arriving at the
+                    current page is sufficient proof, use the final page instead.
+                  </span>
+                  {capture.finalPathname === null ? null : (
+                    <button
+                      className="button button-secondary button-compact"
+                      onClick={useFinalPage}
+                      type="button"
+                    >
+                      Use final page instead
+                    </button>
+                  )}
+                </div>
+              ) : null}
+              {capture?.status === 'selection_cancelled' ? (
+                <div className="recording-warning" role="status">
+                  <strong>Chromium closed after the baseline succeeded.</strong>
+                  <p>
+                    No result element was approved. You can still use the
+                    captured final page below, or replay the journey if you need
+                    to select a visible result. Replaying will execute the real
+                    action again.
+                  </p>
+                  {capture.finalPathname === null ? null : (
+                    <button
+                      className="button button-secondary button-compact"
+                      onClick={useFinalPage}
+                      type="button"
+                    >
+                      Use captured final page
+                    </button>
+                  )}
+                </div>
+              ) : null}
+              {capture?.status === 'selection_rejected' ? (
+                <div className="recording-warning" role="alert">
+                  <strong>This result cannot be saved as selected.</strong>
+                  <p>
+                    In Chromium, click a different stable row, confirmation, or
+                    result element. If reaching the current page is sufficient
+                    proof, use the captured final page instead.
+                  </p>
+                  {capture.finalPathname === null ? null : (
+                    <button
+                      className="button button-secondary button-compact"
+                      onClick={useFinalPage}
+                      type="button"
+                    >
+                      Use captured final page
+                    </button>
+                  )}
+                </div>
               ) : null}
               {capture?.selectionWarnings.map((warning) => (
                 <p className="recording-warning" key={warning.code}>
@@ -467,9 +581,16 @@ export function OutcomeDefinitionPanel({
                 <select
                   aria-label={`${journey.name} Outcome Check type`}
                   value={checkType}
-                  onChange={(event) =>
-                    setCheckType(event.target.value as OutcomeCheckType)
-                  }
+                  onChange={(event) => {
+                    const nextType = event.target.value as OutcomeCheckType;
+                    setCheckType(nextType);
+                    setDescription(
+                      defaultOutcomeCheckDescription(
+                        nextType,
+                        capture.finalPathname,
+                      ),
+                    );
+                  }}
                 >
                   <option value="matching_item_appears_exactly_once">
                     Matching item appears exactly once
@@ -598,8 +719,8 @@ export function OutcomeDefinitionPanel({
               <ul className="outcome-check-list">
                 {checks.map((check) => (
                   <li key={check.id}>
-                    <strong>{readableOutcome(check)}</strong>
-                    <span>{check.description}</span>
+                    <strong>{describeOutcomeCheck(check)}</strong>
+                    <span>{outcomeCheckTypeLabel(check.type)}</span>
                     <details>
                       <summary>Technical details</summary>
                       <p>
@@ -732,16 +853,6 @@ function sentenceCase(value: string): string {
   return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`;
 }
 
-function readableOutcome(check: OutcomeCheck): string {
-  if (check.type === 'matching_item_appears_exactly_once') {
-    return `Exactly one result matching ${check.binding.template} should appear.`;
-  }
-  if (check.type === 'final_pathname_matches') {
-    return `The journey should finish at ${check.expectedPathname}.`;
-  }
-  return `The selected result element should be visible.`;
-}
-
 function approvalInput(
   type: OutcomeCheckType,
   description: string,
@@ -773,10 +884,17 @@ function formatLocator(locator: ReplayLocator): string {
 
 function RunnerFailureMessage({ message }: { readonly message: string }) {
   const technicalDetail = stripTerminalFormatting(message);
+  const selectionSetupFailed = technicalDetail.includes(
+    'Baseline replay completed, but Outcome Check selection could not start.',
+  );
   return (
     <div className="outcome-runner-failure" role="alert">
       <div>
-        <strong>Baseline replay could not complete</strong>
+        <strong>
+          {selectionSetupFailed
+            ? 'Baseline completed, but result selection failed'
+            : 'Baseline replay could not complete'}
+        </strong>
         <p>{friendlyRunnerFailure(technicalDetail)}</p>
       </div>
       <details>
@@ -788,11 +906,26 @@ function RunnerFailureMessage({ message }: { readonly message: string }) {
 }
 
 function captureStatusLabel(status: OutcomeCaptureSession['status']): string {
-  if (status === 'runner_error') return 'Runner error';
-  return status;
+  if (status === 'launching') return 'Launching Chromium';
+  if (status === 'replaying') return 'Replaying saved journey';
+  if (status === 'awaiting_selection') return 'Waiting for result selection';
+  if (status === 'selection_ready') return 'Result selected';
+  if (status === 'selection_rejected') return 'Selection needs attention';
+  if (status === 'selection_cancelled') return 'Result selection cancelled';
+  if (status === 'closing') return 'Closing Chromium';
+  if (status === 'completed') return 'Capture complete';
+  if (status === 'expired') return 'Capture expired';
+  return 'Runner error';
 }
 
 function friendlyRunnerFailure(message: string): string {
+  if (
+    message.includes(
+      'Baseline replay completed, but Outcome Check selection could not start.',
+    )
+  ) {
+    return 'The saved journey completed and may already have changed target data, but FormCrash could not start result selection. Do not immediately replay the mutation; review the target data first.';
+  }
   if (
     message.includes('Target page, context or browser has been closed') ||
     message.includes('Target page, context or browser was closed')

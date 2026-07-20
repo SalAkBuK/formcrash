@@ -7,6 +7,7 @@ import {
   type OutcomeAggregate,
   type OutcomeCheckRunSnapshot,
   type OutcomeEvidenceReferences,
+  type ReplayLocator,
   type RunArtifact,
   type RunEventEnvelope,
 } from '@formcrash/contracts';
@@ -17,6 +18,7 @@ import {
   resolveTemplateValue,
   type ResolvedRuntime,
 } from '../external/runtime-values.js';
+import { describeOutcomeCheck } from './outcome-check-semantics.js';
 
 const BROWSER_ONLY_UNKNOWN =
   'FormCrash evaluated browser-visible state only; database records, hidden records, and backend side effects were not inspected.';
@@ -81,8 +83,9 @@ export async function evaluateOutcomeChecks(input: {
               input.runtime.context,
             ).value
           : undefined;
+      const locator = resolveOutcomeLocator(check.target.locator, input.runtime);
       const matchCount = await input.session.countVisibleMatches(
-        check.target.locator,
+        locator,
         binding,
       );
       if (matchCount.truncated) {
@@ -98,10 +101,10 @@ export async function evaluateOutcomeChecks(input: {
               check.type === 'matching_item_appears_exactly_once'
                 ? {
                     visibleMatchCount: 1,
-                    description: check.description,
+                    description: describeOutcomeCheck(check),
                     template: check.binding.template,
                   }
-                : { visible: true, description: check.description },
+                : { visible: true, description: describeOutcomeCheck(check) },
             observed: {
               verified: false,
               examinedLocatorMatchCount: matchCount.examinedCount,
@@ -143,10 +146,10 @@ export async function evaluateOutcomeChecks(input: {
             check.type === 'matching_item_appears_exactly_once'
               ? {
                   visibleMatchCount: 1,
-                  description: check.description,
+                  description: describeOutcomeCheck(check),
                   template: check.binding.template,
                 }
-              : { visible: true, description: check.description },
+              : { visible: true, description: describeOutcomeCheck(check) },
           observed: {
             visibleMatchCount: observedCount,
             description:
@@ -205,6 +208,30 @@ export async function evaluateOutcomeChecks(input: {
     }
   }
   return results;
+}
+
+function resolveOutcomeLocator(
+  locator: ReplayLocator,
+  runtime: ResolvedRuntime,
+): ReplayLocator {
+  if (locator.strategy === 'role') {
+    return {
+      ...locator,
+      name: resolveTemplateValue(
+        locator.name,
+        runtime.values,
+        runtime.context,
+      ).value,
+    };
+  }
+  return {
+    ...locator,
+    value: resolveTemplateValue(
+      locator.value,
+      runtime.values,
+      runtime.context,
+    ).value,
+  };
 }
 
 export function aggregateOutcomeChecks(

@@ -30,6 +30,10 @@ import {
 } from '../../../lib/formatters';
 import { journeyRuntimeRequirements } from '../models/journey-runtime';
 import {
+  describeOutcomeCheck,
+  outcomeCheckTypeLabel,
+} from '../models/outcome-check-presentation';
+import {
   OutcomeDefinitionPanel,
   type OutcomeDefinitionState,
 } from './outcome-definition-panel';
@@ -558,8 +562,8 @@ export function JourneyDetail(props: JourneyDetailProps) {
                       <li key={check.id}>
                         <StatusBadge tone="pass">Ready</StatusBadge>
                         <div>
-                          <strong>{check.description}</strong>
-                          <span>{outcomeTypeLabel(check.type)}</span>
+                          <strong>{describeOutcomeCheck(check)}</strong>
+                          <span>{outcomeCheckTypeLabel(check.type)}</span>
                           <code>{outcomeExpectedCondition(check)}</code>
                           <small>
                             Required for the aggregate outcome · approved
@@ -1353,13 +1357,6 @@ function formatLocator(locator: ReplayLocator | null): string {
   if (locator.strategy === 'role')
     return `role=${locator.role}, name=${JSON.stringify(locator.name)}`;
   return `${locator.strategy}=${JSON.stringify(locator.value)}`;
-}
-
-function outcomeTypeLabel(type: OutcomeCheck['type']): string {
-  if (type === 'matching_item_appears_exactly_once')
-    return 'Matching item appears exactly once';
-  if (type === 'visible_element_exists') return 'Visible element exists';
-  return 'Final pathname matches';
 }
 
 function outcomeExpectedCondition(check: OutcomeCheck): string {

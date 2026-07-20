@@ -286,7 +286,7 @@ describe.sequential('external impatient-user experiments in Chromium', () => {
       primaryStatus: 'failed',
       headline: 'Failed: The expected result appeared twice instead of once.',
       approvedExpectedOutcomeDescription:
-        'Exactly one profile matching the generated email should appear.',
+        'Exactly one result matching {{unique.email}} should appear.',
       expectedCondition: { kind: 'visible_match_count', count: 1 },
       observedCondition: { kind: 'visible_match_count', count: 2 },
       technicalDetailsAvailable: { assertions: true, screenshots: true },
@@ -380,7 +380,7 @@ describe.sequential('external impatient-user experiments in Chromium', () => {
       primaryStatus: 'passed',
       headline: 'Passed: The intended result occurred exactly once.',
       approvedExpectedOutcomeDescription:
-        'Exactly one profile matching the generated email should appear.',
+        'Exactly one result matching {{unique.email}} should appear.',
       expectedCondition: { kind: 'visible_match_count', count: 1 },
       observedCondition: { kind: 'visible_match_count', count: 1 },
       technicalDetailsAvailable: { assertions: true, screenshots: true },

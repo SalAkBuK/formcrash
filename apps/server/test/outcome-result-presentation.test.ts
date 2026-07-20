@@ -41,7 +41,7 @@ describe('external outcome result presentation', () => {
         primaryStatus: status,
         headline,
         approvedExpectedOutcomeDescription:
-          'Exactly one profile matching the generated email should appear.',
+          'Exactly one result matching {{unique.email}} should appear.',
         expectedCondition: { kind: 'visible_match_count', count: 1 },
         observedCondition: {
           kind: 'visible_match_count',
@@ -93,6 +93,9 @@ describe('external outcome result presentation', () => {
 
       expect(presentation.headline).toBe(headline);
       if (check.type === 'final_pathname_matches') {
+        expect(presentation.approvedExpectedOutcomeDescription).toBe(
+          'The journey should finish at /profiles.',
+        );
         expect(presentation.expectedCondition).toMatchObject({
           kind: 'pathname',
           pathname: '/profiles',
@@ -320,7 +323,7 @@ function pathnameCheck(): OutcomeCheck {
     journeyId: 'journey-1',
     criticalActionId: 'critical-action-1',
     type: 'final_pathname_matches',
-    description: 'The profile pathname should remain visible.',
+    description: 'Exactly one matching item should appear.',
     expectedPathname: '/profiles',
     createdAt,
   };

@@ -2,7 +2,7 @@ import { once } from 'node:events';
 import { createServer } from 'node:http';
 
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ReplayLocator } from '@formcrash/contracts';
+import type { OutcomeCaptureStatus, ReplayLocator } from '@formcrash/contracts';
 
 import type { FormCrashDatabase } from '../src/persistence/database.js';
 import { initializePersistence } from '../src/persistence/initialize.js';
@@ -13,6 +13,7 @@ import { AuthStateStore } from '../src/runner/external/auth-session.js';
 import { BrowserOwnership } from '../src/runner/infrastructure/browser-ownership.js';
 import {
   OutcomeCaptureManager,
+  OutcomeCaptureNotActiveError,
   OutcomeCaptureStaleError,
 } from '../src/runner/outcomes/outcome-capture-manager.js';
 import type {
@@ -102,6 +103,76 @@ describe('Outcome baseline capture lifecycle', () => {
     );
   });
 
+  it('parameterizes a selected row locator that contains the generated identity', async () => {
+    const setup = createSetup();
+    const capture = await setup.manager.start(setup.journey.id, {});
+    const generatedEmail = setup.browser.filledValues.find((value) =>
+      value.includes('@example.test'),
+    );
+    if (generatedEmail === undefined) {
+      throw new Error('Email was not generated.');
+    }
+
+    setup.browser.emitSelection(
+      stableSelection(`Tenant ${generatedEmail}`, {
+        strategy: 'role',
+        role: 'row',
+        name: `Tenant ${generatedEmail}`,
+      }),
+    );
+    const selected = await setup.manager.get(capture.id);
+
+    expect(selected).toMatchObject({
+      status: 'selection_ready',
+      selectedTarget: {
+        locator: {
+          strategy: 'role',
+          role: 'row',
+          name: 'Tenant {{unique.email}}',
+        },
+        generatedBindings: [
+          {
+            expression: 'unique.email',
+            template: '{{unique.email}}',
+          },
+        ],
+      },
+    });
+    expect(
+      selected?.selectionWarnings.some(
+        (warning) => warning.code === 'dynamic_locator',
+      ),
+    ).toBe(false);
+    expect(JSON.stringify(selected)).not.toContain(generatedEmail);
+
+    const check = await setup.manager.approve(capture.id, {
+      type: 'matching_item_appears_exactly_once',
+      description: 'Exactly one generated tenant row should appear.',
+      bindingExpression: 'unique.email',
+    });
+    expect(JSON.stringify(check)).not.toContain(generatedEmail);
+  });
+
+  it('approves a captured final pathname without requiring an element selection', async () => {
+    const setup = createSetup();
+    const capture = await setup.manager.start(setup.journey.id, {});
+
+    expect(capture.status).toBe('awaiting_selection');
+    expect(capture.selectedTarget).toBeNull();
+    expect(capture.finalPathname).toBe('/complete');
+
+    const check = await setup.manager.approve(capture.id, {
+      type: 'final_pathname_matches',
+      description: 'The journey should finish at /complete.',
+      expectedPathname: '/complete',
+    });
+
+    expect(check).toMatchObject({
+      type: 'final_pathname_matches',
+      expectedPathname: '/complete',
+    });
+  });
+
   it('runs the configured cleanup hook when the capture closes', async () => {
     let cleanupCalls = 0;
     const server = createServer((_request, response) => {
@@ -157,6 +228,27 @@ describe('Outcome baseline capture lifecycle', () => {
         (warning) => warning.code === 'ambiguous_locator',
       ),
     ).toBe(true);
+
+    const generatedEmail = setup.browser.filledValues.find((value) =>
+      value.includes('@example.test'),
+    );
+    if (generatedEmail === undefined) {
+      throw new Error('Email was not generated.');
+    }
+    setup.browser.emitSelection(
+      stableSelection('Tenant result without generated identity text', {
+        strategy: 'id',
+        value: generatedEmail,
+      }),
+    );
+    const unboundDynamic = await setup.manager.get(capture.id);
+    expect(unboundDynamic?.status).toBe('selection_rejected');
+    expect(
+      unboundDynamic?.selectionWarnings.some(
+        (warning) => warning.code === 'dynamic_locator',
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(unboundDynamic)).not.toContain(generatedEmail);
 
     setup.browser.emitSelection({
       ...stableSelection('Iframe tenant result', {
@@ -220,17 +312,37 @@ describe('Outcome baseline capture lifecycle', () => {
     expect(await setup.manager.getForJourney(setup.journey.id)).toBeNull();
   });
 
-  it('reports a manually closed browser, releases ownership, and allows another operation', async () => {
+  it('preserves final-page recovery when Chromium closes after a successful baseline', async () => {
     const setup = createSetup();
     const capture = await setup.manager.start(setup.journey.id, {});
 
     setup.browser.simulateUserClose();
-    const failed = await waitForCaptureStatus(
+    const cancelled = await waitForCaptureStatus(
       setup.manager,
       capture.id,
-      'runner_error',
+      'selection_cancelled',
     );
-    expect(failed.errorMessage).toMatch(/Chromium was closed/u);
+    expect(cancelled.errorMessage).toBeNull();
+    expect(cancelled.finalPathname).toBe('/complete');
+    expect(await setup.manager.getForJourney(setup.journey.id)).toEqual(
+      cancelled,
+    );
+    await expect(
+      setup.manager.approve(capture.id, {
+        type: 'visible_element_exists',
+        description: 'The tenant row should be visible.',
+      }),
+    ).rejects.toBeInstanceOf(OutcomeCaptureNotActiveError);
+    const saved = await setup.manager.approve(capture.id, {
+      type: 'final_pathname_matches',
+      description: 'The journey should finish at /complete.',
+      expectedPathname: '/complete',
+    });
+    expect(saved).toMatchObject({
+      type: 'final_pathname_matches',
+      expectedPathname: '/complete',
+    });
+    expect((await setup.manager.get(capture.id))?.status).toBe('completed');
     expect(setup.ownership.activeWorkload).toBeNull();
     const release = setup.ownership.acquire('recording');
     release();
@@ -292,6 +404,26 @@ describe('Outcome baseline capture lifecycle', () => {
       status: 'runner_error',
       errorMessage: 'fixture navigation failed',
     });
+    expect(setup.browser.closed).toBe(true);
+    expect(setup.ownership.activeWorkload).toBeNull();
+  });
+
+  it('distinguishes Outcome selector setup failure after the replay mutation completes', async () => {
+    const setup = createSetup();
+    setup.browser.selectionError = new Error(
+      'frame.evaluate: ReferenceError: __name is not defined',
+    );
+
+    const capture = await setup.manager.start(setup.journey.id, {});
+
+    expect(capture).toMatchObject({
+      status: 'runner_error',
+      finalPathname: '/complete',
+    });
+    expect(capture.errorMessage).toContain(
+      'Baseline replay completed, but Outcome Check selection could not start.',
+    );
+    expect(setup.browser.filledValues.length).toBeGreaterThan(0);
     expect(setup.browser.closed).toBe(true);
     expect(setup.ownership.activeWorkload).toBeNull();
   });
@@ -451,6 +583,7 @@ class FakeReplayBrowser implements ReplayBrowserSession {
   readonly filledValues: string[] = [];
   closed = false;
   navigateError: Error | null = null;
+  selectionError: Error | null = null;
   private selection: ((selection: OutcomeElementSelection) => void) | null =
     null;
   private closedCallback: (() => void) | null = null;
@@ -515,6 +648,9 @@ class FakeReplayBrowser implements ReplayBrowserSession {
   enterOutcomeSelection(
     onSelection: (selection: OutcomeElementSelection) => void,
   ): Promise<void> {
+    if (this.selectionError !== null) {
+      return Promise.reject(this.selectionError);
+    }
     this.selection = onSelection;
     return Promise.resolve();
   }
@@ -526,7 +662,7 @@ class FakeReplayBrowser implements ReplayBrowserSession {
 async function waitForCaptureStatus(
   manager: OutcomeCaptureManager,
   captureId: string,
-  status: 'runner_error',
+  status: OutcomeCaptureStatus,
 ) {
   const deadline = Date.now() + 2_000;
   while (Date.now() < deadline) {

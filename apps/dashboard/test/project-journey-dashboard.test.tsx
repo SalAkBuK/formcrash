@@ -468,11 +468,112 @@ describe('external project journey workflow', () => {
       outcome.getByText('Define Critical Action and Outcome Checks'),
     );
 
-    expect(await outcome.findByText('awaiting_selection')).toBeVisible();
-    expect(outcome.getByText(/Chromium is waiting/u)).toBeVisible();
     expect(
-      outcome.getByRole('button', { name: 'Start outcome baseline' }),
+      await outcome.findByText('Waiting for result selection'),
+    ).toBeVisible();
+    expect(
+      outcome.getByText(/Baseline succeeded\. Choose the proof in Chromium/u),
+    ).toBeVisible();
+    expect(
+      outcome.getByText(/click the visible result that proves/u),
+    ).toBeVisible();
+    await user.click(
+      outcome.getByRole('button', { name: 'Use final page instead' }),
+    );
+    expect(
+      outcome.getByLabelText(`${outcomeJourney.name} Outcome Check type`),
+    ).toHaveValue('final_pathname_matches');
+    expect(
+      outcome.getByLabelText(`${outcomeJourney.name} Outcome Check description`),
+    ).toHaveValue('The journey should finish at /complete.');
+    expect(
+      outcome.getByRole('button', { name: 'Replay and choose result' }),
     ).toBeDisabled();
+  });
+
+  it('offers final-page recovery instead of a runner error when Chromium closes after replay', async () => {
+    const user = userEvent.setup();
+    const submitStep = {
+      ...step,
+      id: 'submit-profile',
+      name: 'Save profile',
+      type: 'submit' as const,
+      locator: { strategy: 'data-testid' as const, value: 'profile-form' },
+      value: null,
+    };
+    const outcomeJourney = { ...journey, steps: [step, submitStep] };
+    const action = {
+      id: 'critical-action-1',
+      journeyId: journey.id,
+      stepId: submitStep.id,
+      label: 'Save profile',
+      createdAt: '2026-07-17T00:00:00.000Z',
+      updatedAt: '2026-07-17T00:00:00.000Z',
+    };
+    const cancelledCapture = {
+      id: 'outcome-capture-cancelled',
+      journeyId: journey.id,
+      criticalActionId: action.id,
+      generatedInputs: [],
+      status: 'selection_cancelled' as const,
+      selectedTarget: null,
+      selectionWarnings: [],
+      finalPathname: '/complete',
+      errorMessage: null,
+      startedAt: '2026-07-17T00:01:00.000Z',
+      expiresAt: '2026-07-17T00:11:00.000Z',
+      completedAt: '2026-07-17T00:02:00.000Z',
+    };
+    const pathCheck = {
+      id: 'outcome-check-path',
+      journeyId: journey.id,
+      criticalActionId: action.id,
+      type: 'final_pathname_matches' as const,
+      description: 'The journey should finish at /complete.',
+      expectedPathname: '/complete',
+      createdAt: '2026-07-17T00:03:00.000Z',
+    };
+    mocks.listJourneys.mockResolvedValue([outcomeJourney]);
+    mocks.getCriticalAction.mockResolvedValue(action);
+    mocks.getActiveOutcomeCapture.mockResolvedValue(cancelledCapture);
+    mocks.approveOutcomeCheck.mockResolvedValue(pathCheck);
+
+    render(<ProjectJourneyDashboard />);
+    await openProjectManagement();
+    await openJourneyDetail();
+    await screen.findByRole('heading', { name: outcomeJourney.name });
+    const detailOutcome = document.querySelector(
+      '#journey-outcome-configuration',
+    );
+    expect(detailOutcome).not.toBeNull();
+    const outcome = within(detailOutcome as HTMLElement);
+    await user.click(
+      outcome.getByText('Define Critical Action and Outcome Checks'),
+    );
+
+    expect(
+      await outcome.findByText(/Chromium closed after the baseline succeeded/u),
+    ).toBeVisible();
+    expect(outcome.queryByText('Runner error')).not.toBeInTheDocument();
+    expect(
+      outcome.getByRole('button', { name: 'Replay and choose result' }),
+    ).toBeEnabled();
+    await user.click(
+      outcome.getByRole('button', { name: 'Use captured final page' }),
+    );
+    await user.click(outcome.getByRole('button', { name: 'Approve check' }));
+
+    expect(mocks.approveOutcomeCheck).toHaveBeenCalledWith(
+      cancelledCapture.id,
+      {
+        type: 'final_pathname_matches',
+        description: 'The journey should finish at /complete.',
+        expectedPathname: '/complete',
+      },
+    );
+    expect(
+      await outcome.findByText('The journey should finish at /complete.'),
+    ).toBeVisible();
   });
 
   it('approves a Critical Action and saves a generated exactly-once Outcome Check', async () => {
@@ -613,13 +714,27 @@ describe('external project journey workflow', () => {
     );
 
     await user.click(
-      outcome.getByRole('button', { name: 'Start outcome baseline' }),
+      outcome.getByRole('button', { name: 'Replay and choose result' }),
     );
     expect(await outcome.findByText('Profile {{unique.email}}')).toBeVisible();
     expect(outcome.getByText('Fill unique email')).toBeVisible();
     expect(
       outcome.getByText(/resolved run-specific literal.*not persisted/u),
     ).toBeVisible();
+    await user.selectOptions(
+      outcome.getByLabelText(`${outcomeJourney.name} Outcome Check type`),
+      'final_pathname_matches',
+    );
+    expect(
+      outcome.getByLabelText(`${outcomeJourney.name} Outcome Check description`),
+    ).toHaveValue('The journey should finish at /complete.');
+    await user.selectOptions(
+      outcome.getByLabelText(`${outcomeJourney.name} Outcome Check type`),
+      'matching_item_appears_exactly_once',
+    );
+    expect(
+      outcome.getByLabelText(`${outcomeJourney.name} Outcome Check description`),
+    ).toHaveValue('Exactly one matching item should appear.');
     await user.click(outcome.getByRole('button', { name: 'Approve check' }));
 
     expect(mocks.approveOutcomeCheck).toHaveBeenCalledWith(capture.id, {

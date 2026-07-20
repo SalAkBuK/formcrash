@@ -16,6 +16,8 @@ import {
   type RunEventEnvelope,
 } from '@formcrash/contracts';
 
+import { describeOutcomeCheck } from './outcome-check-semantics.js';
+
 const DATABASE_UNKNOWN =
   'FormCrash did not inspect the application database or hidden backend state.';
 
@@ -92,7 +94,9 @@ function presentCheck(
     outcomeCheckId: result.outcomeCheckId,
     type: result.type,
     approvedDescription: bounded(
-      check?.description ?? 'Approved Outcome Check',
+      check === undefined
+        ? 'Approved Outcome Check'
+        : describeOutcomeCheck(check),
       500,
     ),
     status: result.status,

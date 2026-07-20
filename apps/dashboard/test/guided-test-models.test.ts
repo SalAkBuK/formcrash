@@ -6,12 +6,16 @@ import type {
 } from '@formcrash/contracts';
 
 import {
+  approveRequestRecommendationSelections,
+  recommendationProvenance,
   recommendationSelections,
   recommendationSetForCandidate,
+  selectedAssertions,
 } from '../src/features/projects/models/assertion-recommendations';
 import { guidedStepValueOverrides } from '../src/features/projects/models/guided-values';
 import { assessJourneyReadiness } from '../src/features/projects/models/journey-readiness';
 import {
+  guidedConfirmableCandidate,
   initialCandidateIndex,
   selectionProvenance,
 } from '../src/features/projects/models/request-selection';
@@ -179,6 +183,117 @@ describe('guided test automation models', () => {
       },
       userOverrodeRecommendation: true,
     });
+  });
+
+  it('offers one strong cross-origin business mutation for explicit Guided approval', () => {
+    const recommended = discoveryResult();
+    const businessMutation = recommended.candidates[1]!;
+    const discovery: RequestDiscoveryResult = {
+      ...recommended,
+      candidates: [
+        {
+          ...businessMutation,
+          rank: 1,
+          score: 74,
+          origin: 'https://api.example.test',
+          confidence: 'review',
+          recommended: false,
+          reasons: [
+            ...businessMutation.reasons,
+            {
+              code: 'cross_origin',
+              label: 'Request uses a different origin.',
+              scoreImpact: -20,
+            },
+          ],
+        },
+      ],
+      recommendation: {
+        outcome: 'review',
+        recommendedCandidateId: null,
+        explanation: 'The cross-origin mutation requires confirmation.',
+      },
+      assertionRecommendationSets: recommended.assertionRecommendationSets.map(
+        (set) => ({
+          ...set,
+          recommendations: set.recommendations.map((item) => ({
+            ...item,
+            confidence: 'review' as const,
+            defaultEnabled: false,
+          })),
+        }),
+      ),
+    };
+
+    const candidate = guidedConfirmableCandidate(discovery);
+    expect(candidate?.candidateId).toBe(businessMutation.candidateId);
+    const selections = approveRequestRecommendationSelections(
+      recommendationSetForCandidate(discovery, candidate),
+    );
+    expect(selectedAssertions(selections)).toHaveLength(4);
+    expect(
+      recommendationProvenance(selections).every(
+        (entry) => entry.action === 'enabled',
+      ),
+    ).toBe(true);
+  });
+
+  it('does not offer failed, weak, or multiple business mutations for Guided confirmation', () => {
+    const recommended = discoveryResult();
+    const businessMutation = recommended.candidates[1]!;
+    const review: RequestDiscoveryResult = {
+      ...recommended,
+      candidates: [
+        {
+          ...businessMutation,
+          rank: 1,
+          score: 74,
+          origin: 'https://api.example.test',
+          confidence: 'review',
+          recommended: false,
+          reasons: [
+            ...businessMutation.reasons,
+            {
+              code: 'cross_origin',
+              label: 'Request uses a different origin.',
+              scoreImpact: -20,
+            },
+          ],
+        },
+      ],
+      recommendation: {
+        outcome: 'review',
+        recommendedCandidateId: null,
+        explanation: 'Review required.',
+      },
+    };
+
+    expect(
+      guidedConfirmableCandidate({
+        ...review,
+        candidates: [{ ...review.candidates[0]!, failed: true }],
+      }),
+    ).toBeNull();
+    expect(
+      guidedConfirmableCandidate({
+        ...review,
+        candidates: [{ ...review.candidates[0]!, score: 59 }],
+      }),
+    ).toBeNull();
+    expect(
+      guidedConfirmableCandidate({
+        ...review,
+        candidates: [
+          review.candidates[0]!,
+          {
+            ...review.candidates[0]!,
+            candidateId: 'request-cccccccccccccccccccccccc',
+            rank: 2,
+            pathname: '/api/invitations',
+          },
+        ],
+      }),
+    ).toBeNull();
   });
 });
 
