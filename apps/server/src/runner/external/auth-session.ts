@@ -118,12 +118,22 @@ export class AuthStateStore {
 
   recordAccess(input: {
     readonly projectId: string;
-    readonly requirement: 'unknown' | 'not_required' | 'required';
+    readonly requirement:
+      'unknown' | 'not_required' | 'user_confirmed_public' | 'required';
     readonly verification:
       'not_checked' | 'valid' | 'expired' | 'failed' | 'inconclusive';
     readonly lastCheckedAt: string | null;
   }): void {
     this.repository.saveAuthAccess(input);
+  }
+
+  confirmPublicJourney(projectId: string): void {
+    this.repository.saveAuthAccess({
+      projectId,
+      requirement: 'user_confirmed_public',
+      verification: 'not_checked',
+      lastCheckedAt: null,
+    });
   }
 
   usablePath(projectId: string): string | null {

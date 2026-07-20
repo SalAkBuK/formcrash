@@ -1,10 +1,16 @@
 # FormCrash design-system reconciliation
 
+> **Historical provenance notice:** This reconciliation is retained as design
+> history and implementation evidence. It is not current UI authority;
+> `docs/product/ui-direction.md` governs current information architecture.
+> Verified historical behavior and regression evidence in this document must
+> still be preserved.
+
 ## Sources compared
 
 1. Stitch Design System asset `assets/733fe26b6cc44c11bcc9ecfbfd1dcfd0` (screen instance `asset-stub-assets_733fe26b6cc44c11bcc9ecfbfd1dcfd0`).
 2. Generated Stitch HTML and inline Tailwind configuration for all eight normal screens.
-3. Repository design source [`design (1).md`](<../../../design%20(1).md>).
+3. Repository design source [`design.md`](../../../design.md).
 4. The pre-Chunk-1 production stylesheet `apps/dashboard/src/app/globals.css`.
 
 The repository design source and the final Stitch asset agree on the important rules: ink-black/cool graphite surfaces, amber controlled disruption, blue focus/browser evidence, violet request evidence, strict red/green outcome semantics, Inter, JetBrains Mono, an 8px rhythm, restrained radii, tonal elevation, and outcome-first results.

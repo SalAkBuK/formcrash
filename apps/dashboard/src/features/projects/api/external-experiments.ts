@@ -93,6 +93,16 @@ export function clearAuthentication(
   );
 }
 
+export function continueWithoutAuthentication(
+  projectId: string,
+): Promise<ProjectExecutionSettings> {
+  return requestJson(
+    `/api/projects/${projectId}/authentication/continue-without-sign-in`,
+    projectExecutionSettingsSchema,
+    { method: 'POST' },
+  );
+}
+
 export function testAuthentication(
   projectId: string,
 ): Promise<AuthValidationResult> {

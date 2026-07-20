@@ -206,6 +206,21 @@ export function registerExternalExperimentRoutes(
   );
 
   app.post<{ Params: ProjectParams }>(
+    '/api/projects/:projectId/authentication/continue-without-sign-in',
+    async (request, reply) => {
+      try {
+        return reply.send(
+          dependencies.settings.continueWithoutAuthentication(
+            request.params.projectId,
+          ),
+        );
+      } catch {
+        return notFound(reply, 'Project');
+      }
+    },
+  );
+
+  app.post<{ Params: ProjectParams }>(
     '/api/projects/:projectId/authentication/test',
     async (request, reply) => {
       if (dependencies.projects.getProject(request.params.projectId) === null) {

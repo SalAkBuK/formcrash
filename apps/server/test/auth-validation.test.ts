@@ -41,7 +41,7 @@ afterEach(() => {
 
 describe('authentication validation', () => {
   it.each([
-    ['http://localhost:4300/portal', 'valid', 'public', 'not_required'],
+    ['http://localhost:4300/portal', 'valid', 'target_accessible', 'unknown'],
     [
       'http://localhost:4300/login',
       'invalid',
@@ -71,6 +71,34 @@ describe('authentication validation', () => {
       expect(store.status(project.id)).toMatchObject({ requirement });
     },
   );
+
+  it('preserves only an explicit user choice when a public page loads', async () => {
+    const project = projects.createProject({
+      name: 'User-confirmed public journey',
+      targetUrl: 'http://localhost:4300/portal',
+      environment: 'local',
+      description: '',
+    });
+    const store = new AuthStateStore(temporary.config.artifactRoot, settings);
+    store.confirmPublicJourney(project.id);
+
+    const validation = await new AuthValidationService(
+      temporary.config,
+      projects,
+      store,
+      new BrowserOwnership(),
+      new FakeOwner(project.targetUrl),
+    ).validate(project.id);
+
+    expect(validation).toMatchObject({
+      status: 'valid',
+      outcome: 'target_accessible',
+    });
+    expect(store.status(project.id)).toMatchObject({
+      requirement: 'user_confirmed_public',
+      verification: 'not_checked',
+    });
+  });
 
   it.each([
     ['http://localhost:4300/portal', 'valid'],

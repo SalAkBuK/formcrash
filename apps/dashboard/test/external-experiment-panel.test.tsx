@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   cancelAuthenticationCapture: vi.fn(),
   clearAuthentication: vi.fn(),
   confirmAuthenticationCapture: vi.fn(),
+  continueWithoutAuthentication: vi.fn(),
   createExternalExperiment: vi.fn(),
   deleteExternalExperimentVersion: vi.fn(),
   deleteExternalRun: vi.fn(),

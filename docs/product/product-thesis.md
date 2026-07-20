@@ -5,6 +5,13 @@
 **Repository baseline:** Current `main` behavior after server-owned request and assertion recommendation  
 **Next implementation chunk:** Outcome Check capture and persistence for one recorded state-changing journey
 
+**Authority:** This thesis refines product behavior and planning within the PRD.
+[`ui-direction.md`](ui-direction.md) governs application identity and information
+architecture, and [`active-bugs.md`](active-bugs.md) governs unresolved behavioral
+and verification work. Product chains and canonical workflows in this document
+describe record relationships, lifecycle, and acceptance behavior, not mandatory
+page sequencing.
+
 ## Status labels
 
 - **Existing behavior** — available in the current repository and reachable through the current external-project workflow unless stated otherwise.
@@ -71,6 +78,10 @@ The painful moment is therefore:
 FormCrash should remove the need to design that resilience test from scratch. It should not merely remove the need to type Playwright syntax.
 
 ## 4. Canonical end-to-end workflow
+
+The sequence below is an acceptance story. It may be completed through contextual
+actions on persistent records and must not be treated as permanent
+application-wide wizard navigation.
 
 **Product decision:** The central acceptance story is an **Add Tenant** create-form journey. Equivalent create-form journeys are supported only when they follow the same product model.
 

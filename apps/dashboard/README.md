@@ -1,6 +1,13 @@
 # FormCrash dashboard
 
-The Next.js dashboard exposes two deliberate workflows:
+The Next.js dashboard is the persistent operational application for FormCrash
+Projects and their related Journeys, Scenarios, Experiments or Configurations,
+Runs, and evidence. Its UI identity and information architecture are governed by
+[`docs/product/ui-direction.md`](../../docs/product/ui-direction.md); active
+behavioral defects and verification gaps are tracked in
+[`docs/product/active-bugs.md`](../../docs/product/active-bugs.md).
+
+The current technical entry points expose these capabilities:
 
 - `http://localhost:3000` is the guaranteed bundled Sample Checkout path. It
   starts the existing seeded Impatient User experiment in vulnerable or fixed
@@ -10,6 +17,9 @@ The Next.js dashboard exposes two deliberate workflows:
   creates controlled targets, records and replays journeys, captures
   authentication, runs Guided or Advanced repeated-action experiments, and
   displays persisted external results.
+
+These capability paths do not define separate application identities, and their
+product lifecycles do not prescribe mandatory page sequencing.
 
 ## Runtime boundary
 

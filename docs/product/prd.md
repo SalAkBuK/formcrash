@@ -8,11 +8,18 @@
 **Development workflow:** Built with Codex and GPT-5.6
 **Primary demonstration:** Duplicate checkout submission before and after a fix
 
+**Authority:** This document owns product scope and behavior.
+[`ui-direction.md`](ui-direction.md) owns application identity and information
+architecture. [`active-bugs.md`](active-bugs.md) owns the current behavioral and
+verification inventory. Canonical workflows below describe product lifecycle and
+acceptance behavior, not mandatory page sequencing.
+
 ---
 
 ## 1. Product Statement
 
-FormCrash Lab is a pre-production resilience-testing workbench for transactional web journeys.
+FormCrash Lab is a persistent pre-production operational application for managing
+resilience-testing projects and their transactional web journeys.
 
 It records a normal journey, lets the developer attach a controlled failure experiment to a precise step, and verifies whether the application:
 
@@ -295,6 +302,9 @@ The developer can:
 
 ## 12. Core Product Loop
 
+This loop defines the lifecycle and relationship among product records. It is not
+a required application navigation sequence or an application-wide wizard.
+
 ```text
 Select or record a normal journey
                 ↓
@@ -320,6 +330,9 @@ Compare failed and passed runs
 ## 13. Main Product Areas
 
 FormCrash Lab contains six primary areas:
+
+These are product capability areas, not a mandatory global-navigation or page
+sequence specification.
 
 1. Projects.
 2. Journeys.
@@ -984,7 +997,7 @@ The fixed implementation prevents duplicates through both:
 
 # 25. First-Run Experience
 
-The first screen should show:
+Within the persistent application shell, the first-run state should show:
 
 * A concise explanation of controlled resilience testing.
 * A primary “Run Sample Experiment” action.
@@ -1411,6 +1424,6 @@ FormCrash Lab is not a production-monitoring platform, session-replay service, a
 
 The locked MVP is:
 
-> A local resilience-testing workbench that replays a recorded transactional web journey, injects one controlled failure at a precise step, evaluates explicit recovery expectations, collects deterministic evidence and compares the failed run with the same experiment after a fix.
+> A local operational resilience-testing application that replays a recorded transactional web journey, injects one controlled failure at a precise step, evaluates explicit recovery expectations, collects deterministic evidence and compares the failed run with the same experiment after a fix.
 
 The submission-critical experience is the duplicate checkout experiment. Every development decision must protect the reliability, clarity and visual strength of that workflow.

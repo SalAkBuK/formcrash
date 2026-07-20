@@ -29,7 +29,8 @@ export interface StoredAuthSession {
 
 export interface StoredAuthAccess {
   readonly projectId: string;
-  readonly requirement: 'unknown' | 'not_required' | 'required';
+  readonly requirement:
+    'unknown' | 'not_required' | 'user_confirmed_public' | 'required';
   readonly verification:
     'not_checked' | 'valid' | 'expired' | 'failed' | 'inconclusive';
   readonly lastCheckedAt: string | null;

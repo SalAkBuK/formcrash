@@ -1,11 +1,11 @@
 ---
-name: FormCrash — Controlled Failure Workbench
+name: FormCrash — Operational Resilience Application
 version: 1.0
 mode: dark-first
 keywords:
-  - developer tool
+  - operational application
   - reliability testing
-  - evidence workbench
+  - resilience records
   - controlled failure
   - browser automation
   - forensic clarity
@@ -126,13 +126,22 @@ shadows:
 
 # FormCrash Design System
 
+> **Authority:** This file owns visual-system details only where they do not
+> conflict with [`docs/product/ui-direction.md`](docs/product/ui-direction.md).
+> That document governs application identity and information architecture.
+> [`docs/product/active-bugs.md`](docs/product/active-bugs.md) remains authoritative
+> for unresolved behavior and verification; visual restructuring must not hide
+> those issues.
+
 ## Design Theme
 
-**Controlled Failure Workbench**
+**Operational Resilience Workspace**
 
-FormCrash should feel like a precision lab for reproducing dangerous browser behavior—not a generic admin dashboard, analytics suite, or hacker terminal.
+FormCrash should feel like a persistent operational application for managing
+resilience-testing records—not a test bench, analytics suite, hacker terminal,
+or temporary setup flow.
 
-The interface combines three ideas:
+Within that application, run and evidence details combine three ideas:
 
 1. **A test bench** — clear controls, known inputs, deterministic runs.
 2. **A forensic workspace** — evidence is organized by what was observed and when.
@@ -499,19 +508,16 @@ Secondary action:
 
 Do not lead with architecture terminology or feature grids.
 
-## 2. Project Setup
+## 2. Project Readiness and Contextual Tasks
 
-Use a vertical staged workflow:
+Treat Target, Authentication, Journey recording, Critical Action approval,
+Outcome Check approval, experiment configuration, and Runs as related project
+records and contextual actions. Their lifecycle order may inform status and next
+actions, but it must not become permanent application-wide wizard navigation.
 
-1. Target
-2. Authentication
-3. Record journey
-4. Confirm Critical Action
-5. Approve Outcome Check
-6. Configure experiment
-7. Run
-
-Show completed stages with check marks and the current stage with amber emphasis.
+A complex action may use a focused multistep dialog or task flow. Keep the stable
+application shell and project record context visible, and return the user to the
+relevant record when the task finishes or is cancelled.
 
 Do not show all advanced settings at once. Keep advanced controls behind explicit disclosure.
 
@@ -682,7 +688,8 @@ Do not use marketing language inside evidence views.
 - Convert wide technical tables to key-value cards or horizontal scroll
 - Keep primary result and run status above the fold
 
-Mobile support should remain functional, but desktop is the primary supported environment for the local developer workbench.
+Mobile support should remain functional, but desktop is the primary supported
+environment for the persistent operational application.
 
 ## Stitch Generation Guidance
 
@@ -690,7 +697,7 @@ When generating FormCrash screens in Stitch:
 
 - Use the exact palette and typography tokens in this file.
 - Prefer realistic product data over generic placeholder charts.
-- Generate dense but readable developer-tool layouts.
+- Generate dense but readable operational record layouts.
 - Lead result pages with expected versus observed outcomes.
 - Keep technical evidence collapsed by default.
 - Use amber for controlled action and selection, red only for failed outcomes, and green only for verified success.
@@ -705,7 +712,17 @@ When generating FormCrash screens in Stitch:
 
 ## Suggested Stitch Prompt
 
-Design a dark-first desktop developer tool called FormCrash using the “Controlled Failure Workbench” design system. The interface should feel like a precision reliability lab and forensic evidence workspace, not a generic SaaS dashboard. Use an ink-black and cool graphite surface system, amber for controlled disruption and primary actions, red only for failed outcomes, green for verified success, blue for browser evidence, and violet for request evidence. Use Inter for interface text and JetBrains Mono for technical values. Build clear hierarchy around expected outcome, observed outcome, conclusion, browser evidence, and a collapsed Developer detail section. Use balanced density, 10–12px card radii, thin borders, limited shadows, no gradients, no glassmorphism, no cyberpunk effects, and no analytics charts unless the screen specifically requires one.
+Design a dark-first operational resilience application called FormCrash. Use a
+persistent shell, stable record navigation, compact record lists, structured
+detail sections, status strips, activity, and contextual actions. Run details
+should lead with expected outcome, observed outcome, conclusion, browser evidence,
+and a collapsed Developer detail section. Use an ink-black and cool graphite
+surface system, amber for controlled disruption and primary actions, red only for
+failed outcomes, green for verified success, blue for browser evidence, and
+violet for request evidence. Use Inter for interface text and JetBrains Mono for
+technical values. Use balanced density, 10–12px card radii, thin borders,
+limited shadows, no gradients, no glassmorphism, no cyberpunk effects, and no
+analytics charts unless the screen specifically requires one.
 
 ## Non-Negotiable Design Rules
 
