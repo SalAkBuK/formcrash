@@ -49,10 +49,10 @@ It contains:
 
 ### Expected results
 
-| Mode | Expected result | Created orders |
-|---|---:|---:|
-| Vulnerable | Failed | 2 |
-| Fixed | Passed | 1 |
+| Mode       | Expected result | Created orders |
+| ---------- | --------------: | -------------: |
+| Vulnerable |          Failed |              2 |
+| Fixed      |          Passed |              1 |
 
 The failed assertion in vulnerable mode is an expected product result, not a server error.
 
@@ -89,10 +89,10 @@ pnpm dev
 
 This starts:
 
-| Application | URL |
-|---|---|
-| Dashboard | http://localhost:3000 |
-| Control server | http://localhost:4100 |
+| Application     | URL                   |
+| --------------- | --------------------- |
+| Dashboard       | http://localhost:3000 |
+| Control server  | http://localhost:4100 |
 | Sample checkout | http://localhost:4200 |
 
 Application startup never downloads a browser. Chromium must be installed explicitly before the first run.
@@ -235,19 +235,19 @@ The runner executes one browser run at a time. A concurrent sample-run request r
 
 ## Configuration
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `DASHBOARD_PORT` | `3000` | Dashboard port |
-| `SERVER_PORT` | `4100` | Control-server port |
-| `SAMPLE_CHECKOUT_PORT` | `4200` | Sample-checkout port |
-| `SERVER_HOST` | local default | Control-server bind address |
-| `NEXT_PUBLIC_FORMCRASH_SERVER_URL` | `http://localhost:4100` | Browser-visible server URL |
-| `FORMCRASH_DASHBOARD_ORIGINS` | `http://localhost:3000` | Allowed dashboard origins |
-| `FORMCRASH_BROWSER_HEADLESS` | `false` | Run visible Chromium by default |
-| `FORMCRASH_BROWSER_TIMEOUT_MS` | `10000` | Bounded browser timeout |
-| `SAMPLE_CHECKOUT_BASE_URL` | `http://localhost:4200` | Bundled checkout target |
-| `FORMCRASH_DATABASE_PATH` | `./var/database/formcrash.db` | SQLite database path |
-| `FORMCRASH_ARTIFACT_ROOT` | `./var` | Generated artifact root |
+| Variable                           | Default                       | Purpose                         |
+| ---------------------------------- | ----------------------------- | ------------------------------- |
+| `DASHBOARD_PORT`                   | `3000`                        | Dashboard port                  |
+| `SERVER_PORT`                      | `4100`                        | Control-server port             |
+| `SAMPLE_CHECKOUT_PORT`             | `4200`                        | Sample-checkout port            |
+| `SERVER_HOST`                      | local default                 | Control-server bind address     |
+| `NEXT_PUBLIC_FORMCRASH_SERVER_URL` | `http://localhost:4100`       | Browser-visible server URL      |
+| `FORMCRASH_DASHBOARD_ORIGINS`      | `http://localhost:3000`       | Allowed dashboard origins       |
+| `FORMCRASH_BROWSER_HEADLESS`       | `false`                       | Run visible Chromium by default |
+| `FORMCRASH_BROWSER_TIMEOUT_MS`     | `10000`                       | Bounded browser timeout         |
+| `SAMPLE_CHECKOUT_BASE_URL`         | `http://localhost:4200`       | Bundled checkout target         |
+| `FORMCRASH_DATABASE_PATH`          | `./var/database/formcrash.db` | SQLite database path            |
+| `FORMCRASH_ARTIFACT_ROOT`          | `./var`                       | Generated artifact root         |
 
 The root launcher reads environment variables but does not load `.env` files automatically.
 
