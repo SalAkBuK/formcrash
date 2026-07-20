@@ -149,6 +149,9 @@ const settings: ProjectExecutionSettings = {
     available: true,
     capturedAt: '2026-07-01T00:00:00.000Z',
     missingReason: null,
+    requirement: 'required',
+    verification: 'valid',
+    lastCheckedAt: '2026-07-01T00:00:00.000Z',
   },
   updatedAt: '2026-07-01T00:00:00.000Z',
 };
@@ -218,6 +221,90 @@ describe('CRM project surfaces', () => {
       screen.queryByText(/security score|notification/i),
     ).not.toBeInTheDocument();
     expect(screen.getAllByRole('main')).toHaveLength(1);
+    expect(screen.getByText('Connected')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Test session' })).toBeVisible();
+  });
+
+  it('surfaces required authentication and capture on the project overview', async () => {
+    crmApi.loadProjectCrmData.mockResolvedValue({
+      ...projectData(),
+      settings: {
+        status: 'available',
+        value: {
+          ...settings,
+          authentication: {
+            configured: false,
+            available: false,
+            capturedAt: null,
+            missingReason: null,
+            requirement: 'required',
+            verification: 'not_checked',
+            lastCheckedAt: '2026-07-01T00:00:00.000Z',
+          },
+        },
+      },
+    });
+
+    render(<ProjectOverviewScreen projectId={project.id} />);
+
+    expect(await screen.findByText('Required')).toBeVisible();
+    expect(
+      screen.getByText(
+        'Required before FormCrash can record or replay protected journeys.',
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Capture sign-in' }),
+    ).toBeVisible();
+  });
+
+  it('verifies a public target before marking authentication not required', async () => {
+    const user = userEvent.setup();
+    const publicSettings: ProjectExecutionSettings = {
+      ...settings,
+      authentication: {
+        configured: false,
+        available: false,
+        capturedAt: null,
+        missingReason: null,
+        requirement: 'not_required',
+        verification: 'valid',
+        lastCheckedAt: '2026-07-01T01:00:00.000Z',
+      },
+    };
+    crmApi.loadProjectCrmData.mockResolvedValue({
+      ...projectData(),
+      settings: {
+        status: 'available',
+        value: {
+          ...publicSettings,
+          authentication: {
+            ...publicSettings.authentication,
+            requirement: 'unknown',
+            verification: 'not_checked',
+          },
+        },
+      },
+    });
+    experimentApi.getProjectSettings.mockResolvedValue(publicSettings);
+    experimentApi.testAuthentication.mockResolvedValue({
+      projectId: project.id,
+      status: 'valid',
+      outcome: 'public',
+      currentUrl: project.targetUrl,
+      message: 'The target loaded without a sign-in redirect.',
+      checkedAt: '2026-07-01T01:00:00.000Z',
+    });
+
+    render(<ProjectOverviewScreen projectId={project.id} />);
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'This application does not require authentication',
+      }),
+    );
+
+    expect(await screen.findByText('Not required')).toBeVisible();
+    expect(experimentApi.testAuthentication).toHaveBeenCalledOnce();
   });
 
   it('renders Scenario columns and preserves partial rows truthfully', async () => {

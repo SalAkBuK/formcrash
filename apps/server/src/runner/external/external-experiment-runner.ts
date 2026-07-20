@@ -225,12 +225,7 @@ export class ExternalExperimentRunner {
       });
       events.append('run.running', {});
       await session.navigate(project.targetUrl);
-      if (storageStatePath !== null) {
-        await assertSavedAuthenticationSessionActive(
-          project.targetUrl,
-          session,
-        );
-      }
+      await assertSavedAuthenticationSessionActive(project.targetUrl, session);
 
       const targetIndex = journey.steps.findIndex(
         (step) => step.id === experiment.targetStepId,

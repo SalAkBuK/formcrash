@@ -133,12 +133,7 @@ export class RequestDiscoveryService {
         if (capture) collector.observe(observation);
       });
       await session.navigate(project.targetUrl);
-      if (storageStatePath !== null) {
-        await assertSavedAuthenticationSessionActive(
-          project.targetUrl,
-          session,
-        );
-      }
+      await assertSavedAuthenticationSessionActive(project.targetUrl, session);
       for (const step of journey.steps.slice(0, targetIndex)) {
         await executeDiscoveryStep(session, step, runtime);
       }

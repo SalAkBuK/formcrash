@@ -1,9 +1,8 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
-  AuthCaptureSession,
   PersistedJourney,
   Project,
   ProjectExecutionSettings,
@@ -14,11 +13,7 @@ import type {
 
 import { StateMessage } from '../../../components/ui/state-message';
 import { FormCrashApiError } from '../../../lib/api-client';
-import {
-  confirmAuthenticationCapture,
-  getProjectSettings,
-  startAuthenticationCapture,
-} from '../api/external-experiments';
+import { getProjectSettings } from '../api/external-experiments';
 import {
   deleteJourney,
   getProject,
@@ -26,6 +21,10 @@ import {
   replayJourney,
 } from '../api/projects';
 import { JourneyDetail } from './journey-detail';
+import {
+  AuthenticationRecoveryPanel,
+  useAuthenticationGate,
+} from './authentication-gate';
 
 export type JourneyWorkspaceView =
   'overview' | 'sequence' | 'outcomes' | 'replay';
@@ -52,14 +51,20 @@ export function JourneyWorkspaceScreen({
     Readonly<Record<string, Readonly<Record<string, string>>>>
   >({});
   const [productionConfirmed, setProductionConfirmed] = useState(false);
-  const [authenticationRequired, setAuthenticationRequired] = useState(false);
-  const [authCapture, setAuthCapture] = useState<AuthCaptureSession | null>(
-    null,
-  );
-  const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const authentication = useAuthenticationGate({
+    projectId,
+    onSettingsChange: setSettings,
+  });
+  const authenticationJourneyId = useRef(journeyId);
+
+  useEffect(() => {
+    if (authenticationJourneyId.current === journeyId) return;
+    authenticationJourneyId.current = journeyId;
+    authentication.complete();
+  }, [authentication.complete, journeyId]);
 
   useEffect(() => {
     let active = true;
@@ -92,12 +97,20 @@ export function JourneyWorkspaceScreen({
     };
   }, [journeyId, projectId]);
 
-  async function run(journey: PersistedJourney): Promise<void> {
+  async function run(
+    journey: PersistedJourney,
+    preflightComplete = false,
+  ): Promise<boolean> {
+    const operation = {
+      kind: 'replayJourney',
+      projectId,
+      journeyId: journey.id,
+    } as const;
+    if (!preflightComplete && !(await authentication.ensure(operation)))
+      return false;
     setBusy(`replay-${journey.id}`);
     setError(null);
     setReplayResult(null);
-    setAuthenticationRequired(false);
-    setAuthMessage(null);
     try {
       setReplayResult(
         await replayJourney(
@@ -108,44 +121,15 @@ export function JourneyWorkspaceScreen({
           replayPacing,
         ),
       );
+      return true;
     } catch (reason: unknown) {
       if (
         reason instanceof FormCrashApiError &&
         reason.code === 'AUTHENTICATION_REQUIRED'
       ) {
-        setAuthenticationRequired(true);
-        setAuthCapture(null);
-        setAuthMessage(reason.message);
+        authentication.requireRecovery(operation, 'expired');
       } else setError(messageOf(reason));
-    } finally {
-      setBusy(null);
-    }
-  }
-  async function startAuth(): Promise<void> {
-    setBusy('replay-auth-start');
-    setError(null);
-    setAuthMessage(null);
-    try {
-      setAuthCapture(await startAuthenticationCapture(projectId));
-    } catch (reason: unknown) {
-      setError(messageOf(reason));
-    } finally {
-      setBusy(null);
-    }
-  }
-  async function confirmAuth(): Promise<void> {
-    if (authCapture === null) return;
-    setBusy('replay-auth-confirm');
-    setError(null);
-    try {
-      setAuthCapture(
-        await confirmAuthenticationCapture(projectId, authCapture.id),
-      );
-      setSettings(await getProjectSettings(projectId));
-      setAuthenticationRequired(false);
-      setAuthMessage('Authentication was recaptured. Replay again when ready.');
-    } catch (reason: unknown) {
-      setError(messageOf(reason));
+      return false;
     } finally {
       setBusy(null);
     }
@@ -181,16 +165,34 @@ export function JourneyWorkspaceScreen({
       {error !== null ? (
         <StateMessage variant="error">{error}</StateMessage>
       ) : null}
+      <AuthenticationRecoveryPanel
+        gate={authentication}
+        onRetry={(operation) => {
+          if (operation.kind !== 'replayJourney') return;
+          const journey = journeys.find(
+            (item) => item.id === operation.journeyId,
+          );
+          if (journey === undefined) {
+            authentication.complete();
+            return;
+          }
+          void run(journey, true).then((started) => {
+            if (started) authentication.complete();
+          });
+        }}
+      />
       <JourneyDetail
-        authCapture={authCapture}
-        authMessage={authMessage}
-        authenticationRequired={authenticationRequired}
-        busy={busy}
+        authCapture={null}
+        authMessage={null}
+        authenticationRequired={false}
+        busy={
+          busy ?? (authentication.pending === null ? null : 'authentication')
+        }
         executionSettings={settings}
         journeys={journeys}
         loading={false}
-        onAuthenticationConfirm={() => void confirmAuth()}
-        onAuthenticationStart={() => void startAuth()}
+        onAuthenticationConfirm={() => undefined}
+        onAuthenticationStart={() => undefined}
         onDelete={(journey) => void remove(journey)}
         onManageProjects={() =>
           router.push(`/projects/${projectId}/journeys/new`)

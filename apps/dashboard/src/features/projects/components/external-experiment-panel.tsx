@@ -31,6 +31,7 @@ import type {
 } from '@formcrash/contracts';
 import Link from 'next/link';
 
+import { FormCrashApiError } from '../../../lib/api-client';
 import {
   clearAuthentication,
   confirmAuthenticationCapture,
@@ -61,6 +62,10 @@ import {
 } from '../models/assertion-recommendations';
 import { ExternalRunResult } from './external-run-result';
 import { ExternalRunComparison } from './external-run-comparison';
+import {
+  AuthenticationRecoveryPanel,
+  useAuthenticationGate,
+} from './authentication-gate';
 import {
   GuidedTestPanel,
   type GuidedTestDraftV1,
@@ -142,6 +147,10 @@ export function ExternalExperimentPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [productionConfirmed, setProductionConfirmed] = useState(false);
+  const authentication = useAuthenticationGate({
+    projectId: project.id,
+    onSettingsChange: handleGuidedAuthenticationRecaptured,
+  });
   const projectInitialization = useRef<{
     readonly projectId: string;
     readonly promise: ReturnType<typeof loadExternalWorkspace>;
@@ -371,8 +380,16 @@ export function ExternalExperimentPanel({
     }
   }
 
-  async function discover(): Promise<void> {
-    if (journey === null || targetStep === null) return;
+  async function discover(preflightComplete = false): Promise<boolean> {
+    if (journey === null || targetStep === null) return false;
+    const operation = {
+      kind: 'startRequestDiscovery',
+      projectId: project.id,
+      journeyId: journey.id,
+      targetStepId: targetStep.id,
+    } as const;
+    if (!preflightComplete && !(await authentication.ensure(operation)))
+      return false;
     setBusy('discovery');
     setError(null);
     try {
@@ -393,8 +410,15 @@ export function ExternalExperimentPanel({
       );
       setDiscovery(discovered);
       setCandidateIndex(initialCandidateIndex(discovered));
+      return true;
     } catch (reason: unknown) {
-      setError(messageOf(reason));
+      if (
+        reason instanceof FormCrashApiError &&
+        reason.code === 'AUTHENTICATION_REQUIRED'
+      ) {
+        authentication.requireRecovery(operation, 'expired');
+      } else setError(messageOf(reason));
+      return false;
     } finally {
       setBusy(null);
     }
@@ -483,7 +507,17 @@ export function ExternalExperimentPanel({
     }
   }
 
-  async function run(version: ExternalExperimentVersion): Promise<void> {
+  async function run(
+    version: ExternalExperimentVersion,
+    preflightComplete = false,
+  ): Promise<boolean> {
+    const operation = {
+      kind: 'runExperiment',
+      projectId: project.id,
+      experimentVersionId: version.id,
+    } as const;
+    if (!preflightComplete && !(await authentication.ensure(operation)))
+      return false;
     setBusy(`run-${version.id}`);
     setResult(null);
     setError(null);
@@ -495,10 +529,21 @@ export function ExternalExperimentPanel({
         'adaptive',
         replayPacing,
       );
+      if (completed.runnerError?.code === 'authentication_required') {
+        authentication.requireRecovery(operation, 'expired');
+        return false;
+      }
       setResult(completed);
       setRunHistory((await listExternalRuns(project.id)).items);
+      return true;
     } catch (reason: unknown) {
-      setError(messageOf(reason));
+      if (
+        reason instanceof FormCrashApiError &&
+        reason.code === 'AUTHENTICATION_REQUIRED'
+      ) {
+        authentication.requireRecovery(operation, 'expired');
+      } else setError(messageOf(reason));
+      return false;
     } finally {
       setBusy(null);
     }
@@ -647,6 +692,27 @@ export function ExternalExperimentPanel({
         </>
       ) : (
         <>
+          <AuthenticationRecoveryPanel
+            gate={authentication}
+            onRetry={(operation) => {
+              const retry =
+                operation.kind === 'startRequestDiscovery'
+                  ? discover(true)
+                  : operation.kind === 'runExperiment'
+                    ? (() => {
+                        const version = experiments.find(
+                          (item) => item.id === operation.experimentVersionId,
+                        );
+                        return version === undefined
+                          ? Promise.resolve(false)
+                          : run(version, true);
+                      })()
+                    : Promise.resolve(false);
+              void retry.then((started) => {
+                if (started) authentication.complete();
+              });
+            }}
+          />
           <div className="panel settings-panel">
             <div className="section-heading-row">
               <div>
@@ -891,6 +957,7 @@ export function ExternalExperimentPanel({
                   <select
                     value={journeyId}
                     onChange={(event) => {
+                      authentication.complete();
                       setJourneyId(event.target.value);
                       onSelectedJourneyChange?.(event.target.value);
                     }}
@@ -1001,6 +1068,8 @@ export function ExternalExperimentPanel({
                   className="button button-secondary button-compact"
                   disabled={
                     busy !== null ||
+                    authentication.busy ||
+                    authentication.pending !== null ||
                     targetStep === null ||
                     (project.environment === 'production' &&
                       !productionConfirmed)
@@ -1291,6 +1360,8 @@ export function ExternalExperimentPanel({
                       className="button button-secondary button-compact"
                       disabled={
                         busy !== null ||
+                        authentication.busy ||
+                        authentication.pending !== null ||
                         (project.environment === 'production' &&
                           !productionConfirmed)
                       }

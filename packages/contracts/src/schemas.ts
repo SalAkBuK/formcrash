@@ -98,6 +98,7 @@ export const recordingSessionStatusSchema = z.enum([
   'recording',
   'stopping',
   'completed',
+  'cancelled',
   'runner_error',
 ]);
 
@@ -581,6 +582,11 @@ export const projectAuthStatusSchema = z.object({
   available: z.boolean(),
   capturedAt: z.iso.datetime({ offset: true }).nullable(),
   missingReason: z.string().nullable(),
+  requirement: z.enum(['unknown', 'not_required', 'required']).optional(),
+  verification: z
+    .enum(['not_checked', 'valid', 'expired', 'failed', 'inconclusive'])
+    .optional(),
+  lastCheckedAt: z.iso.datetime({ offset: true }).nullable().optional(),
 });
 
 export const projectExecutionSettingsSchema = z.object({
@@ -598,6 +604,7 @@ export const authCaptureStatusSchema = z.enum([
   'awaiting_confirmation',
   'stopping',
   'completed',
+  'cancelled',
   'runner_error',
 ]);
 
@@ -613,6 +620,16 @@ export const authCaptureSessionSchema = z.object({
 export const authValidationResultSchema = z.object({
   projectId: z.string().min(1),
   status: z.enum(['valid', 'invalid', 'runner_error']),
+  outcome: z
+    .enum([
+      'public',
+      'authenticated',
+      'authentication_required',
+      'authentication_expired',
+      'target_unavailable',
+      'inconclusive',
+    ])
+    .optional(),
   currentUrl: controlledTargetUrlSchema.nullable(),
   message: z.string().min(1),
   checkedAt: z.iso.datetime({ offset: true }),

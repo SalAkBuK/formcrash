@@ -35,24 +35,23 @@ export class AuthValidationService {
     try {
       storageStatePath = this.store.usablePath(projectId);
     } catch (error: unknown) {
-      return result(
+      const checked = result(
         projectId,
         'invalid',
+        'authentication_expired',
         null,
         error instanceof Error
           ? error.message
           : 'Saved authentication state is unavailable.',
         checkedAt,
       );
-    }
-    if (storageStatePath === null) {
-      return result(
+      this.store.recordAccess({
         projectId,
-        'invalid',
-        null,
-        'No saved authentication state exists for this project.',
-        checkedAt,
-      );
+        requirement: 'required',
+        verification: 'expired',
+        lastCheckedAt: checkedAt,
+      });
+      return checked;
     }
 
     const release = this.ownership.acquire('auth_validation');
@@ -62,36 +61,83 @@ export class AuthValidationService {
         targetUrl: project.targetUrl,
         headless: this.config.browserHeadless,
         timeoutMs: this.config.browserTimeoutMs,
-        storageStatePath,
+        ...(storageStatePath === null ? {} : { storageStatePath }),
       });
       await session.navigate(project.targetUrl);
       const currentUrl = session.currentUrl();
-      const redirectedToAuthentication = isAuthenticationRedirect(
-        project.targetUrl,
-        currentUrl,
-      );
+      const redirectedToAuthentication =
+        currentUrl === null
+          ? false
+          : isAuthenticationRedirect(project.targetUrl, currentUrl);
       const visibleAuthenticationRequirement =
         await session.detectAuthenticationRequired?.();
       const authenticationRequired =
         redirectedToAuthentication ||
         (visibleAuthenticationRequirement !== undefined &&
           visibleAuthenticationRequirement !== null);
+      if (currentUrl === null && !authenticationRequired) {
+        this.store.recordAccess({
+          projectId,
+          requirement: this.store.status(projectId).requirement ?? 'unknown',
+          verification: 'inconclusive',
+          lastCheckedAt: checkedAt,
+        });
+        return result(
+          projectId,
+          'runner_error',
+          'inconclusive',
+          null,
+          'FormCrash loaded the target but could not determine its final address.',
+          checkedAt,
+        );
+      }
+      const outcome = authenticationRequired
+        ? storageStatePath === null
+          ? 'authentication_required'
+          : 'authentication_expired'
+        : storageStatePath === null
+          ? 'public'
+          : 'authenticated';
+      this.store.recordAccess({
+        projectId,
+        requirement: outcome === 'public' ? 'not_required' : 'required',
+        verification:
+          outcome === 'authentication_expired'
+            ? 'expired'
+            : outcome === 'authentication_required'
+              ? 'not_checked'
+              : 'valid',
+        lastCheckedAt: checkedAt,
+      });
       return result(
         projectId,
         authenticationRequired ? 'invalid' : 'valid',
+        outcome,
         currentUrl,
         authenticationRequired
           ? (visibleAuthenticationRequirement?.message ??
-              'The saved session was redirected to a login or authentication page.')
-          : 'The saved browser state reached the configured target without an obvious login redirect.',
+              (storageStatePath === null
+                ? 'The configured target redirected to a login or authentication page.'
+                : 'The saved session was redirected to a login or authentication page.'))
+          : storageStatePath === null
+            ? 'The configured target loaded without an obvious login redirect.'
+            : 'The saved browser state reached the configured target without an obvious login redirect.',
         checkedAt,
       );
     } catch {
+      const previous = this.store.status(projectId);
+      this.store.recordAccess({
+        projectId,
+        requirement: previous.requirement ?? 'unknown',
+        verification: 'failed',
+        lastCheckedAt: checkedAt,
+      });
       return result(
         projectId,
         'runner_error',
+        'target_unavailable',
         safeCurrentUrl(session),
-        'Authentication validation could not load the configured target.',
+        'FormCrash could not load the configured target to check access.',
         checkedAt,
       );
     } finally {
@@ -104,6 +150,7 @@ export class AuthValidationService {
 function result(
   projectId: string,
   status: AuthValidationResult['status'],
+  outcome: NonNullable<AuthValidationResult['outcome']>,
   currentUrl: string | null,
   message: string,
   checkedAt: string,
@@ -111,6 +158,7 @@ function result(
   return authValidationResultSchema.parse({
     projectId,
     status,
+    outcome,
     currentUrl,
     message,
     checkedAt,

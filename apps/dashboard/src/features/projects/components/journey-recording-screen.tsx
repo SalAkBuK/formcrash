@@ -11,6 +11,7 @@ import type {
 
 import { StateMessage } from '../../../components/ui/state-message';
 import { StatusBadge } from '../../../components/ui/status-badge';
+import { FormCrashApiError } from '../../../lib/api-client';
 import {
   getProject,
   getRecording,
@@ -18,6 +19,10 @@ import {
   startRecording,
   stopRecording,
 } from '../api/projects';
+import {
+  AuthenticationRecoveryPanel,
+  useAuthenticationGate,
+} from './authentication-gate';
 
 export function JourneyRecordingScreen({
   projectId,
@@ -31,6 +36,7 @@ export function JourneyRecordingScreen({
   const [journeyName, setJourneyName] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const authentication = useAuthenticationGate({ projectId });
 
   useEffect(() => {
     let active = true;
@@ -59,16 +65,29 @@ export function JourneyRecordingScreen({
     return () => window.clearInterval(timer);
   }, [projectId, recording?.id, recording?.status]);
 
-  async function begin(): Promise<void> {
+  async function begin(preflightComplete = false): Promise<boolean> {
+    const operation = { kind: 'startRecording', projectId } as const;
+    if (!preflightComplete && !(await authentication.ensure(operation)))
+      return false;
     setBusy('start');
     setError(null);
     try {
       const session = await startRecording(projectId);
       setRecording(session);
       setSteps(session.steps);
-      if (session.status === 'runner_error') setError(session.errorMessage);
+      if (session.status === 'runner_error') {
+        setError(session.errorMessage);
+        return false;
+      }
+      return true;
     } catch (reason: unknown) {
-      setError(messageOf(reason));
+      if (
+        reason instanceof FormCrashApiError &&
+        reason.code === 'AUTHENTICATION_REQUIRED'
+      ) {
+        authentication.requireRecovery(operation, 'expired');
+      } else setError(messageOf(reason));
+      return false;
     } finally {
       setBusy(null);
     }
@@ -161,6 +180,15 @@ export function JourneyRecordingScreen({
       {error !== null ? (
         <StateMessage variant="error">{error}</StateMessage>
       ) : null}
+      <AuthenticationRecoveryPanel
+        gate={authentication}
+        onRetry={(operation) => {
+          if (operation.kind !== 'startRecording') return;
+          void begin(true).then((started) => {
+            if (started) authentication.complete();
+          });
+        }}
+      />
       <section className="panel crm-recording-control">
         <div>
           <p className="eyebrow">Browser recorder</p>
@@ -170,7 +198,11 @@ export function JourneyRecordingScreen({
         <div className="crm-form-actions">
           <button
             className="button button-primary"
-            disabled={busy !== null || recording?.status === 'recording'}
+            disabled={
+              busy !== null ||
+              recording?.status === 'recording' ||
+              authentication.pending !== null
+            }
             onClick={() => void begin()}
             type="button"
           >

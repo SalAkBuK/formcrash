@@ -90,12 +90,16 @@ export class AuthStateStore {
 
   status(projectId: string): ProjectAuthStatus {
     const metadata = this.repository.getAuthSession(projectId);
+    const access = this.repository.getAuthAccess(projectId);
     if (metadata === null) {
       return {
         configured: false,
         available: false,
         capturedAt: null,
         missingReason: null,
+        requirement: access.requirement,
+        verification: access.verification,
+        lastCheckedAt: access.lastCheckedAt,
       };
     }
     const available = existsSync(this.resolve(metadata.relativePath));
@@ -106,7 +110,20 @@ export class AuthStateStore {
       missingReason: available
         ? null
         : 'Saved authentication state is missing from local runtime storage.',
+      requirement: access.requirement,
+      verification: access.verification,
+      lastCheckedAt: access.lastCheckedAt,
     };
+  }
+
+  recordAccess(input: {
+    readonly projectId: string;
+    readonly requirement: 'unknown' | 'not_required' | 'required';
+    readonly verification:
+      'not_checked' | 'valid' | 'expired' | 'failed' | 'inconclusive';
+    readonly lastCheckedAt: string | null;
+  }): void {
+    this.repository.saveAuthAccess(input);
   }
 
   usablePath(projectId: string): string | null {
@@ -142,6 +159,12 @@ export class AuthStateStore {
         updatedAt: now,
       };
       this.repository.saveAuthSession(metadata);
+      this.repository.saveAuthAccess({
+        projectId,
+        requirement: 'required',
+        verification: 'not_checked',
+        lastCheckedAt: null,
+      });
     } finally {
       rmSync(temporary, { force: true });
     }
@@ -249,6 +272,25 @@ export class AuthCaptureManager {
         id,
         status: 'runner_error',
         errorMessage: 'Authentication state could not be saved locally.',
+        completedAt: new Date().toISOString(),
+      });
+    } finally {
+      active.release();
+    }
+  }
+
+  async cancel(id: string): Promise<AuthCaptureSession> {
+    const active = this.active;
+    if (active === null || active.id !== id) {
+      throw new Error('Authentication capture is not active.');
+    }
+    this.active = null;
+    try {
+      await active.browser.close();
+      return this.repository.updateAuthCapture({
+        id,
+        status: 'cancelled',
+        errorMessage: null,
         completedAt: new Date().toISOString(),
       });
     } finally {
