@@ -22,6 +22,35 @@ export function initialCandidateIndex(
   return discovery.candidates.findIndex((candidate) => candidate.recommended);
 }
 
+export function guidedConfirmableCandidate(
+  discovery: RequestDiscoveryResult,
+): RankedRequestCandidate | null {
+  if (discovery.recommendation.outcome !== 'review') return null;
+  const businessMutations = discovery.candidates.filter(
+    (candidate) =>
+      candidate.classification === 'likely_business_mutation' &&
+      ['POST', 'PUT', 'PATCH', 'DELETE'].includes(
+        candidate.method.toUpperCase(),
+      ),
+  );
+  if (businessMutations.length !== 1) return null;
+  const candidate = businessMutations[0];
+  if (
+    candidate === undefined ||
+    candidate.rank !== 1 ||
+    candidate.confidence !== 'review' ||
+    candidate.failed ||
+    candidate.status === null ||
+    candidate.status < 200 ||
+    candidate.status >= 400 ||
+    candidate.score < 60 ||
+    !candidate.reasons.some((reason) => reason.code === 'cross_origin')
+  ) {
+    return null;
+  }
+  return candidate;
+}
+
 export function selectionProvenance(
   discovery: RequestDiscoveryResult,
   selected: RankedRequestCandidate,

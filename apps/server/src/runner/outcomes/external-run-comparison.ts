@@ -451,7 +451,7 @@ function pairedChecks(
         .slice(0, 24),
       outcomeCheckId: beforeItem.check.id,
       type: beforeItem.check.type,
-      approvedDescription: beforeItem.check.description,
+      approvedDescription: beforePresented.approvedDescription,
       expectedCondition: beforePresented.expectedCondition,
       beforeStatus: beforeResult.status,
       afterStatus: afterResult.status,

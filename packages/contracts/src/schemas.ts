@@ -428,6 +428,7 @@ export const outcomeCaptureStatusSchema = z.enum([
   'awaiting_selection',
   'selection_ready',
   'selection_rejected',
+  'selection_cancelled',
   'closing',
   'completed',
   'runner_error',

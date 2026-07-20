@@ -199,17 +199,29 @@ export class OutcomeCaptureManager {
       await browser.settle(900);
       await assertNoVisibleAuthenticationRequirement(browser);
       const finalPathname = pathnameOf(browser.currentUrl());
-      if (browser.enterOutcomeSelection === undefined) {
+      this.update(id, { finalPathname });
+      try {
+        if (browser.enterOutcomeSelection === undefined) {
+          throw new Error(
+            'The replay browser does not support outcome selection.',
+          );
+        }
+        await browser.enterOutcomeSelection((selection) => {
+          this.acceptSelection(id, selection);
+        });
+      } catch (error: unknown) {
+        const detail =
+          error instanceof Error && error.message.trim() !== ''
+            ? error.message
+            : 'The Chromium selection bridge did not initialize.';
         throw new Error(
-          'The replay browser does not support outcome selection.',
+          `Baseline replay completed, but Outcome Check selection could not start. The Critical Action may already have changed target data. ${detail}`,
+          { cause: error },
         );
       }
-      await browser.enterOutcomeSelection((selection) => {
-        this.acceptSelection(id, selection);
-      });
+      this.completeCancelledSessionsForJourney(journeyId, id);
       return this.update(id, {
         status: 'awaiting_selection',
-        finalPathname,
       });
     } catch (error: unknown) {
       if (error instanceof SavedAuthenticationExpiredError) {
@@ -238,17 +250,28 @@ export class OutcomeCaptureManager {
     journeyId: string,
   ): Promise<OutcomeCaptureSession | null> {
     const id = this.active?.id;
-    if (id === undefined) return null;
-    const capture = await this.get(id);
-    return capture?.journeyId === journeyId ? capture : null;
+    if (id !== undefined) {
+      const capture = await this.get(id);
+      return capture?.journeyId === journeyId ? capture : null;
+    }
+    return (
+      [...this.sessions.values()]
+        .reverse()
+        .find(
+          (capture) =>
+            capture.journeyId === journeyId &&
+            capture.status === 'selection_cancelled' &&
+            !this.isExpired(capture),
+        ) ?? null
+    );
   }
 
   async approve(
     id: string,
     input: ApproveOutcomeCheckRequest,
   ): Promise<OutcomeCheck> {
-    const session = await this.requireActive(id);
     if (input.type === 'final_pathname_matches') {
+      const session = await this.requirePathApprovalSession(id);
       if (
         session.finalPathname === null ||
         input.expectedPathname !== session.finalPathname
@@ -257,14 +280,19 @@ export class OutcomeCaptureManager {
           'The approved pathname must match the baseline replay’s final pathname.',
         );
       }
-      return this.outcomes.saveOutcomeCheck({
+      const saved = this.outcomes.saveOutcomeCheck({
         journeyId: session.journeyId,
         criticalActionId: session.criticalActionId,
         type: input.type,
         description: input.description,
         expectedPathname: input.expectedPathname,
       });
+      if (session.status === 'selection_cancelled') {
+        this.update(id, { status: 'completed', errorMessage: null });
+      }
+      return saved;
     }
+    const session = await this.requireActive(id);
     if (
       session.status !== 'selection_ready' ||
       session.selectedTarget === null
@@ -347,6 +375,21 @@ export class OutcomeCaptureManager {
     return this.requireSession(id);
   }
 
+  private async requirePathApprovalSession(
+    id: string,
+  ): Promise<OutcomeCaptureSession> {
+    if (this.active?.id === id) return this.requireActive(id);
+    const session = this.requireSession(id);
+    if (session.status !== 'selection_cancelled') {
+      throw new OutcomeCaptureNotActiveError();
+    }
+    if (this.isExpired(session)) {
+      this.update(id, { status: 'expired' });
+      throw new OutcomeCaptureStaleError();
+    }
+    return session;
+  }
+
   private isExpired(session: OutcomeCaptureSession): boolean {
     return this.now() >= Date.parse(session.expiresAt);
   }
@@ -379,10 +422,38 @@ export class OutcomeCaptureManager {
 
   private async handleBrowserClosed(id: string): Promise<void> {
     if (this.active?.id !== id) return;
+    const session = this.requireSession(id);
+    if (
+      session.finalPathname !== null &&
+      ['awaiting_selection', 'selection_ready', 'selection_rejected'].includes(
+        session.status,
+      )
+    ) {
+      await this.cancelSelection(id);
+      return;
+    }
     await this.failAndClose(
       id,
       'Chromium was closed before the Outcome Check capture finished. Start a new baseline replay.',
     );
+  }
+
+  private async cancelSelection(id: string): Promise<void> {
+    const active = this.active;
+    if (active === null || active.id !== id) return;
+    this.active = null;
+    await active.browser.close().catch(() => undefined);
+    if (active.afterRunHook !== null) {
+      await executeHttpHook('after', active.afterRunHook, active.events).catch(
+        () => undefined,
+      );
+    }
+    active.release();
+    this.update(id, {
+      status: 'selection_cancelled',
+      errorMessage: null,
+      completedAt: new Date(this.now()).toISOString(),
+    });
   }
 
   private async finish(
@@ -443,6 +514,21 @@ export class OutcomeCaptureManager {
     }
     return session;
   }
+
+  private completeCancelledSessionsForJourney(
+    journeyId: string,
+    exceptId: string,
+  ): void {
+    for (const session of this.sessions.values()) {
+      if (
+        session.id !== exceptId &&
+        session.journeyId === journeyId &&
+        session.status === 'selection_cancelled'
+      ) {
+        this.update(session.id, { status: 'completed' });
+      }
+    }
+  }
 }
 
 function analyzeSelection(
@@ -494,14 +580,14 @@ function analyzeSelection(
     );
   }
   const bindings = generatedBindings(selection, runtime);
-  if (
+  const locatorContainsGeneratedValue =
     selection.locator !== null &&
-    containsGeneratedValue(locatorStrings(selection.locator), runtime)
-  ) {
+    containsGeneratedValue(locatorStrings(selection.locator), runtime);
+  if (locatorContainsGeneratedValue && bindings.length === 0) {
     warnings.push(
       warning(
         'dynamic_locator',
-        'The locator depends on a run-specific generated value and cannot be persisted safely.',
+        'The locator depends on a run-specific generated value, but the selected element does not expose a matching value that FormCrash can bind safely.',
       ),
     );
   }
@@ -538,7 +624,7 @@ function analyzeSelection(
     selection.fingerprint.accessibleName ||
     selection.fingerprint.tagName;
   const target = capturedOutcomeTargetSchema.parse({
-    locator: selection.locator,
+    locator: sanitizeGeneratedLocator(selection.locator, runtime),
     fingerprint: sanitizeFingerprint(selection.fingerprint, runtime),
     preview: sanitizeGeneratedText(previewSource, runtime).slice(0, 300),
     reliability: warnings.length === 0 ? 'high' : 'review',
@@ -617,6 +703,22 @@ function sanitizeGeneratedText(
     }
   }
   return sanitized;
+}
+
+function sanitizeGeneratedLocator(
+  locator: ReplayLocator,
+  runtime: ResolvedRuntime,
+): ReplayLocator {
+  if (locator.strategy === 'role') {
+    return {
+      ...locator,
+      name: sanitizeGeneratedText(locator.name, runtime),
+    };
+  }
+  return {
+    ...locator,
+    value: sanitizeGeneratedText(locator.value, runtime),
+  };
 }
 
 function containsGeneratedValue(

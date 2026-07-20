@@ -213,7 +213,7 @@ const checks: readonly OutcomeCheck[] = [
     journeyId: journey.id,
     criticalActionId: criticalAction.id,
     type: 'final_pathname_matches',
-    description: 'The browser reaches the profile page.',
+    description: 'Exactly one matching item should appear.',
     expectedPathname: '/profile/saved',
     createdAt: '2026-07-18T09:07:00.000Z',
   },
@@ -294,19 +294,30 @@ describe('Journey Detail', () => {
     expect(await screen.findByText('Step 4')).toBeVisible();
     expect(screen.getAllByText('Critical Action').length).toBeGreaterThan(1);
     expect(
-      screen.getAllByText('One saved profile appears.').length,
+      screen.getAllByText(
+        'Exactly one result matching {{unique.email}} should appear.',
+      ).length,
     ).toBeGreaterThan(0);
     expect(
-      screen.getByText('Matching item appears exactly once'),
-    ).toBeVisible();
-    expect(
-      screen.getAllByText('Confirmation is visible.').length,
+      screen.getAllByText('Matching item appears exactly once').length,
     ).toBeGreaterThan(0);
-    expect(screen.getByText('Visible element exists')).toBeVisible();
     expect(
-      screen.getAllByText('The browser reaches the profile page.').length,
+      screen.getAllByText('The selected result element should be visible.')
+        .length,
     ).toBeGreaterThan(0);
-    expect(screen.getByText('Final pathname matches')).toBeVisible();
+    expect(
+      screen.getAllByText('Visible element exists').length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText('The journey should finish at /profile/saved.')
+        .length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.queryByText('Exactly one matching item should appear.'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getAllByText('Final pathname matches').length,
+    ).toBeGreaterThan(0);
     expect(screen.getByText('/profile/saved')).toBeVisible();
     expect(screen.getAllByText('{{unique.email}}').length).toBeGreaterThan(0);
   });
@@ -316,7 +327,9 @@ describe('Journey Detail', () => {
     const onSelectionChange = vi.fn();
     renderDetail({ journeys: [journey, previousVersion], onSelectionChange });
 
-    await screen.findByText('One saved profile appears.');
+    await screen.findByText(
+      'Exactly one result matching {{unique.email}} should appear.',
+    );
     await user.selectOptions(
       screen.getByLabelText('Journey version'),
       previousVersion.id,
@@ -406,9 +419,12 @@ describe('Journey Detail', () => {
       journeys: [missingTrace],
       selectedJourneyId: missingTrace.id,
     });
-    await screen.findByText('One saved profile appears.', {
-      selector: '.journey-outcome-list strong',
-    });
+    await screen.findByText(
+      'Exactly one result matching {{unique.email}} should appear.',
+      {
+        selector: '.journey-outcome-list strong',
+      },
+    );
     const nextAction = screen.getByText('Next action').parentElement!;
     expect(
       nextAction.querySelector('.journey-primary-action'),
@@ -421,7 +437,9 @@ describe('Journey Detail', () => {
     const onReplayModeChange = vi.fn();
     const onReplayPacingChange = vi.fn();
     renderDetail({ onReplayModeChange, onReplayPacingChange });
-    await screen.findByText('One saved profile appears.');
+    await screen.findByText(
+      'Exactly one result matching {{unique.email}} should appear.',
+    );
 
     await user.selectOptions(screen.getByLabelText('Replay mode'), 'strict');
     await user.selectOptions(screen.getByLabelText('Replay pacing'), 'fast');

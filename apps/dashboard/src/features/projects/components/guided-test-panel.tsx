@@ -14,7 +14,6 @@ import type {
   CreateExternalExperimentRequest,
   EphemeralRuntimeValues,
   ExternalRunDetail,
-  OutcomeCheck,
   PersistedJourney,
   Project,
   ProjectExecutionSettings,
@@ -39,6 +38,7 @@ import {
   type GuidedRecipeId,
 } from '../models/guided-recipes';
 import {
+  approveRequestRecommendationSelections,
   recommendationProvenance,
   recommendationSelections,
   recommendationSetForCandidate,
@@ -49,6 +49,11 @@ import { guidedStepValueOverrides } from '../models/guided-values';
 import { assessJourneyReadiness } from '../models/journey-readiness';
 import { journeyRuntimeRequirements } from '../models/journey-runtime';
 import {
+  describeOutcomeCheck,
+  outcomeCheckTypeLabel,
+} from '../models/outcome-check-presentation';
+import {
+  guidedConfirmableCandidate,
   initialCandidateIndex,
   matcherForCandidate,
   selectionProvenance,
@@ -238,6 +243,13 @@ export function GuidedTestPanel({
   );
   const recipe = guidedRecipe(recipeId);
   const assertions = selectedAssertions(assertionSelections);
+  const confirmableCandidate = useMemo(
+    () =>
+      discovery === null || selectedCandidate !== null
+        ? null
+        : guidedConfirmableCandidate(discovery),
+    [discovery, selectedCandidate],
+  );
   const missingRuntime = runtimeRequirements.filter(
     (requirement) =>
       (runtimeValues[requirement.name] ?? '').trim().length === 0,
@@ -449,6 +461,9 @@ export function GuidedTestPanel({
   const handleOutcomeState = useCallback((state: OutcomeDefinitionState) => {
     setOutcomeState(state);
   }, []);
+  const reviewOutcomeCheck = useCallback(() => {
+    setExpectedWorkspaceTab('checks');
+  }, []);
 
   function selectJourney(nextJourneyId: string): void {
     authentication.complete();
@@ -512,11 +527,18 @@ export function GuidedTestPanel({
           stepValueOverrides,
         },
       );
+      setDiscovery(discovered);
       const candidateIndex = initialCandidateIndex(discovered);
       const candidate = discovered.candidates[candidateIndex] ?? null;
       if (candidate === null) {
+        setSelectedCandidate(null);
+        setAssertionSelections([]);
+        if (guidedConfirmableCandidate(discovered) !== null) {
+          setShowValidation(false);
+          return true;
+        }
         throw new Error(
-          'FormCrash could not identify one request safely enough for Guided mode. Review the request matcher and technical assertions in Advanced mode.',
+          `${discovered.recommendation.explanation} Open Advanced mode to review the observed requests.`,
         );
       }
       const selections = recommendationSelections(
@@ -527,7 +549,6 @@ export function GuidedTestPanel({
           'Request discovery did not produce a runnable technical assertion set. Open Advanced mode to configure the runner explicitly.',
         );
       }
-      setDiscovery(discovered);
       setSelectedCandidate(candidate);
       setAssertionSelections(selections);
       completeStep(2);
@@ -541,6 +562,32 @@ export function GuidedTestPanel({
       reviewPending.current = false;
       setBusy(null);
     }
+  }
+
+  function confirmDiscoveredRequest(): void {
+    if (discovery === null) return;
+    const candidate = guidedConfirmableCandidate(discovery);
+    if (candidate === null) {
+      setError(
+        'This request can no longer be confirmed in Guided mode. Review the observed requests in Advanced mode.',
+      );
+      return;
+    }
+    const selections = approveRequestRecommendationSelections(
+      recommendationSetForCandidate(discovery, candidate),
+    );
+    if (selectedAssertions(selections).length === 0) {
+      setError(
+        'Request discovery did not produce bounded request checks for this candidate. Open Advanced mode to configure the runner explicitly.',
+      );
+      return;
+    }
+    setSelectedCandidate(candidate);
+    setAssertionSelections(selections);
+    completeStep(2);
+    navigateToStep(3);
+    setShowValidation(false);
+    setError(null);
   }
 
   async function saveAndRun(preflightComplete = false): Promise<boolean> {
@@ -869,22 +916,15 @@ export function GuidedTestPanel({
 
         {journey !== null &&
         outcomeState.checks.length === 0 &&
+        runtimeRequirements.length > 0 &&
         expectedWorkspaceTab === 'action' ? (
           <div className="guided-baseline-prerequisites">
-            {runtimeRequirements.length > 0 ? (
-              <RuntimeInputs
-                labelPrefix="Baseline"
-                requirements={runtimeRequirements}
-                runtimeValues={runtimeValues}
-                setRuntimeValues={setRuntimeValues}
-              />
-            ) : null}
-            {project.environment === 'production' ? (
-              <ProductionConfirmation
-                checked={productionConfirmed}
-                onChange={setProductionConfirmed}
-              />
-            ) : null}
+            <RuntimeInputs
+              labelPrefix="Baseline"
+              requirements={runtimeRequirements}
+              runtimeValues={runtimeValues}
+              setRuntimeValues={setRuntimeValues}
+            />
           </div>
         ) : null}
 
@@ -917,8 +957,17 @@ export function GuidedTestPanel({
               environment={project.environment}
               id="guided-outcome-configuration"
               journey={journey}
+              onReviewRequested={reviewOutcomeCheck}
               onStateChange={handleOutcomeState}
               presentation="wizard"
+              productionConfirmation={
+                project.environment === 'production' ? (
+                  <ProductionConfirmation
+                    checked={productionConfirmed}
+                    onChange={setProductionConfirmed}
+                  />
+                ) : undefined
+              }
               runtimeValues={runtimeValues}
             />
           </div>
@@ -1254,7 +1303,45 @@ export function GuidedTestPanel({
                 </StateMessage>
               )}
 
-              {safetyBlockers.length > 0 ? (
+              {confirmableCandidate !== null ? (
+                <section
+                  aria-labelledby="guided-request-confirmation-title"
+                  className="guided-request-confirmation"
+                >
+                  <StatusBadge tone="warning">Confirmation needed</StatusBadge>
+                  <h4 id="guided-request-confirmation-title">
+                    Confirm the request to stress
+                  </h4>
+                  <p>
+                    FormCrash found one successful state-changing request for{' '}
+                    {outcomeState.criticalAction?.label ??
+                      'the Critical Action'}
+                    , but it uses a different origin from the application.
+                  </p>
+                  <dl>
+                    <div>
+                      <dt>Request</dt>
+                      <dd>
+                        {confirmableCandidate.method}{' '}
+                        {new URL(confirmableCandidate.origin).host}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Path</dt>
+                      <dd>{confirmableCandidate.pathname}</dd>
+                    </div>
+                    <div>
+                      <dt>Response</dt>
+                      <dd>HTTP {confirmableCandidate.status}</dd>
+                    </div>
+                  </dl>
+                  <small>
+                    Use this request only if it represents the business action
+                    you recorded. FormCrash will also enable its bounded
+                    request-count and response checks.
+                  </small>
+                </section>
+              ) : safetyBlockers.length > 0 ? (
                 <BlockingReasons
                   heading="Safety & Data is incomplete"
                   reasons={safetyBlockers}
@@ -1278,12 +1365,18 @@ export function GuidedTestPanel({
                     authentication.pending !== null ||
                     safetyBlockers.length > 0
                   }
-                  onClick={() => void prepareReview()}
+                  onClick={
+                    confirmableCandidate === null
+                      ? () => void prepareReview()
+                      : confirmDiscoveredRequest
+                  }
                   variant="primary"
                 >
-                  {busy === 'review'
-                    ? 'Preparing review…'
-                    : 'Continue to Review'}
+                  {confirmableCandidate !== null
+                    ? 'Use this request'
+                    : busy === 'review'
+                      ? 'Preparing review…'
+                      : 'Continue to Review'}
                 </Button>
               </WizardActions>
             </aside>
@@ -1439,8 +1532,8 @@ export function GuidedTestPanel({
                   <ol>
                     {outcomeState.checks.map((check) => (
                       <li key={check.id}>
-                        <strong>{outcomeTypeLabel(check)}</strong>
-                        <span>{readableOutcome(check)}</span>
+                        <strong>{outcomeCheckTypeLabel(check.type)}</strong>
+                        <span>{describeOutcomeCheck(check)}</span>
                       </li>
                     ))}
                   </ol>
@@ -1871,26 +1964,6 @@ function ReviewRow({
       <dd className={technical ? 'technical-value' : undefined}>{value}</dd>
     </div>
   );
-}
-
-function readableOutcome(check: OutcomeCheck): string {
-  if (check.type === 'matching_item_appears_exactly_once') {
-    return `Exactly one result matching ${check.binding.template} should appear.`;
-  }
-  if (check.type === 'final_pathname_matches') {
-    return `The browser should finish at ${check.expectedPathname}.`;
-  }
-  return 'The captured result element should be visible.';
-}
-
-function outcomeTypeLabel(check: OutcomeCheck): string {
-  if (check.type === 'matching_item_appears_exactly_once') {
-    return 'Matching item appears exactly once';
-  }
-  if (check.type === 'final_pathname_matches') {
-    return 'Final pathname matches';
-  }
-  return 'Visible element exists';
 }
 
 function recordedEnvironmentSummary(journey: PersistedJourney | null): string {

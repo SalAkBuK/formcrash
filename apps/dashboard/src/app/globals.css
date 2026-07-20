@@ -1160,6 +1160,8 @@ input[type='radio'] {
 }
 
 .guided-ready-note {
+  display: grid;
+  gap: 0.6rem;
   margin: 0;
   border: 1px solid #3f7549;
   border-radius: 0.7rem;
@@ -1168,6 +1170,10 @@ input[type='radio'] {
   color: var(--safe);
   font-size: 0.84rem;
   font-weight: 700;
+}
+
+.guided-ready-note > .button {
+  justify-self: start;
 }
 
 .guided-readiness {
@@ -7011,6 +7017,17 @@ code,
   padding: var(--space-4);
 }
 
+.guided-production-confirmation > input[type='checkbox'] {
+  display: block;
+  flex: 0 0 1.25rem;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin: 0.1rem 0 0;
+  opacity: 1;
+  visibility: visible;
+  cursor: pointer;
+}
+
 .guided-production-confirmation > span {
   display: grid;
   gap: var(--space-1);
@@ -7770,6 +7787,47 @@ code,
   margin: 0.75rem 0 0;
   color: var(--text-secondary);
   font-size: 0.8125rem;
+}
+
+.guided-request-confirmation {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--border-warning);
+  border-radius: 0.5rem;
+  background: var(--surface-raised);
+}
+
+.guided-request-confirmation h4,
+.guided-request-confirmation p,
+.guided-request-confirmation dl {
+  margin: 0;
+}
+
+.guided-request-confirmation p,
+.guided-request-confirmation small,
+.guided-request-confirmation dt {
+  color: var(--text-secondary);
+}
+
+.guided-request-confirmation dl {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.guided-request-confirmation dl > div {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+.guided-request-confirmation dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--text-technical);
+  font-family: var(--font-technical);
+  font-size: var(--type-code);
 }
 
 .guided-safety-sidebar,

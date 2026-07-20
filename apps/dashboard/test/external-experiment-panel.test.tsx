@@ -1,5 +1,5 @@
 import { StrictMode } from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -415,6 +415,10 @@ beforeEach(() => {
 describe('external experiment dashboard workflow', () => {
   it('presents and initializes one high-confidence action once under Strict Mode', async () => {
     const user = userEvent.setup();
+    const productionProject = {
+      ...project,
+      environment: 'production' as const,
+    };
     const placeOrderStep = {
       ...journey.steps[0]!,
       id: 'place-order',
@@ -466,25 +470,27 @@ describe('external experiment dashboard workflow', () => {
     mocks.getCriticalAction.mockResolvedValue(null);
     mocks.listOutcomeChecks.mockResolvedValue([]);
     mocks.approveCriticalAction.mockResolvedValue(savedAction);
-    mocks.startOutcomeCapture.mockResolvedValue({
+    const checkoutCapture = {
       id: 'checkout-capture',
       journeyId: checkoutJourney.id,
       criticalActionId: savedAction.id,
       generatedInputs: [],
-      status: 'awaiting_selection',
+      status: 'awaiting_selection' as const,
       selectedTarget: null,
       selectionWarnings: [],
-      finalPathname: null,
+      finalPathname: '/checkout/complete',
       errorMessage: null,
       startedAt: '2026-07-16T00:00:00.000Z',
       expiresAt: '2026-07-16T00:10:00.000Z',
       completedAt: null,
-    });
+    };
+    mocks.startOutcomeCapture.mockResolvedValue(checkoutCapture);
+    mocks.getOutcomeCapture.mockResolvedValue(checkoutCapture);
 
     render(
       <StrictMode>
         <ExternalExperimentPanel
-          project={project}
+          project={productionProject}
           journeys={[checkoutJourney]}
         />
       </StrictMode>,
@@ -530,8 +536,20 @@ describe('external experiment dashboard workflow', () => {
     );
 
     const baseline = screen.getByRole('button', {
-      name: 'Start outcome baseline',
+      name: 'Replay and choose result',
     });
+    expect(baseline).toBeDisabled();
+    const outcomeConfiguration = document.querySelector(
+      '#guided-outcome-configuration',
+    );
+    expect(outcomeConfiguration).not.toBeNull();
+    const productionConfirmation = within(
+      outcomeConfiguration as HTMLElement,
+    ).getByRole('checkbox', {
+      name: /I confirm this test may change production data/u,
+    });
+    expect(productionConfirmation).toBeVisible();
+    await user.click(productionConfirmation);
     await waitFor(() => expect(baseline).toBeEnabled());
     await user.click(baseline);
     await waitFor(() =>
@@ -544,6 +562,21 @@ describe('external experiment dashboard workflow', () => {
     expect(mocks.getCriticalAction).toHaveBeenCalledOnce();
     expect(mocks.listOutcomeChecks).toHaveBeenCalledOnce();
     expect(mocks.getActiveOutcomeCapture).toHaveBeenCalledOnce();
+    expect(mocks.startOutcomeCapture).toHaveBeenCalledWith(
+      checkoutJourney.id,
+      {},
+      true,
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Use final page instead' }),
+    );
+    expect(
+      screen.getByRole('tab', { name: /Outcome Checks/u }),
+    ).toHaveAttribute('aria-selected', 'true');
+    expect(
+      screen.getByText('Final pathname:', { exact: false }),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Approve check' })).toBeEnabled();
   });
 
   it('shows a concrete first-test tutorial when no journey exists', async () => {
@@ -656,7 +689,7 @@ describe('external experiment dashboard workflow', () => {
     ).toBeVisible();
     await user.click(screen.getByRole('tab', { name: /Critical Action/u }));
     expect(
-      screen.getByRole('button', { name: 'Start outcome baseline' }),
+      screen.getByRole('button', { name: 'Replay and choose result' }),
     ).toBeVisible();
   });
 
@@ -722,6 +755,85 @@ describe('external experiment dashboard workflow', () => {
         'page.goto: Target page, context or browser has been closed',
       ),
     ).toBeVisible();
+  });
+
+  it('warns that target data may already have changed when result selection fails after replay', async () => {
+    const user = userEvent.setup();
+    mocks.listOutcomeChecks.mockResolvedValue([]);
+    mocks.getActiveOutcomeCapture.mockResolvedValue({
+      id: 'failed-outcome-selector',
+      journeyId: journey.id,
+      criticalActionId: criticalAction.id,
+      generatedInputs: [],
+      status: 'runner_error',
+      selectedTarget: null,
+      selectionWarnings: [],
+      finalPathname: '/portal/residents',
+      errorMessage:
+        'Baseline replay completed, but Outcome Check selection could not start. The Critical Action may already have changed target data. frame.evaluate: ReferenceError: __name is not defined',
+      startedAt: '2026-07-16T00:00:00.000Z',
+      expiresAt: '2026-07-16T00:10:00.000Z',
+      completedAt: '2026-07-16T00:01:00.000Z',
+    });
+
+    render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
+    await user.click(
+      await screen.findByRole('tab', { name: /Critical Action/u }),
+    );
+
+    expect(
+      await screen.findByText(
+        'Baseline completed, but result selection failed',
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        'The saved journey completed and may already have changed target data, but FormCrash could not start result selection. Do not immediately replay the mutation; review the target data first.',
+      ),
+    ).toBeVisible();
+    expect(screen.queryByText('Baseline replay could not complete')).toBeNull();
+  });
+
+  it('offers another selection or final-page recovery for a rejected result', async () => {
+    const user = userEvent.setup();
+    mocks.listOutcomeChecks.mockResolvedValue([]);
+    mocks.getActiveOutcomeCapture.mockResolvedValue({
+      id: 'rejected-outcome-selection',
+      journeyId: journey.id,
+      criticalActionId: criticalAction.id,
+      generatedInputs: [],
+      status: 'selection_rejected',
+      selectedTarget: null,
+      selectionWarnings: [
+        {
+          code: 'dynamic_locator',
+          message:
+            'The selected result could not be bound to a generated journey value.',
+        },
+      ],
+      finalPathname: '/portal/residents',
+      errorMessage: null,
+      startedAt: '2026-07-16T00:00:00.000Z',
+      expiresAt: '2026-07-16T00:10:00.000Z',
+      completedAt: null,
+    });
+
+    render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
+    await user.click(
+      await screen.findByRole('tab', { name: /Critical Action/u }),
+    );
+
+    expect(
+      await screen.findByText('This result cannot be saved as selected.'),
+    ).toBeVisible();
+    expect(screen.getByText(/click a different stable row/u)).toBeVisible();
+    await user.click(
+      screen.getByRole('button', { name: 'Use captured final page' }),
+    );
+    expect(
+      screen.getByRole('tab', { name: /Outcome Checks/u }),
+    ).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('button', { name: 'Approve check' })).toBeEnabled();
   });
 
   it('keeps authentication unknown, redacts runtime values, and requires production confirmation', async () => {
@@ -964,7 +1076,9 @@ describe('external experiment dashboard workflow', () => {
       await screen.findByRole('tab', { name: /Outcome Checks/u }),
     );
     expect(
-      await screen.findByText('The profile page should appear.'),
+      await screen.findByText(
+        'The journey should finish at /profiles/created.',
+      ),
     ).toBeVisible();
     expect(screen.queryByText(/confidence/u)).not.toBeInTheDocument();
     await user.click(
@@ -1010,8 +1124,9 @@ describe('external experiment dashboard workflow', () => {
       screen.getByText(/trigger Submit profile 2 times, 300 ms apart/u),
     ).toBeVisible();
     expect(
-      screen.getByText('The browser should finish at /profiles/created.'),
-    ).toBeVisible();
+      screen.getAllByText('The journey should finish at /profiles/created.')
+        .length,
+    ).toBeGreaterThan(0);
     expect(screen.queryByText('runtime-only')).not.toBeInTheDocument();
     await user.click(
       screen.getByRole('button', {
@@ -1206,7 +1321,126 @@ describe('external experiment dashboard workflow', () => {
     );
   });
 
-  it('requires an explicit Guided choice when the server reports ambiguous mutations', async () => {
+  it('confirms one strong cross-origin mutation once before Guided mode uses it', async () => {
+    mocks.discoverRequests.mockResolvedValueOnce(
+      withAssertionRecommendations({
+        discoveryId: '99999999-aaaa-4bbb-8ccc-dddddddddddd',
+        discoveredAt: '2026-07-16T00:00:00.000Z',
+        journeyId: journey.id,
+        targetStepId: 'submit-profile',
+        candidates: [
+          {
+            candidateId: 'request-999999999999999999999999',
+            rank: 1,
+            score: 74,
+            classification: 'likely_business_mutation',
+            confidence: 'review',
+            recommended: false,
+            reasons: [
+              {
+                code: 'mutation_method',
+                label: 'POST can change server state.',
+                scoreImpact: 50,
+              },
+              {
+                code: 'cross_origin',
+                label: 'Request uses a different origin.',
+                scoreImpact: -20,
+              },
+              {
+                code: 'successful_status',
+                label: 'HTTP 201 is a successful response.',
+                scoreImpact: 15,
+              },
+            ],
+            method: 'POST',
+            pathname: '/api/org/buildings/building-1/residents',
+            origin: 'https://api.towerdeskpro.com',
+            status: 201,
+            failed: false,
+            relativeTimestampMs: 4,
+            occurrences: 1,
+          },
+        ],
+        recommendation: {
+          outcome: 'review',
+          recommendedCandidateId: null,
+          explanation:
+            'One cross-origin business mutation requires confirmation.',
+        },
+      }),
+    );
+    const user = userEvent.setup();
+    const panel = (
+      <StrictMode>
+        <ExternalExperimentPanel project={project} journeys={[journey]} />
+      </StrictMode>
+    );
+    const view = render(panel);
+
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Continue to Safety & Data',
+      }),
+    );
+    await user.type(
+      await screen.findByLabelText('Runtime SECRET_TOKEN'),
+      'runtime-only',
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Continue to Review' }),
+    );
+
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Confirm the request to stress',
+      }),
+    ).toBeVisible();
+    expect(screen.getByText('POST api.towerdeskpro.com')).toBeVisible();
+    expect(
+      screen.getByText('/api/org/buildings/building-1/residents'),
+    ).toBeVisible();
+    expect(mocks.discoverRequests).toHaveBeenCalledOnce();
+    expect(mocks.createExternalExperiment).not.toHaveBeenCalled();
+
+    view.rerender(panel);
+    expect(mocks.discoverRequests).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole('button', { name: 'Use this request' }));
+    expect(
+      await screen.findByRole('heading', { name: 'Review & Run' }),
+    ).toBeVisible();
+    expect(mocks.discoverRequests).toHaveBeenCalledOnce();
+
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Run repeated-submission experiment',
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.createExternalExperiment).toHaveBeenCalledOnce(),
+    );
+    expect(lastCreatedExperiment()).toMatchObject({
+      networkMatcher: {
+        method: 'POST',
+        pathname: '/api/org/buildings/building-1/residents',
+        host: 'api.towerdeskpro.com',
+      },
+      requestSelectionProvenance: {
+        selectionMode: 'manual_override',
+        discoveryOutcome: 'review',
+        selectedCandidateId: 'request-999999999999999999999999',
+        recommendedMatcher: null,
+        userOverrodeRecommendation: false,
+      },
+    });
+    expect(
+      lastCreatedExperiment().assertionSelectionProvenance?.every(
+        (entry) => entry.action === 'enabled',
+      ),
+    ).toBe(true);
+  });
+
+  it('keeps ambiguous mutations out of bounded Guided confirmation', async () => {
     mocks.discoverRequests.mockResolvedValueOnce(
       withAssertionRecommendations({
         discoveryId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
@@ -1283,8 +1517,13 @@ describe('external experiment dashboard workflow', () => {
       screen.getByRole('button', { name: 'Continue to Review' }),
     );
     expect(
-      await screen.findByText(/could not identify one request safely enough/u),
+      await screen.findByText(
+        /Multiple plausible state-changing requests have similar evidence/u,
+      ),
     ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Use this request' }),
+    ).not.toBeInTheDocument();
     expect(mocks.createExternalExperiment).not.toHaveBeenCalled();
     expect(
       screen.getAllByRole('button', { name: 'Open Advanced mode' }).length,
@@ -1322,8 +1561,11 @@ describe('external experiment dashboard workflow', () => {
       screen.getByRole('button', { name: 'Continue to Review' }),
     );
     expect(
-      await screen.findByText(/could not identify one request safely enough/u),
+      await screen.findByText(/No browser request was observed after the action/u),
     ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Use this request' }),
+    ).not.toBeInTheDocument();
     expect(mocks.createExternalExperiment).not.toHaveBeenCalled();
     expect(
       screen.getAllByRole('button', { name: 'Open Advanced mode' }).length,

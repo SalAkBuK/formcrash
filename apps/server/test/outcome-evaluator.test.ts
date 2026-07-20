@@ -69,6 +69,38 @@ describe('Outcome Check evaluator', () => {
     },
   );
 
+  it('resolves a parameterized generated-identity locator only in memory', async () => {
+    const session = fakeSession(1);
+    const check = exactlyOnce();
+    if (check.type !== 'matching_item_appears_exactly_once') {
+      throw new Error('Expected an exactly-once Outcome Check fixture.');
+    }
+    await evaluateOutcomeChecks({
+      ...context(session),
+      snapshot: snapshot({
+        ...check,
+        target: {
+          ...check.target,
+          locator: {
+            strategy: 'role',
+            role: 'row',
+            name: 'Tenant {{unique.email}}',
+          },
+        },
+      }),
+    });
+
+    expect(session.lastLocator?.strategy).toBe('role');
+    if (session.lastLocator?.strategy !== 'role') {
+      throw new Error('Expected the resolved role locator.');
+    }
+    expect(session.lastLocator.role).toBe('row');
+    expect(session.lastLocator.name).toMatch(/^Tenant formcrash\+/u);
+    expect(JSON.stringify(session.lastLocator)).not.toContain(
+      '{{unique.email}}',
+    );
+  });
+
   it.each([
     [1, 'passed'],
     [0, 'failed'],
@@ -249,7 +281,10 @@ function pathname(): OutcomeCheck {
   };
 }
 
-type TestSession = ReplayBrowserSession & { lastContainingText?: string };
+type TestSession = ReplayBrowserSession & {
+  lastContainingText?: string;
+  lastLocator?: ReplayLocator;
+};
 
 function fakeSession(
   count: number,
@@ -269,7 +304,8 @@ function fakeSession(
     captureScreenshot: () => Promise.resolve(),
     setScreenshotMasks: () => undefined,
     isVisible: () => Promise.resolve(count > 0),
-    countVisibleMatches: (_locator: ReplayLocator, containingText?: string) => {
+    countVisibleMatches: (resolvedLocator: ReplayLocator, containingText?: string) => {
+      session.lastLocator = resolvedLocator;
       if (containingText !== undefined) {
         session.lastContainingText = containingText;
       }
