@@ -2,6 +2,7 @@
   "name": "@formcrash/server",
   "version": "0.0.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "db:migrate": "tsx src/persistence/migrate-cli.ts",
