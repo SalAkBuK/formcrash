@@ -32,7 +32,10 @@ export async function executeRecordedStep(
     throw new UnsupportedSecurityChallengeError(securityChallenge.message);
   }
   const mode = options?.mode ?? 'adaptive';
-  const interaction = options?.interaction;
+  const interaction =
+    options?.interaction === undefined
+      ? undefined
+      : interactionWithReliablePostconditions(options.interaction);
   const resolvedValue =
     step.type === 'fill' ||
     step.type === 'checkbox' ||
@@ -228,6 +231,31 @@ function interactionWithResolvedPostconditions(
     };
   }
   return interaction;
+}
+
+function interactionWithReliablePostconditions(
+  interaction: RecordedInteraction,
+): RecordedInteraction {
+  if (
+    interaction.intent !== 'click' ||
+    interaction.fingerprint?.role !== 'combobox'
+  ) {
+    return interaction;
+  }
+  return {
+    ...interaction,
+    // Browser recording observes the click event before React-controlled
+    // dropdown state has necessarily committed. An aria-expanded="false"
+    // sample can therefore describe the pre-click control and must not cause
+    // replay to click the dropdown again or reject an otherwise valid action.
+    postconditions: interaction.postconditions.filter(
+      (condition) =>
+        !(
+          condition.kind === 'aria_attribute' &&
+          condition.name === 'aria-expanded'
+        ),
+    ),
+  };
 }
 
 export class UnsupportedSecurityChallengeError extends Error {

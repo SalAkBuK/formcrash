@@ -44,6 +44,7 @@ describe('SQLite migrations and seeded definitions', () => {
       '0015_network_evidence_provenance.sql',
       '0016_deduplicate_outcome_assertions.sql',
       '0017_restore_outcome_snapshot_nulls.sql',
+      '0018_recording_authentication_interruptions.sql',
     ]);
     expect(second).toEqual(first);
     expect(database.connection.pragma('foreign_keys', { simple: true })).toBe(

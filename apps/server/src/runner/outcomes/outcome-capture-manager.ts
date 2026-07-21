@@ -13,6 +13,7 @@ import {
   type OutcomeCaptureSession,
   type OutcomeCaptureWarning,
   type OutcomeCheck,
+  type RecordedInteraction,
   type ReplayLocator,
 } from '@formcrash/contracts';
 
@@ -45,6 +46,7 @@ import {
   type OutcomeElementSelection,
   type ReplayBrowserSession,
 } from '../recording/external-browser.js';
+import { paceReplayStep } from '../recording/replay-pacing.js';
 import { createOutcomeBaseline } from './baseline-journey.js';
 
 const DEFAULT_CAPTURE_TTL_MS = 10 * 60 * 1_000;
@@ -163,6 +165,12 @@ export class OutcomeCaptureManager {
       }
       const storageStatePath = this.authStore.usablePath(project.id);
       const trace = this.projects.getJourneyTraceManifest(journey.id);
+      const interactions = new Map(
+        (trace?.interactions ?? []).map((interaction) => [
+          interaction.stepId,
+          interaction,
+        ]),
+      );
       browser = await this.browserOwner.launchReplay({
         targetUrl: project.targetUrl,
         headless: this.config.browserHeadless,
@@ -200,9 +208,28 @@ export class OutcomeCaptureManager {
       this.update(id, { status: 'replaying' });
       await browser.navigate(project.targetUrl);
       await assertSavedAuthenticationSessionActive(project.targetUrl, browser);
-      for (const step of baselineJourney.steps) {
-        await executeRecordedStep(browser, step, (item) =>
-          resolveStepValue(item, runtime),
+      for (const [index, step] of baselineJourney.steps.entries()) {
+        const interaction = interactions.get(step.id);
+        const previousStep = baselineJourney.steps[index - 1];
+        const previousInteraction =
+          previousStep === undefined
+            ? undefined
+            : interactions.get(previousStep.id);
+        await paceReplayStep({
+          session: browser,
+          pacing: 'deliberate',
+          step,
+          ...(interaction === undefined ? {} : { interaction }),
+          ...(previousStep === undefined ? {} : { previousStep }),
+          ...(previousInteraction === undefined ? {} : { previousInteraction }),
+        });
+        await executeRecordedStep(
+          browser,
+          step,
+          (item) => resolveStepValue(item, runtime),
+          interaction === undefined
+            ? undefined
+            : { interaction: baselineReplayInteraction(interaction) },
         );
       }
       await browser.settle(900);
@@ -545,6 +572,20 @@ export class OutcomeCaptureManager {
       }
     }
   }
+}
+
+function baselineReplayInteraction(
+  interaction: RecordedInteraction,
+): RecordedInteraction {
+  if (interaction.intent !== 'click') return interaction;
+  return {
+    ...interaction,
+    // Click postconditions are sampled immediately after the browser event.
+    // React-controlled dropdowns can still expose their pre-click expanded
+    // state at that instant. Keep the recorded target candidates and geometry,
+    // but do not let a stale state sample toggle the control a second time.
+    postconditions: [],
+  };
 }
 
 function analyzeSelection(

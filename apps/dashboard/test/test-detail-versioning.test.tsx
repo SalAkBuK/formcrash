@@ -190,6 +190,7 @@ describe('stable test detail and immutable editing', () => {
       `/projects/${project.id}/tests/${versionOne.experimentId}`,
     );
     expect(screen.getByText('Immutable configurations')).toBeVisible();
+    expect(screen.getByLabelText('Replay pacing')).toHaveValue('deliberate');
     expect(
       screen.getByText('The receipt page should be visible.'),
     ).toBeVisible();

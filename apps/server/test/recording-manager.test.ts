@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { FormCrashDatabase } from '../src/persistence/database.js';
 import { initializePersistence } from '../src/persistence/initialize.js';
@@ -153,6 +153,45 @@ describe('recording event normalization', () => {
     expect(ownership.activeWorkload).toBeNull();
   });
 
+  it('stops an active recording and discards its steps when the session later redirects to sign-in', async () => {
+    temporary = createTemporaryTestConfig();
+    database = initializePersistence(temporary.config);
+    const repository = new ProjectJourneyRepository(database.connection);
+    const project = repository.createProject({
+      name: 'Expiring protected recording',
+      targetUrl: 'https://example.test/portal/dashboard',
+      description: '',
+    });
+    const browserOwner = new ExpiringRecordingBrowserOwner();
+    const ownership = new BrowserOwnership();
+    const manager = new RecordingManager(
+      temporary.config,
+      repository,
+      ownership,
+      browserOwner,
+    );
+
+    const started = await manager.start(project.id);
+    expect(manager.get(started.id)?.steps).toHaveLength(1);
+
+    browserOwner.expire();
+
+    await vi.waitFor(() => {
+      expect(manager.get(started.id)?.status).toBe('runner_error');
+      expect(manager.get(started.id)?.authenticationRequired).toBe(true);
+      expect(browserOwner.closed).toBe(true);
+    });
+    expect(manager.get(started.id)?.steps).toEqual([]);
+    expect(manager.get(started.id)?.traceStatus).toBe('not_captured');
+    expect(manager.getActiveForProject(project.id)).toBeNull();
+    expect(ownership.activeWorkload).toBeNull();
+    expect(() =>
+      manager.save(project.id, started.id, {
+        name: 'Must not save',
+      }),
+    ).toThrow('Only a completed recording can be saved as a journey.');
+  });
+
   it('coalesces one field across pauses until another action occurs', async () => {
     temporary = createTemporaryTestConfig();
     database = initializePersistence(temporary.config);
@@ -287,6 +326,48 @@ class LoginRecordingBrowserOwner implements ExternalBrowserOwner {
         return Promise.resolve();
       },
     });
+  }
+
+  launchReplay(): Promise<ReplayBrowserSession> {
+    return Promise.reject(new Error('Not used.'));
+  }
+}
+
+class ExpiringRecordingBrowserOwner implements ExternalBrowserOwner {
+  closed = false;
+  private callbacks: RecordingCallbacks | null = null;
+  private currentUrl = 'https://example.test/portal/dashboard';
+
+  launchRecording(
+    options: ExternalBrowserOptions,
+    callbacks: RecordingCallbacks,
+  ): Promise<RecordingBrowserSession> {
+    this.callbacks = callbacks;
+    callbacks.onEvent(
+      {
+        kind: 'click',
+        timestamp: Date.now(),
+        url: options.targetUrl,
+        locator: { strategy: 'id', value: 'open-account' },
+        fingerprint: fingerprint('button', 'open-account', 'Open account'),
+        value: null,
+        sensitive: false,
+      },
+      true,
+    );
+    return Promise.resolve({
+      currentUrl: () => this.currentUrl,
+      detectAuthenticationRequired: () => Promise.resolve(null),
+      close: () => {
+        this.closed = true;
+        return Promise.resolve();
+      },
+    });
+  }
+
+  expire(): void {
+    this.currentUrl = 'https://example.test/login';
+    this.callbacks?.onNavigation(this.currentUrl, Date.now());
   }
 
   launchReplay(): Promise<ReplayBrowserSession> {

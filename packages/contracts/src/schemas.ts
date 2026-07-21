@@ -319,6 +319,7 @@ export const recordingSessionSchema = z.object({
   steps: z.array(recordedJourneyStepSchema),
   warnings: z.array(recordingWarningSchema),
   errorMessage: z.string().nullable(),
+  authenticationRequired: z.boolean().default(false),
   startedAt: z.iso.datetime({ offset: true }),
   completedAt: z.iso.datetime({ offset: true }).nullable(),
   captureFormat: journeyCaptureFormatSchema.optional(),
@@ -1401,7 +1402,7 @@ export const runExternalExperimentRequestSchema = z.object({
   variables: ephemeralRuntimeValuesSchema.optional().default({}),
   confirmProduction: z.boolean().optional().default(false),
   replayMode: replayModeSchema.optional().default('adaptive'),
-  replayPacing: replayPacingSchema.optional().default('recorded'),
+  replayPacing: replayPacingSchema.optional().default('deliberate'),
 });
 
 export const externalNetworkObservationSchema = z.object({

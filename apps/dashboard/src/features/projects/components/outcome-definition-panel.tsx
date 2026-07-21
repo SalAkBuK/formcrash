@@ -484,10 +484,10 @@ export function OutcomeDefinitionPanel({
               <div className="guided-ready-note">
                 <strong>After the replay succeeds, Chromium stays open.</strong>
                 <span>
-                  In Chromium, click the tenant row, confirmation, or other
-                  visible result that proves success. The click is captured by
-                  FormCrash and may not visibly change the target page. Keep
-                  Chromium open, then return here to approve the check.
+                  In Chromium, click the visible result that proves the journey
+                  succeeded. FormCrash will highlight your selection; the page
+                  may not otherwise change. Keep Chromium open, then return here
+                  to review and approve the check.
                 </span>
               </div>
               <div className="guided-action-row">
@@ -965,7 +965,7 @@ function captureStatusLabel(status: OutcomeCaptureSession['status']): string {
   if (status === 'closing') return 'Closing Chromium';
   if (status === 'completed') return 'Capture complete';
   if (status === 'expired') return 'Capture expired';
-  return 'Runner error';
+  return 'Replay stopped';
 }
 
 function friendlyRunnerFailure(message: string): string {
@@ -973,7 +973,7 @@ function friendlyRunnerFailure(message: string): string {
     message.includes('strict mode violation') &&
     message.includes('resolved to')
   ) {
-    return 'A recorded label matched more than one element, so FormCrash could not safely identify the original control. Switching pages or buildings is supported; the problem was the ambiguous saved locator.';
+    return 'FormCrash found more than one match for a saved step and stopped before clicking the wrong control. Re-record that step with a unique label or stable selector.';
   }
   if (
     message.includes(

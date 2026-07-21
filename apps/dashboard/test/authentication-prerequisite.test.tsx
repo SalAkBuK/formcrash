@@ -232,6 +232,51 @@ describe('authentication prerequisites', () => {
     expect(projectsApi.startRecording).not.toHaveBeenCalled();
   });
 
+  it('replaces an interrupted recording with sign-in recapture instead of journey review', async () => {
+    const user = userEvent.setup();
+    projectsApi.getActiveRecording.mockResolvedValue({
+      id: 'recording-auth',
+      projectId: project.id,
+      status: 'recording',
+      steps: [],
+      warnings: [],
+      errorMessage: null,
+      startedAt: '2026-07-19T00:02:00.000Z',
+      completedAt: null,
+    });
+    projectsApi.getRecording.mockResolvedValue({
+      id: 'recording-auth',
+      projectId: project.id,
+      status: 'runner_error',
+      steps: [],
+      warnings: [],
+      authenticationRequired: true,
+      errorMessage:
+        'Recording stopped because the application required sign-in.',
+      startedAt: '2026-07-19T00:02:00.000Z',
+      completedAt: '2026-07-19T00:02:02.000Z',
+    });
+
+    render(<JourneyRecordingScreen projectId={project.id} />);
+
+    expect(await screen.findByText('Authentication expired')).toBeVisible();
+    expect(screen.getByText(/incomplete steps were discarded/u)).toBeVisible();
+    expect(
+      screen.queryByRole('heading', { name: 'Inspect before saving' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Stop recording' }),
+    ).toBeDisabled();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Capture sign-in again' }),
+    );
+    expect(authenticationApi.startAuthenticationCapture).toHaveBeenCalledWith(
+      project.id,
+    );
+    expect(authenticationApi.testAuthentication).not.toHaveBeenCalled();
+  });
+
   it('blocks recording until capture completes and requires an explicit start', async () => {
     const user = userEvent.setup();
     authenticationApi.testAuthentication

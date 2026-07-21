@@ -625,6 +625,27 @@ class PlaywrightExternalSession
         },
       };
     }
+    if (interaction.fingerprint !== null) {
+      const target = await resolveFingerprintTarget(
+        scope,
+        interaction.fingerprint,
+      );
+      attempts.push(
+        `fingerprint: ${target === null ? 0 : 1} unique visible match(es)`,
+      );
+      if (target !== null) {
+        return {
+          scope,
+          target,
+          resolution: {
+            strategy: 'fingerprint',
+            confidence: 0.7,
+            recovered: true,
+            attempts,
+          },
+        };
+      }
+    }
     throw new InteractionResolutionError(
       'No unique visible target matched the recorded interaction.',
       attempts,
@@ -1570,7 +1591,7 @@ function installOutcomeSelector(
             ? ' · More generated values are shown in the FormCrash dashboard.'
             : ''
         }`;
-  helper.textContent = `FormCrash outcome capture:${generatedValueHint} Click the matching tenant row, confirmation, or other visible result that proves success. Do not close this window.`;
+  helper.textContent = `FormCrash outcome capture:${generatedValueHint} Click the visible result that proves the journey succeeded. Do not close this window.`;
   const helperStyles: Readonly<Record<string, string>> = {
     display: 'block',
     position: 'fixed',

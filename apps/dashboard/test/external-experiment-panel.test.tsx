@@ -794,6 +794,7 @@ describe('external experiment dashboard workflow', () => {
     expect(
       await screen.findByText('Saved journey could not complete'),
     ).toBeVisible();
+    expect(screen.getByText('Replay stopped')).toBeVisible();
     expect(
       screen.getByText(/controlled browser closed before the saved journey/u),
     ).toBeVisible();
@@ -804,6 +805,53 @@ describe('external experiment dashboard workflow', () => {
         'page.goto: Target page, context or browser has been closed',
       ),
     ).toBeVisible();
+  });
+
+  it('explains outcome selection without assuming a tenant workflow', async () => {
+    const user = userEvent.setup();
+    mocks.listOutcomeChecks.mockResolvedValue([]);
+
+    render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
+    await user.click(
+      await screen.findByRole('tab', { name: /Critical Action/u }),
+    );
+
+    expect(
+      screen.getByText(/click the visible result that proves the journey/u),
+    ).toBeVisible();
+    expect(screen.queryByText(/tenant row/u)).not.toBeInTheDocument();
+  });
+
+  it('explains ambiguous replay targets without workflow-specific jargon', async () => {
+    const user = userEvent.setup();
+    mocks.listOutcomeChecks.mockResolvedValue([]);
+    mocks.getActiveOutcomeCapture.mockResolvedValue({
+      id: 'ambiguous-outcome-capture',
+      journeyId: journey.id,
+      criticalActionId: criticalAction.id,
+      generatedInputs: [],
+      status: 'runner_error',
+      selectedTarget: null,
+      selectionWarnings: [],
+      finalPathname: null,
+      errorMessage:
+        'locator.click: Error: strict mode violation: getByText resolved to 2 elements',
+      startedAt: '2026-07-16T00:00:00.000Z',
+      expiresAt: '2026-07-16T00:10:00.000Z',
+      completedAt: '2026-07-16T00:01:00.000Z',
+    });
+
+    render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
+    await user.click(
+      await screen.findByRole('tab', { name: /Critical Action/u }),
+    );
+
+    expect(
+      screen.getByText(/stopped before clicking the wrong control/u),
+    ).toBeVisible();
+    expect(
+      within(screen.getByRole('alert')).queryByText(/tenant|building/u),
+    ).not.toBeInTheDocument();
   });
 
   it('warns that target data may already have changed when result selection fails after replay', async () => {

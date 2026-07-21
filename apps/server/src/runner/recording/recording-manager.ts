@@ -224,16 +224,22 @@ export class RecordingManager {
       if (this.pending?.sessionId === created.id) this.pending = null;
       releaseOwnership();
       this.traceStore.removeRecording(created.id);
+      const authenticationRequired =
+        error instanceof SavedAuthenticationExpiredError;
       const failed = this.repository.updateRecordingSession({
         id: created.id,
         status: 'runner_error',
+        authenticationRequired,
         errorMessage: publicError(
           error,
           'Chromium could not start the recording.',
         ),
         completedAt: new Date().toISOString(),
+        ...(authenticationRequired
+          ? { steps: [], warnings: [], traceStatus: 'not_captured' as const }
+          : {}),
       });
-      if (error instanceof SavedAuthenticationExpiredError) throw error;
+      if (authenticationRequired) throw error;
       return failed;
     }
   }
@@ -476,6 +482,10 @@ export class RecordingManager {
       });
       return;
     }
+    if (isAuthenticationRedirect(fallbackUrl, parsedUrl.data)) {
+      void this.stopForAuthentication(pending.sessionId);
+      return;
+    }
     const previous = pending.steps.at(-1);
     if (
       previous !== undefined &&
@@ -527,6 +537,37 @@ export class RecordingManager {
           retrySafety: 'side_effect_possible',
         }),
       );
+    }
+  }
+
+  private async stopForAuthentication(sessionId: string): Promise<void> {
+    const active = this.active;
+    if (active === null || active.sessionId !== sessionId) return;
+
+    this.active = null;
+    clearTimeout(active.maximumDurationTimer);
+    this.repository.updateRecordingSession({
+      id: sessionId,
+      status: 'runner_error',
+      steps: [],
+      warnings: [],
+      authenticationRequired: true,
+      errorMessage:
+        'Recording stopped because the application required sign-in. Sign in again and recapture authentication before recording a new journey.',
+      completedAt: new Date().toISOString(),
+      traceStatus: 'not_captured',
+      traceSummary: null,
+      requestEvidence: [],
+    });
+    this.traceStore.removeRecording(sessionId);
+
+    try {
+      await active.browser.close();
+    } catch {
+      // Authentication recovery is still the actionable state when Chromium
+      // cleanup also fails, so do not replace it with a generic runner error.
+    } finally {
+      active.releaseOwnership();
     }
   }
 

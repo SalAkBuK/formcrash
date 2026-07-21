@@ -2,7 +2,12 @@ import { once } from 'node:events';
 import { createServer } from 'node:http';
 
 import { afterEach, describe, expect, it } from 'vitest';
-import type { OutcomeCaptureStatus, ReplayLocator } from '@formcrash/contracts';
+import {
+  hybridTraceManifestSchema,
+  type OutcomeCaptureStatus,
+  type RecordedInteraction,
+  type ReplayLocator,
+} from '@formcrash/contracts';
 
 import type { FormCrashDatabase } from '../src/persistence/database.js';
 import { initializePersistence } from '../src/persistence/initialize.js';
@@ -76,6 +81,118 @@ describe('Outcome baseline capture lifecycle', () => {
     expect(completed.status).toBe('completed');
     expect(setup.browser.closed).toBe(true);
     expect(setup.ownership.activeWorkload).toBeNull();
+  });
+
+  it('uses the recorded target candidate when a dropdown label is ambiguous', async () => {
+    const setup = createSetup();
+    const recording = setup.projects.createRecordingSession(setup.projectId);
+    const interaction = {
+      id: 'building-dropdown-interaction',
+      stepId: 'building-dropdown',
+      sequence: 1,
+      pageId: 'page-1',
+      framePath: [],
+      startedAt: 1,
+      durationMs: 0,
+      intent: 'click' as const,
+      pointerType: 'mouse' as const,
+      targetCandidates: [
+        {
+          locator: { strategy: 'text' as const, value: 'Current building' },
+          source: 'text' as const,
+          confidence: 0.72,
+        },
+        {
+          locator: {
+            strategy: 'css' as const,
+            value: '#building-switcher',
+          },
+          source: 'structure' as const,
+          confidence: 0.45,
+        },
+      ],
+      fingerprint: {
+        tagName: 'button',
+        inputType: null,
+        dataFormcrash: null,
+        dataTestId: null,
+        id: null,
+        role: 'combobox',
+        accessibleName: null,
+        name: null,
+        label: null,
+        text: 'Current building',
+        cssPath: '#building-switcher',
+      },
+      geometry: null,
+      postconditions: [
+        {
+          kind: 'aria_attribute' as const,
+          name: 'aria-expanded',
+          value: 'false',
+          target: {
+            strategy: 'text' as const,
+            value: 'Current building',
+          },
+        },
+      ],
+      retrySafety: 'side_effect_possible' as const,
+    };
+    const manifest = hybridTraceManifestSchema.parse({
+      formatVersion: 2,
+      environment: {
+        viewportWidth: 1440,
+        viewportHeight: 900,
+        deviceScaleFactor: 1,
+        locale: 'en-US',
+        timezoneId: 'UTC',
+        userAgent: 'outcome-capture-test',
+        colorScheme: 'light',
+        browserName: 'chromium',
+        browserVersion: 'test',
+      },
+      interactions: [interaction],
+      eventCount: 1,
+      pageCount: 1,
+      frameCount: 1,
+      redactionVersion: 1,
+      videoCaptured: false,
+      truncated: false,
+    });
+    const trace = setup.projects.createRecordingTrace({
+      recordingSessionId: recording.id,
+      manifest,
+      relativePath: 'journey-traces/test/trace-v2.json.gz',
+      sizeBytes: 1,
+      checksumSha256: 'a'.repeat(64),
+    });
+    database?.connection
+      .prepare(
+        `INSERT INTO journey_trace_links
+          (journey_id, trace_id, manifest_json, created_at)
+         VALUES (?, ?, ?, ?)`,
+      )
+      .run(
+        setup.journey.id,
+        trace.id,
+        JSON.stringify(manifest),
+        new Date().toISOString(),
+      );
+
+    const capture = await setup.manager.start(setup.journey.id, {});
+
+    expect(capture.status).toBe('awaiting_selection');
+    expect(setup.browser.semanticClickCount).toBe(0);
+    expect(setup.browser.clickInteractions).toHaveLength(1);
+    expect(setup.browser.clickInteractions[0]).toMatchObject({
+      stepId: 'building-dropdown',
+      targetCandidates: interaction.targetCandidates,
+      postconditions: [],
+    });
+    expect(setup.browser.settleDurations).toEqual([
+      ...setup.journey.steps.map(() => 1_000),
+      900,
+    ]);
   });
 
   it('captures a stable target and persists a generated-value binding without the literal value', async () => {
@@ -513,6 +630,29 @@ function createSetup(
     name: 'Add Tenant',
     steps: [
       {
+        id: 'building-dropdown',
+        name: 'Open building selector',
+        type: 'click',
+        timestamp: 0,
+        url: project.targetUrl,
+        locator: { strategy: 'text', value: 'Current building' },
+        fingerprint: {
+          tagName: 'button',
+          inputType: null,
+          dataFormcrash: null,
+          dataTestId: null,
+          id: null,
+          role: 'combobox',
+          accessibleName: null,
+          name: null,
+          label: null,
+          text: 'Current building',
+          cssPath: '#building-switcher',
+        },
+        value: null,
+        sensitive: false,
+      },
+      {
         id: 'email',
         name: 'Fill tenant email',
         type: 'fill',
@@ -599,6 +739,7 @@ function createSetup(
     browserOwner,
     ownership,
     outcomes,
+    projects,
     journey,
     settings,
     projectId: project.id,
@@ -622,6 +763,9 @@ class FakeBrowserOwner implements ExternalBrowserOwner {
 
 class FakeReplayBrowser implements ReplayBrowserSession {
   readonly filledValues: string[] = [];
+  readonly clickInteractions: RecordedInteraction[] = [];
+  readonly settleDurations: number[] = [];
+  semanticClickCount = 0;
   closed = false;
   navigateError: Error | null = null;
   selectionError: Error | null = null;
@@ -634,7 +778,29 @@ class FakeReplayBrowser implements ReplayBrowserSession {
     return Promise.resolve();
   }
   click(): Promise<void> {
+    this.semanticClickCount += 1;
     return Promise.resolve();
+  }
+  clickInteraction(interaction: RecordedInteraction): Promise<{
+    strategy: string;
+    confidence: number;
+    recovered: boolean;
+    attempts: readonly string[];
+  }> {
+    this.clickInteractions.push(interaction);
+    return Promise.resolve({
+      strategy: 'css',
+      confidence: 0.45,
+      recovered: true,
+      attempts: ['text: 2 candidate match(es)', 'css: 1 candidate match(es)'],
+    });
+  }
+  verifyInteraction(): Promise<{
+    passed: boolean;
+    expected: readonly string[];
+    observed: readonly string[];
+  }> {
+    return Promise.resolve({ passed: true, expected: [], observed: [] });
   }
   fill(_locator: ReplayLocator, value: string): Promise<void> {
     this.filledValues.push(value);
@@ -672,7 +838,8 @@ class FakeReplayBrowser implements ReplayBrowserSession {
   currentUrl(): string {
     return 'http://localhost:4300/complete';
   }
-  settle(): Promise<void> {
+  settle(milliseconds: number): Promise<void> {
+    this.settleDurations.push(milliseconds);
     return Promise.resolve();
   }
   close(): Promise<void> {

@@ -63,6 +63,7 @@ interface RecordingRow {
   readonly stepsJson: string;
   readonly warningsJson: string;
   readonly errorMessage: string | null;
+  readonly authenticationRequired: number;
   readonly startedAt: string;
   readonly completedAt: string | null;
   readonly captureFormat: string;
@@ -206,6 +207,7 @@ export class ProjectJourneyRepository {
       steps: [],
       warnings: [],
       errorMessage: null,
+      authenticationRequired: false,
       startedAt: new Date().toISOString(),
       completedAt: null,
       captureFormat: 'hybrid-v2',
@@ -244,6 +246,7 @@ export class ProjectJourneyRepository {
     readonly steps?: readonly RecordedJourneyStep[];
     readonly warnings?: readonly RecordingWarning[];
     readonly errorMessage?: string | null;
+    readonly authenticationRequired?: boolean;
     readonly completedAt?: string | null;
     readonly traceStatus?: TraceCaptureStatus;
     readonly traceSummary?: TraceSummary | null;
@@ -261,7 +264,8 @@ export class ProjectJourneyRepository {
       .prepare(
         `UPDATE recording_sessions
             SET status = ?, steps_json = ?, warnings_json = ?,
-                error_message = ?, completed_at = ?, trace_status = ?,
+                error_message = ?, authentication_required = ?,
+                completed_at = ?, trace_status = ?,
                 trace_summary_json = ?, request_evidence_json = ?
           WHERE id = ?`,
       )
@@ -272,6 +276,9 @@ export class ProjectJourneyRepository {
         input.errorMessage === undefined
           ? current.errorMessage
           : input.errorMessage,
+        input.authenticationRequired === undefined
+          ? Number(current.authenticationRequired)
+          : Number(input.authenticationRequired),
         input.completedAt === undefined
           ? current.completedAt
           : input.completedAt,
@@ -301,6 +308,7 @@ export class ProjectJourneyRepository {
       .prepare(
         `SELECT id, project_id AS projectId, status, steps_json AS stepsJson,
                 warnings_json AS warningsJson, error_message AS errorMessage,
+                authentication_required AS authenticationRequired,
                 started_at AS startedAt, completed_at AS completedAt,
                 capture_format AS captureFormat, trace_status AS traceStatus,
                 trace_summary_json AS traceSummaryJson,
@@ -311,6 +319,7 @@ export class ProjectJourneyRepository {
     if (row === undefined) return null;
     return recordingSessionSchema.parse({
       ...row,
+      authenticationRequired: row.authenticationRequired === 1,
       steps: JSON.parse(row.stepsJson) as unknown,
       warnings: JSON.parse(row.warningsJson) as unknown,
       traceSummary:

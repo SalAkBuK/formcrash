@@ -62,7 +62,7 @@ export function TestDetailScreen({
   const [data, setData] = useState<TestData | null>(null);
   const [values, setValues] = useState<EphemeralRuntimeValues>({});
   const [replayMode, setReplayMode] = useState<ReplayMode>('adaptive');
-  const [replayPacing, setReplayPacing] = useState<ReplayPacing>('recorded');
+  const [replayPacing, setReplayPacing] = useState<ReplayPacing>('deliberate');
   const [productionConfirmed, setProductionConfirmed] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editedTriggerCount, setEditedTriggerCount] = useState<2 | 3>(2);

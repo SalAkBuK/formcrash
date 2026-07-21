@@ -70,7 +70,7 @@ describe('external runner terminal paths', () => {
     ).toHaveLength(2);
     expect(owner.launchCount).toBe(1);
     expect(owner.lastOptions?.storageStatePath).toBeUndefined();
-    expect(owner.lastSession?.settleDurations).toEqual([700, 900]);
+    expect(owner.lastSession?.settleDurations).toEqual([1_000, 700, 900]);
     expect(ownership.activeWorkload).toBeNull();
     expect(
       experiments.listRuns({

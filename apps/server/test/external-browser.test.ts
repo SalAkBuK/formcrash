@@ -356,6 +356,171 @@ describe('external browser recorder injection', () => {
     await session.close();
   });
 
+  it('uses a structural trace candidate when a dropdown label matches multiple elements', async () => {
+    let page: Page | null = null;
+    const owner = new PlaywrightExternalBrowserOwner(undefined, (created) => {
+      page = created;
+    });
+    const session = await owner.launchReplay({
+      targetUrl,
+      headless: true,
+      timeoutMs: 10_000,
+    });
+    await session.navigate(targetUrl);
+    const interaction = recordedInteractionSchema.parse({
+      id: 'building-switcher-interaction',
+      stepId: 'building-switcher-step',
+      sequence: 1,
+      pageId: 'page-1',
+      framePath: [],
+      startedAt: Date.now(),
+      durationMs: 0,
+      intent: 'click',
+      pointerType: 'mouse',
+      targetCandidates: [
+        {
+          locator: { strategy: 'text', value: 'test building 2' },
+          source: 'text',
+          confidence: 0.72,
+        },
+        {
+          locator: { strategy: 'css', value: '#building-switcher' },
+          source: 'structure',
+          confidence: 0.45,
+        },
+      ],
+      fingerprint: {
+        tagName: 'button',
+        inputType: null,
+        dataFormcrash: null,
+        dataTestId: null,
+        id: null,
+        role: 'combobox',
+        accessibleName: null,
+        name: null,
+        label: null,
+        text: 'test building 2',
+        cssPath: '#building-switcher',
+      },
+      geometry: null,
+      postconditions: [
+        {
+          kind: 'aria_attribute',
+          name: 'aria-expanded',
+          value: 'false',
+          target: { strategy: 'text', value: 'test building 2' },
+        },
+      ],
+      retrySafety: 'side_effect_possible',
+    });
+
+    await expect(
+      executeRecordedStep(
+        session,
+        {
+          id: 'building-switcher-step',
+          name: 'Open building selector',
+          type: 'click',
+          timestamp: Date.now(),
+          url: targetUrl,
+          locator: { strategy: 'text', value: 'test building 2' },
+          fingerprint: interaction.fingerprint,
+          value: null,
+          sensitive: false,
+        },
+        () => '',
+        { interaction, mode: 'adaptive' },
+      ),
+    ).resolves.toMatchObject({
+      status: 'recovered',
+      strategy: 'css',
+    });
+    if (page === null) throw new Error('Replay page was not exposed.');
+    await expect(
+      (page as Page).locator('#building-switch-count').textContent(),
+    ).resolves.toBe('1');
+    await session.close();
+  });
+
+  it('uses the recorded fingerprint when trace candidates are stale or ambiguous', async () => {
+    let page: Page | null = null;
+    const owner = new PlaywrightExternalBrowserOwner(undefined, (created) => {
+      page = created;
+    });
+    const session = await owner.launchReplay({
+      targetUrl,
+      headless: true,
+      timeoutMs: 10_000,
+    });
+    await session.navigate(targetUrl);
+    const interaction = recordedInteractionSchema.parse({
+      id: 'stale-building-switcher-interaction',
+      stepId: 'stale-building-switcher-step',
+      sequence: 1,
+      pageId: 'page-1',
+      framePath: [],
+      startedAt: Date.now(),
+      durationMs: 0,
+      intent: 'click',
+      pointerType: 'mouse',
+      targetCandidates: [
+        {
+          locator: { strategy: 'text', value: 'test building 2' },
+          source: 'text',
+          confidence: 0.72,
+        },
+        {
+          locator: { strategy: 'css', value: '#old-building-switcher' },
+          source: 'structure',
+          confidence: 0.45,
+        },
+      ],
+      fingerprint: {
+        tagName: 'button',
+        inputType: null,
+        dataFormcrash: null,
+        dataTestId: null,
+        id: null,
+        role: 'combobox',
+        accessibleName: null,
+        name: null,
+        label: null,
+        text: 'test building 2',
+        cssPath: '#old-building-switcher',
+      },
+      geometry: null,
+      postconditions: [],
+      retrySafety: 'side_effect_possible',
+    });
+
+    await expect(
+      executeRecordedStep(
+        session,
+        {
+          id: 'stale-building-switcher-step',
+          name: 'Open building selector',
+          type: 'click',
+          timestamp: Date.now(),
+          url: targetUrl,
+          locator: { strategy: 'text', value: 'test building 2' },
+          fingerprint: interaction.fingerprint,
+          value: null,
+          sensitive: false,
+        },
+        () => '',
+        { interaction, mode: 'adaptive' },
+      ),
+    ).resolves.toMatchObject({
+      status: 'recovered',
+      strategy: 'fingerprint',
+    });
+    if (page === null) throw new Error('Replay page was not exposed.');
+    await expect(
+      (page as Page).locator('#building-switch-count').textContent(),
+    ).resolves.toBe('1');
+    await session.close();
+  });
+
   it('provides the build helper required by tsx-serialized functions', async () => {
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext();

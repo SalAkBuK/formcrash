@@ -95,7 +95,7 @@ export class ExternalExperimentRunner {
     ephemeral: EphemeralRuntimeValues,
     confirmProduction = false,
     replayMode: ReplayMode = 'adaptive',
-    replayPacing: ReplayPacing = 'recorded',
+    replayPacing: ReplayPacing = 'deliberate',
   ): Promise<ExternalRunDetail> {
     const experiment = this.repository.getVersion(experimentVersionId);
     if (experiment === null)
@@ -358,14 +358,31 @@ export class ExternalExperimentRunner {
         for (const [offset, step] of journey.steps
           .slice(targetIndex + 1)
           .entries()) {
+          const stepIndex = targetIndex + 1 + offset;
+          const interaction = traceInteractions.get(step.id);
+          const previousStep = journey.steps[stepIndex - 1];
+          const previousInteraction =
+            previousStep === undefined
+              ? undefined
+              : traceInteractions.get(previousStep.id);
+          await paceReplayStep({
+            session,
+            pacing: replayPacing,
+            step,
+            ...(interaction === undefined ? {} : { interaction }),
+            ...(previousStep === undefined ? {} : { previousStep }),
+            ...(previousInteraction === undefined
+              ? {}
+              : { previousInteraction }),
+          });
           await executeWithEvents(
             session,
             step,
-            targetIndex + 1 + offset,
+            stepIndex,
             events,
             runtime,
             outcomeCheckSnapshot,
-            traceInteractions.get(step.id),
+            interaction,
             replayMode,
           );
         }

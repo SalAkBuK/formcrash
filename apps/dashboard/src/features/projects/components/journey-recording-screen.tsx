@@ -92,6 +92,21 @@ export function JourneyRecordingScreen({
     return () => window.clearInterval(timer);
   }, [projectId, recording?.id, recording?.status]);
 
+  useEffect(() => {
+    if (recording?.authenticationRequired !== true) return;
+    setSteps([]);
+    setError(null);
+    authentication.requireRecovery(
+      { kind: 'startRecording', projectId },
+      'expired',
+    );
+  }, [
+    authentication.requireRecovery,
+    projectId,
+    recording?.id,
+    recording?.authenticationRequired,
+  ]);
+
   async function begin(preflightComplete = false): Promise<boolean> {
     const operation = { kind: 'startRecording', projectId } as const;
     if (!preflightComplete && !(await authentication.ensure(operation)))
@@ -190,12 +205,16 @@ export function JourneyRecordingScreen({
           tone={
             recording?.status === 'recording'
               ? 'browser'
-              : recording?.status === 'runner_error'
-                ? 'failure'
-                : 'neutral'
+              : recording?.authenticationRequired === true
+                ? 'warning'
+                : recording?.status === 'runner_error'
+                  ? 'failure'
+                  : 'neutral'
           }
         >
-          {recording?.status ?? 'Ready'}
+          {recording?.authenticationRequired === true
+            ? 'Sign-in required'
+            : (recording?.status ?? 'Ready')}
         </StatusBadge>
       </header>
       {project.environment === 'production' ? (

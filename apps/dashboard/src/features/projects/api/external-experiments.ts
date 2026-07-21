@@ -262,7 +262,7 @@ export function runExternalExperiment(
   variables: EphemeralRuntimeValues,
   confirmProduction: boolean,
   replayMode: ReplayMode = 'adaptive',
-  replayPacing: ReplayPacing = 'recorded',
+  replayPacing: ReplayPacing = 'deliberate',
 ): Promise<ExternalRunDetail> {
   return requestJson(
     `/api/external-experiments/${experimentVersionId}/runs`,
