@@ -269,6 +269,46 @@ The runner executes one browser run at a time. A concurrent sample-run request r
 
 The root launcher reads environment variables but does not load `.env` files automatically.
 
+## Contributing
+
+Contributions are welcome. Keep changes focused, preserve existing behavior outside the proposed scope, and represent incomplete or unsafe states honestly.
+
+### Before writing code
+
+1. Fork and clone the repository, then create a focused branch such as `feature/run-filtering` or `fix/outcome-selection`.
+2. Install the workspace and Chromium using the [Quick start](#quick-start) instructions.
+3. Read `docs/product/ui-direction.md` and `docs/product/active-bugs.md` before changing the dashboard. Read the relevant product and architecture documents for the area being changed.
+4. For a large feature, schema change, or new runner capability, open an issue first so the behavior and safety boundary can be agreed before implementation.
+
+### Engineering expectations
+
+- Preserve the persistent Project → Journey → Test → Run information architecture. Do not turn the application into a global wizard.
+- Keep real backend behavior connected. Do not hide active defects with placeholders, removed error states, relabeling, or weakened tests.
+- Treat browser execution and target data as potentially destructive. Use local or staging fixtures and never commit runtime data, credentials, authentication state, databases, or screenshots from real targets.
+- Update shared contracts before their server and dashboard consumers when a public shape changes.
+- Add focused regression coverage for every behavioral change. Browser-sensitive work should include visible-browser verification when the environment supports it.
+- Avoid unrelated cleanup or mass formatting in the same pull request.
+
+### Validate the change
+
+Run the tests closest to the changed package while developing:
+
+```bash
+pnpm --filter @formcrash/contracts test
+pnpm --filter @formcrash/dashboard test
+pnpm --filter @formcrash/server test
+```
+
+Before opening a pull request, run `pnpm verify`. If a repository-wide check exposes an unrelated pre-existing failure, do not rewrite unrelated files; run focused checks for the touched files and document the exact baseline failure in the pull request.
+
+A pull request should include:
+
+- the user problem and resulting behavior;
+- the intentionally changed files and any migration or compatibility impact;
+- tests and manual verification performed;
+- screenshots for meaningful dashboard changes;
+- remaining limitations, skipped verification, and data-safety considerations.
+
 ## Verification
 
 Run the complete non-destructive verification suite:
