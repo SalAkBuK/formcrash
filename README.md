@@ -390,3 +390,7 @@ FormCrash was built with Codex, but it has no runtime AI dependency.
 - High-fidelity replay contract: `docs/architecture/high-fidelity-replay.md`
 - Request recommendation model: `docs/architecture/request-recommendation.md`
 - Assertion recommendation model: `docs/architecture/assertion-recommendation.md`
+
+## License
+
+FormCrash is licensed under the MIT License. See `/LICENSE`.
