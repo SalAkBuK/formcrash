@@ -3,6 +3,8 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import type {
+  ExternalExperimentVersion,
+  ExternalTestSummary,
   PersistedJourney,
   Project,
   ProjectExecutionSettings,
@@ -13,21 +15,28 @@ import type {
 
 import { StateMessage } from '../../../components/ui/state-message';
 import { FormCrashApiError } from '../../../lib/api-client';
-import { getProjectSettings } from '../api/external-experiments';
+import {
+  getProjectSettings,
+  listJourneyExternalTests,
+  runExternalExperiment,
+  saveProductionReplayAcknowledgement,
+} from '../api/external-experiments';
 import {
   deleteJourney,
   getProject,
   listJourneys,
   replayJourney,
 } from '../api/projects';
-import { JourneyDetail } from './journey-detail';
+import {
+  SavedJourneyDetail,
+  type SavedJourneyView,
+} from './saved-journey-detail';
 import {
   AuthenticationRecoveryPanel,
   useAuthenticationGate,
 } from './authentication-gate';
 
-export type JourneyWorkspaceView =
-  'overview' | 'sequence' | 'outcomes' | 'replay';
+export type JourneyWorkspaceView = SavedJourneyView;
 
 export function JourneyWorkspaceScreen({
   journeyId,
@@ -44,6 +53,7 @@ export function JourneyWorkspaceScreen({
   const [settings, setSettings] = useState<ProjectExecutionSettings | null>(
     null,
   );
+  const [tests, setTests] = useState<readonly ExternalTestSummary[]>([]);
   const [replayResult, setReplayResult] = useState<ReplayResult | null>(null);
   const [replayMode, setReplayMode] = useState<ReplayMode>('adaptive');
   const [replayPacing, setReplayPacing] = useState<ReplayPacing>('recorded');
@@ -75,8 +85,9 @@ export function JourneyWorkspaceScreen({
       getProject(projectId),
       listJourneys(projectId),
       getProjectSettings(projectId),
+      listJourneyExternalTests(journeyId),
     ])
-      .then(([nextProject, nextJourneys, nextSettings]) => {
+      .then(([nextProject, nextJourneys, nextSettings, nextTests]) => {
         if (!active) return;
         if (!nextJourneys.some((item) => item.id === journeyId))
           throw new Error(
@@ -85,6 +96,10 @@ export function JourneyWorkspaceScreen({
         setProject(nextProject);
         setJourneys(nextJourneys);
         setSettings(nextSettings);
+        setTests(nextTests);
+        setProductionConfirmed(
+          nextSettings.productionReplayAcknowledged === true,
+        );
       })
       .catch((reason: unknown) => {
         if (active) setError(messageOf(reason));
@@ -152,6 +167,63 @@ export function JourneyWorkspaceScreen({
     }
   }
 
+  async function runTest(
+    version: ExternalExperimentVersion,
+    preflightComplete = false,
+  ): Promise<boolean> {
+    const operation = {
+      kind: 'runExperiment',
+      projectId,
+      journeyId: version.journeyId,
+      experimentVersionId: version.id,
+    } as const;
+    if (!preflightComplete && !(await authentication.ensure(operation)))
+      return false;
+    setBusy(`run-test-${version.id}`);
+    setError(null);
+    try {
+      const result = await runExternalExperiment(
+        version.id,
+        {},
+        project?.environment !== 'production' || productionConfirmed,
+      );
+      router.push(`/external-runs/${result.runId}`);
+      return true;
+    } catch (reason: unknown) {
+      if (
+        reason instanceof FormCrashApiError &&
+        reason.code === 'AUTHENTICATION_REQUIRED'
+      ) {
+        authentication.requireRecovery(operation, 'expired');
+      } else setError(messageOf(reason));
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function saveProductionAcknowledgement(
+    acknowledged: boolean,
+  ): Promise<void> {
+    const previous = productionConfirmed;
+    setProductionConfirmed(acknowledged);
+    setBusy('production-replay-acknowledgement');
+    setError(null);
+    try {
+      const next = await saveProductionReplayAcknowledgement(
+        projectId,
+        acknowledged,
+      );
+      setSettings(next);
+      setProductionConfirmed(next.productionReplayAcknowledged === true);
+    } catch (reason: unknown) {
+      setProductionConfirmed(previous);
+      setError(messageOf(reason));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   if (loading)
     return (
       <StateMessage variant="loading">Loading saved journey…</StateMessage>
@@ -168,42 +240,52 @@ export function JourneyWorkspaceScreen({
       <AuthenticationRecoveryPanel
         gate={authentication}
         onRetry={(operation) => {
+          if (operation.kind === 'runExperiment') {
+            const version = tests
+              .map((item) => item.latestVersion)
+              .find((item) => item.id === operation.experimentVersionId);
+            if (version === undefined) {
+              authentication.complete();
+              return;
+            }
+            void runTest(version, true).then((started) => {
+              if (started) authentication.complete();
+            });
+            return;
+          }
           if (operation.kind !== 'replayJourney') return;
-          const journey = journeys.find(
+          const selectedJourney = journeys.find(
             (item) => item.id === operation.journeyId,
           );
-          if (journey === undefined) {
+          if (selectedJourney === undefined) {
             authentication.complete();
             return;
           }
-          void run(journey, true).then((started) => {
+          void run(selectedJourney, true).then((started) => {
             if (started) authentication.complete();
           });
         }}
       />
-      <JourneyDetail
-        authCapture={null}
-        authMessage={null}
-        authenticationRequired={false}
+      <SavedJourneyDetail
         busy={
           busy ?? (authentication.pending === null ? null : 'authentication')
         }
         executionSettings={settings}
         journeys={journeys}
-        loading={false}
-        onAuthenticationConfirm={() => undefined}
-        onAuthenticationStart={() => undefined}
         onDelete={(journey) => void remove(journey)}
-        onManageProjects={() =>
-          router.push(`/projects/${projectId}/journeys/new`)
-        }
         onOpenTest={() =>
           router.push(
             `/projects/${projectId}/tests/new?journeyId=${journeyId}&step=outcome`,
           )
         }
-        onProductionConfirmationChange={setProductionConfirmed}
+        onProductionAcknowledgementChange={(acknowledged) =>
+          void saveProductionAcknowledgement(acknowledged)
+        }
+        onRecordNewVersion={() =>
+          router.push(`/projects/${projectId}/journeys/new`)
+        }
         onReplay={(journey) => void run(journey)}
+        onRunTest={(test) => void runTest(test.latestVersion)}
         onReplayModeChange={setReplayMode}
         onReplayPacingChange={setReplayPacing}
         onRuntimeValueChange={(selectedId, name, value) =>
@@ -215,13 +297,14 @@ export function JourneyWorkspaceScreen({
         onSelectionChange={(selectedId) =>
           router.push(journeyRoute(projectId, selectedId, view))
         }
-        productionReplayConfirmed={productionConfirmed}
+        productionReplayAcknowledged={productionConfirmed}
         project={project}
         replayMode={replayMode}
         replayPacing={replayPacing}
         replayResult={replayResult}
         replayValues={replayValues}
         selectedJourneyId={journeyId}
+        tests={tests}
         view={view}
       />
     </main>

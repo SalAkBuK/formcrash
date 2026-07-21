@@ -65,12 +65,29 @@ export function ExternalRunDetailRoute({ runId }: { readonly runId: string }) {
       <main className="dashboard-shell external-result-shell">
         <header className="external-result-page-heading">
           <div>
-            <p className="eyebrow">Persisted external run</p>
+            <p className="eyebrow">Saved run</p>
             <h1>Run {result.runId.slice(0, 8)}</h1>
           </div>
-          <Link className="button button-secondary" href="/runs">
-            All runs
-          </Link>
+          <div className="journey-card-actions">
+            <Link
+              className="button button-secondary button-compact"
+              href={`/projects/${result.projectId}/journeys/${result.journeyId}`}
+            >
+              Journey
+            </Link>
+            <Link
+              className="button button-secondary button-compact"
+              href={`/projects/${result.projectId}/tests/${result.experimentSnapshot.experimentId}`}
+            >
+              Test detail
+            </Link>
+            <Link
+              className="button button-secondary button-compact"
+              href={`/projects/${result.projectId}/runs`}
+            >
+              Project runs
+            </Link>
+          </div>
         </header>
         <ExternalRunResult eyebrow="Persisted result" result={result} />
         <details className="external-route-comparison">

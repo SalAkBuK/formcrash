@@ -1,9 +1,11 @@
 # Server-owned assertion recommendation
 
-Request discovery now produces assertion recommendations for the existing
-Impatient User repeated-action family. The dashboard does not generate a second
-recipe-specific assertion set. Guided and Advanced modes select from the same
-server response and persist how each recommendation was handled.
+This document describes the legacy request-discovery recommendation contract.
+The standard test editor no longer executes discovery or exposes a separate
+Advanced assertion workspace. It derives bounded built-in network checks from
+an explicitly approved recording/prior-run candidate and uses the reusable
+Technical checks editor for optional browser checks. The compatibility endpoint
+continues to return the recommendation records described below.
 
 ## Evidence boundary
 

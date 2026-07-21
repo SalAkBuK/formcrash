@@ -69,7 +69,7 @@ function generatedExpressionFor(
   if (descriptor.includes('name') && !descriptor.includes('username')) {
     return 'unique.name';
   }
-  return /(username|reference|passport|emirates|identifier|number)/u.test(
+  return /(username|reference|passport|emirates|identifier|number|code)/u.test(
     descriptor,
   )
     ? 'unique.text'

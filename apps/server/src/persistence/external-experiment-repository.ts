@@ -2,15 +2,21 @@ import { randomUUID } from 'node:crypto';
 
 import {
   createExternalExperimentRequestSchema,
+  createExternalExperimentSuiteRequestSchema,
+  createExternalExperimentVersionRequestSchema,
   externalAssertionResultSchema,
   externalExperimentListSchema,
   externalExperimentVersionSchema,
   externalNetworkObservationSchema,
+  recordedRequestEvidenceSchema,
   externalOutcomeCheckResultSchema,
   externalRunDetailSchema,
   externalRunLifecycleStatusSchema,
   externalRunListSchema,
   externalRunSummarySchema,
+  externalTestDetailSchema,
+  externalTestSummaryListSchema,
+  externalTestSummarySchema,
   externalRunnerErrorSchema,
   externalRunWarningSchema,
   persistedJourneySchema,
@@ -19,6 +25,8 @@ import {
   outcomeAggregateSchema,
   outcomeCheckRunSnapshotSchema,
   type CreateExternalExperimentRequest,
+  type CreateExternalExperimentSuiteRequest,
+  type CreateExternalExperimentVersionRequest,
   type ExternalAssertionResult,
   type ExternalExperimentVersion,
   type ExternalNetworkObservation,
@@ -27,11 +35,14 @@ import {
   type ExternalRunList,
   type ExternalRunListQuery,
   type ExternalRunSummary,
+  type ExternalTestDetail,
+  type ExternalTestSummary,
   type ExternalRunnerError,
   type ExternalRunWarning,
   type OutcomeAggregate,
   type OutcomeCheckRunSnapshot,
   type PersistedJourney,
+  type RecordedRequestEvidence,
   type RunArtifact,
   type RunEventEnvelope,
 } from '@formcrash/contracts';
@@ -39,8 +50,17 @@ import type Database from 'better-sqlite3';
 
 import type { CreateArtifactInput } from './run-repository.js';
 import { RunPersistenceError } from './run-repository.js';
+import { OutcomeCheckRepository } from './outcome-check-repository.js';
 import { createGuidedJourneySnapshot } from '../runner/external/guided-journey.js';
+import { createOutcomeBaseline } from '../runner/outcomes/baseline-journey.js';
 import { presentExternalRun } from '../runner/outcomes/outcome-result-presentation.js';
+
+export class ExternalTestNameExistsError extends Error {
+  constructor(readonly testName: string) {
+    super(`A test named "${testName}" already exists for this journey.`);
+    this.name = 'ExternalTestNameExistsError';
+  }
+}
 
 interface ExperimentRow {
   readonly id: string;
@@ -54,7 +74,10 @@ interface ExperimentRow {
   readonly journeySnapshotJson: string;
   readonly assertionsSnapshotJson: string;
   readonly requestSelectionProvenanceJson: string | null;
+  readonly networkEvidenceProvenanceJson: string | null;
   readonly assertionSelectionProvenanceJson: string | null;
+  readonly criticalActionSnapshotJson: string | null;
+  readonly outcomeChecksSnapshotJson: string;
   readonly createdAt: string;
 }
 
@@ -126,6 +149,18 @@ interface RunSummaryRow {
   readonly createdAt: string;
 }
 
+interface PriorRunEvidenceRow {
+  readonly runId: string;
+  readonly startedAt: string;
+  readonly networkObservationsJson: string;
+  readonly triggerTimestampMs: number;
+}
+
+export interface PriorRunRequestEvidence {
+  readonly runId: string;
+  readonly evidence: readonly RecordedRequestEvidence[];
+}
+
 interface EventRow {
   readonly id: string;
   readonly runId: string;
@@ -165,25 +200,16 @@ interface ArtifactRow {
 export class ExternalExperimentRepository {
   constructor(private readonly database: Database.Database) {}
 
-  createVersion(input: {
+  createTest(input: {
     readonly projectId: string;
     readonly journey: PersistedJourney;
     readonly request: CreateExternalExperimentRequest;
   }): ExternalExperimentVersion {
-    return this.protect('create an external experiment version', () => {
+    return this.protect('create an external test', () => {
       const request = createExternalExperimentRequestSchema.parse(
         input.request,
       );
-      const target = input.journey.steps.find(
-        (step) => step.id === request.targetStepId,
-      );
-      if (target === undefined)
-        throw new Error('Target journey step was not found.');
-      if (target.type !== 'click' && target.type !== 'submit') {
-        throw new Error(
-          'Impatient User can target only click or submit steps.',
-        );
-      }
+      this.validateTarget(input.journey, request.targetStepId);
       const journeySnapshot = createGuidedJourneySnapshot(
         input.journey,
         request.stepValueOverrides ?? {},
@@ -197,67 +223,83 @@ export class ExternalExperimentRepository {
           )
           .get(input.projectId, input.journey.id, request.name) as
           { id: string } | undefined;
-        const experimentId = existing?.id ?? randomUUID();
-        const now = new Date().toISOString();
-        if (existing === undefined) {
-          this.database
-            .prepare(
-              `INSERT INTO external_experiments
-                (id, project_id, journey_id, name, experiment_type, created_at)
-               VALUES (?, ?, ?, ?, 'impatient_user', ?)`,
-            )
-            .run(
-              experimentId,
-              input.projectId,
-              input.journey.id,
-              request.name,
-              now,
-            );
+        if (existing !== undefined) {
+          throw new ExternalTestNameExistsError(request.name);
         }
+        const experimentId = randomUUID();
+        const now = new Date().toISOString();
+        this.database
+          .prepare(
+            `INSERT INTO external_experiments
+              (id, project_id, journey_id, name, experiment_type, created_at)
+             VALUES (?, ?, ?, ?, 'impatient_user', ?)`,
+          )
+          .run(
+            experimentId,
+            input.projectId,
+            input.journey.id,
+            request.name,
+            now,
+          );
+        return this.insertVersion({
+          experimentId,
+          version: 1,
+          journeySnapshot,
+          request,
+          now,
+        });
+      });
+      return create();
+    });
+  }
+
+  createTestSuite(input: {
+    readonly projectId: string;
+    readonly journey: PersistedJourney;
+    readonly requests: CreateExternalExperimentSuiteRequest['tests'];
+  }): readonly ExternalExperimentVersion[] {
+    return this.protect('create an external test suite', () => {
+      const requests = createExternalExperimentSuiteRequestSchema.parse({
+        tests: input.requests,
+      }).tests;
+      const create = this.database.transaction(() =>
+        requests.map((request) =>
+          this.createTest({
+            projectId: input.projectId,
+            journey: input.journey,
+            request,
+          }),
+        ),
+      );
+      return create();
+    });
+  }
+
+  createVersion(input: {
+    readonly testId: string;
+    readonly request: CreateExternalExperimentVersionRequest;
+  }): ExternalExperimentVersion {
+    return this.protect('create an external test version', () => {
+      const request = createExternalExperimentVersionRequestSchema.parse(
+        input.request,
+      );
+      const latest = this.getLatestVersion(input.testId);
+      if (latest === null) throw new Error('External test was not found.');
+      this.validateTarget(latest.journeySnapshot, request.targetStepId);
+      const create = this.database.transaction(() => {
         const versionRow = this.database
           .prepare(
             `SELECT COALESCE(MAX(version), 0) AS version
                FROM external_experiment_versions WHERE experiment_id = ?`,
           )
-          .get(experimentId) as { version: number };
-        const version = versionRow.version + 1;
-        const id = randomUUID();
-        const configuration = {
-          targetStepId: request.targetStepId,
-          triggerCount: request.triggerCount,
-          intervalMs: request.intervalMs,
-          networkMatcher: request.networkMatcher,
-          continueAfterTarget: request.continueAfterTarget,
-          guided: request.guided ?? false,
-        };
-        this.database
-          .prepare(
-            `INSERT INTO external_experiment_versions
-              (id, experiment_id, version, configuration_json,
-               journey_snapshot_json, assertions_snapshot_json,
-               request_selection_provenance_json,
-               assertion_selection_provenance_json, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          )
-          .run(
-            id,
-            experimentId,
-            version,
-            JSON.stringify(configuration),
-            JSON.stringify(journeySnapshot),
-            JSON.stringify(request.assertions),
-            request.requestSelectionProvenance === null
-              ? null
-              : JSON.stringify(request.requestSelectionProvenance),
-            (request.assertionSelectionProvenance?.length ?? 0) === 0
-              ? null
-              : JSON.stringify(request.assertionSelectionProvenance),
-            now,
-          );
-        const created = this.getVersion(id);
-        if (created === null)
-          throw new Error('Created experiment version is missing.');
-        return created;
+          .get(input.testId) as { version: number };
+        return this.insertVersion({
+          experimentId: input.testId,
+          version: versionRow.version + 1,
+          journeySnapshot: latest.journeySnapshot,
+          request,
+          now: new Date().toISOString(),
+        });
       });
       return create();
     });
@@ -270,6 +312,23 @@ export class ExternalExperimentRepository {
         .get(id) as ExperimentRow | undefined;
       return row === undefined ? null : mapExperiment(row);
     });
+  }
+
+  getLatestVersion(testId: string): ExternalExperimentVersion | null {
+    return this.protect('read the latest external test version', () => {
+      const row = this.database
+        .prepare(
+          experimentSelect(
+            'WHERE e.id = ? ORDER BY ev.version DESC, ev.created_at DESC LIMIT 1',
+          ),
+        )
+        .get(testId) as ExperimentRow | undefined;
+      return row === undefined ? null : mapExperiment(row);
+    });
+  }
+
+  resolveVersion(identifier: string): ExternalExperimentVersion | null {
+    return this.getVersion(identifier) ?? this.getLatestVersion(identifier);
   }
 
   listVersions(journeyId: string): readonly ExternalExperimentVersion[] {
@@ -304,6 +363,45 @@ export class ExternalExperimentRepository {
     });
   }
 
+  listTestSummaries(journeyId: string): readonly ExternalTestSummary[] {
+    return this.protect('list stable external tests', () => {
+      const versions = this.listVersions(journeyId);
+      const families = new Map<string, ExternalExperimentVersion[]>();
+      for (const version of versions) {
+        const family = families.get(version.experimentId) ?? [];
+        family.push(version);
+        families.set(version.experimentId, family);
+      }
+      return externalTestSummaryListSchema.parse({
+        items: [...families.values()].map((family) =>
+          this.mapTestSummary(family),
+        ),
+      }).items;
+    });
+  }
+
+  getTestDetail(testId: string): ExternalTestDetail | null {
+    return this.protect('read stable external test detail', () => {
+      const historicalVersion = this.getVersion(testId);
+      const stableTestId = historicalVersion?.experimentId ?? testId;
+      const rows = this.database
+        .prepare(
+          experimentSelect(
+            'WHERE e.id = ? ORDER BY ev.version DESC, ev.created_at DESC',
+          ),
+        )
+        .all(stableTestId) as ExperimentRow[];
+      if (rows.length === 0) return null;
+      const versions = rows.map(mapExperiment);
+      const summary = this.mapTestSummary(versions);
+      return externalTestDetailSchema.parse({
+        ...summary,
+        versions,
+        runs: this.listRunsForTest(stableTestId),
+      });
+    });
+  }
+
   createRun(input: {
     readonly runId: string;
     readonly experiment: ExternalExperimentVersion;
@@ -311,7 +409,6 @@ export class ExternalExperimentRepository {
     readonly projectName: string;
     readonly journeyName: string;
     readonly safeResolvedValues: Readonly<Record<string, string>>;
-    readonly outcomeCheckSnapshot?: OutcomeCheckRunSnapshot;
     readonly startedAt: string;
   }): void {
     this.protect('create an external run', () => {
@@ -336,14 +433,7 @@ export class ExternalExperimentRepository {
           input.experiment.name,
           JSON.stringify(input.experiment),
           JSON.stringify(input.safeResolvedValues),
-          JSON.stringify(
-            outcomeCheckRunSnapshotSchema.parse(
-              input.outcomeCheckSnapshot ?? {
-                criticalAction: null,
-                checks: [],
-              },
-            ),
-          ),
+          JSON.stringify(input.experiment.outcomeCheckSnapshot),
           input.startedAt,
         );
     });
@@ -715,6 +805,66 @@ export class ExternalExperimentRepository {
     });
   }
 
+  deleteTest(testId: string): readonly RunArtifact[] | null {
+    return this.protect('delete an external test', () => {
+      const direct = this.database
+        .prepare('SELECT id FROM external_experiments WHERE id = ?')
+        .get(testId) as { readonly id: string } | undefined;
+      const historical =
+        direct === undefined
+          ? (this.database
+              .prepare(
+                'SELECT experiment_id AS id FROM external_experiment_versions WHERE id = ?',
+              )
+              .get(testId) as { readonly id: string } | undefined)
+          : undefined;
+      const stableTestId = direct?.id ?? historical?.id;
+      if (stableTestId === undefined) return null;
+      const runIds = this.database
+        .prepare(
+          `SELECT r.id
+             FROM external_runs r
+             JOIN external_experiment_versions ev
+               ON ev.id = r.experiment_version_id
+            WHERE ev.experiment_id = ?`,
+        )
+        .all(stableTestId) as Array<{ readonly id: string }>;
+      const artifacts = runIds.flatMap(({ id }) =>
+        this.listArtifacts('WHERE run_id = ?', id),
+      );
+      this.database.transaction(() => {
+        for (const { id } of runIds) {
+          this.database
+            .prepare(
+              'DELETE FROM external_outcome_check_results WHERE run_id = ?',
+            )
+            .run(id);
+          this.database
+            .prepare('DELETE FROM external_assertion_results WHERE run_id = ?')
+            .run(id);
+          this.database
+            .prepare('DELETE FROM external_run_events WHERE run_id = ?')
+            .run(id);
+          this.database
+            .prepare('DELETE FROM external_artifacts WHERE run_id = ?')
+            .run(id);
+          this.database
+            .prepare('DELETE FROM external_runs WHERE id = ?')
+            .run(id);
+        }
+        this.database
+          .prepare(
+            'DELETE FROM external_experiment_versions WHERE experiment_id = ?',
+          )
+          .run(stableTestId);
+        this.database
+          .prepare('DELETE FROM external_experiments WHERE id = ?')
+          .run(stableTestId);
+      })();
+      return artifacts;
+    });
+  }
+
   listRuns(query: ExternalRunListQuery): ExternalRunList {
     return this.protect('list external runs', () => {
       const clauses: string[] = [];
@@ -764,6 +914,147 @@ export class ExternalExperimentRepository {
         offset: query.offset,
       });
     });
+  }
+
+  listPriorRunRequestEvidence(
+    journeyId: string,
+    actionStepId: string,
+  ): readonly PriorRunRequestEvidence[] {
+    return this.protect('list prior-run request evidence', () => {
+      const rows = this.database
+        .prepare(
+          `SELECT r.id AS runId, r.started_at AS startedAt,
+                  r.network_observations_json AS networkObservationsJson,
+                  MIN(ere.relative_timestamp_ms) AS triggerTimestampMs
+             FROM external_runs r
+             JOIN external_run_events ere ON ere.run_id = r.id
+            WHERE r.journey_id = ?
+              AND ere.event_type = 'experiment.triggered'
+              AND json_extract(ere.payload_json, '$.targetStepId') = ?
+            GROUP BY r.id
+            ORDER BY r.created_at DESC, r.id DESC
+            LIMIT 20`,
+        )
+        .all(journeyId, actionStepId) as PriorRunEvidenceRow[];
+      return rows.flatMap((row) => {
+        const observations = externalNetworkObservationSchema
+          .array()
+          .parse(parseJson(row.networkObservationsJson));
+        const grouped = new Map<string, RecordedRequestEvidence>();
+        for (const observation of observations) {
+          const relativeTimestampMs =
+            observation.startedAtMs - row.triggerTimestampMs;
+          if (relativeTimestampMs < 0 || relativeTimestampMs > 5_000) continue;
+          const host = new URL(observation.origin).host;
+          const key = [
+            observation.method,
+            observation.origin,
+            observation.pathname,
+            observation.status ?? 'pending',
+            observation.failed,
+          ].join('|');
+          const current = grouped.get(key);
+          if (current === undefined) {
+            grouped.set(
+              key,
+              recordedRequestEvidenceSchema.parse({
+                actionStepId,
+                method: observation.method,
+                origin: observation.origin,
+                host,
+                pathname: observation.pathname,
+                status: observation.status,
+                failed: observation.failed,
+                relativeTimestampMs,
+                occurrences: 1,
+                observedAt: new Date(
+                  Date.parse(row.startedAt) + observation.startedAtMs,
+                ).toISOString(),
+              }),
+            );
+          } else {
+            grouped.set(key, {
+              ...current,
+              failed: current.failed || observation.failed,
+              occurrences: current.occurrences + 1,
+              relativeTimestampMs: Math.min(
+                current.relativeTimestampMs,
+                relativeTimestampMs,
+              ),
+            });
+          }
+        }
+        return grouped.size === 0
+          ? []
+          : [{ runId: row.runId, evidence: [...grouped.values()] }];
+      });
+    });
+  }
+
+  private mapTestSummary(
+    versions: readonly ExternalExperimentVersion[],
+  ): ExternalTestSummary {
+    const latestVersion = versions.reduce((latest, candidate) =>
+      candidate.version > latest.version ? candidate : latest,
+    );
+    const runs = this.listRunsForTest(latestVersion.experimentId, 1);
+    const count = this.database
+      .prepare(
+        `SELECT COUNT(*) AS count
+           FROM external_runs r
+           JOIN external_experiment_versions ev
+             ON ev.id = r.experiment_version_id
+          WHERE ev.experiment_id = ?`,
+      )
+      .get(latestVersion.experimentId) as { count: number };
+    return externalTestSummarySchema.parse({
+      testId: latestVersion.experimentId,
+      projectId: latestVersion.projectId,
+      journeyId: latestVersion.journeyId,
+      name: latestVersion.name,
+      experimentType: latestVersion.experimentType,
+      latestVersion,
+      versionCount: versions.length,
+      latestRun: runs[0] ?? null,
+      runCount: count.count,
+    });
+  }
+
+  private listRunsForTest(
+    testId: string,
+    limit = 100,
+  ): readonly ExternalRunSummary[] {
+    const rows = this.database
+      .prepare(
+        `SELECT r.id,
+                r.experiment_version_id AS experimentVersionId,
+                r.project_id AS projectId, r.journey_id AS journeyId,
+                r.status, r.lifecycle_status AS lifecycleStatus,
+                r.outcome_aggregate AS outcomeAggregate,
+                r.assertion_aggregate AS assertionAggregate,
+                r.started_at AS startedAt,
+                r.completed_at AS completedAt, r.duration_ms AS durationMs,
+                r.project_name AS projectName, r.journey_name AS journeyName,
+                r.experiment_name AS experimentName,
+                r.trigger_attempts AS triggerAttempts,
+                r.network_observations_json AS networkObservationsJson,
+                (SELECT COUNT(*) FROM external_assertion_results ar
+                  WHERE ar.run_id = r.id AND ar.status = 'passed')
+                  AS passedAssertionCount,
+                (SELECT COUNT(*) FROM external_assertion_results ar
+                  WHERE ar.run_id = r.id) AS assertionCount,
+                (SELECT COUNT(*) FROM external_artifacts ea
+                  WHERE ea.run_id = r.id) AS screenshotCount,
+                r.created_at AS createdAt
+           FROM external_runs r
+           JOIN external_experiment_versions ev
+             ON ev.id = r.experiment_version_id
+          WHERE ev.experiment_id = ?
+          ORDER BY r.created_at DESC, r.id DESC
+          LIMIT ?`,
+      )
+      .all(testId, limit) as RunSummaryRow[];
+    return rows.map(mapRunSummary);
   }
 
   getRun(runId: string): ExternalRunDetail | null {
@@ -905,6 +1196,122 @@ export class ExternalExperimentRepository {
     });
   }
 
+  private insertVersion(input: {
+    readonly experimentId: string;
+    readonly version: number;
+    readonly journeySnapshot: PersistedJourney;
+    readonly request:
+      CreateExternalExperimentRequest | CreateExternalExperimentVersionRequest;
+    readonly now: string;
+  }): ExternalExperimentVersion {
+    const id = randomUUID();
+    const outcomeCheckSnapshot = new OutcomeCheckRepository(
+      this.database,
+    ).snapshot(input.journeySnapshot.id);
+    const journeySnapshot = alignJourneyWithOutcomeBindings(
+      input.journeySnapshot,
+      outcomeCheckSnapshot,
+    );
+    this.validateOutcomeCheckSnapshot(
+      outcomeCheckSnapshot,
+      input.request.targetStepId,
+    );
+    const assertions = input.request.assertions.filter(
+      (assertion) =>
+        !outcomeCheckSnapshot.checks.some(
+          (check) => assertion.id === `outcome-${check.id}`,
+        ),
+    );
+    if (outcomeCheckSnapshot.checks.length === 0 && assertions.length === 0) {
+      throw new Error(
+        'A test requires at least one approved Outcome Check or custom technical check.',
+      );
+    }
+    const configuration = {
+      targetStepId: input.request.targetStepId,
+      triggerCount: input.request.triggerCount,
+      intervalMs: input.request.intervalMs,
+      networkMatcher: input.request.networkMatcher,
+      continueAfterTarget: input.request.continueAfterTarget,
+      guided: input.request.guided ?? false,
+    };
+    this.database
+      .prepare(
+        `INSERT INTO external_experiment_versions
+          (id, experiment_id, version, configuration_json,
+           journey_snapshot_json, assertions_snapshot_json,
+           request_selection_provenance_json,
+           network_evidence_provenance_json,
+           assertion_selection_provenance_json,
+           critical_action_snapshot_json, outcome_checks_snapshot_json,
+           created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        input.experimentId,
+        input.version,
+        JSON.stringify(configuration),
+        JSON.stringify(journeySnapshot),
+        JSON.stringify(assertions),
+        input.request.requestSelectionProvenance === null
+          ? null
+          : JSON.stringify(input.request.requestSelectionProvenance),
+        input.request.networkEvidenceProvenance == null
+          ? null
+          : JSON.stringify(input.request.networkEvidenceProvenance),
+        (input.request.assertionSelectionProvenance?.length ?? 0) === 0
+          ? null
+          : JSON.stringify(
+              input.request.assertionSelectionProvenance?.filter(
+                (entry) =>
+                  entry.assertionId === null ||
+                  assertions.some(
+                    (assertion) => assertion.id === entry.assertionId,
+                  ),
+              ),
+            ),
+        outcomeCheckSnapshot.criticalAction === null
+          ? null
+          : JSON.stringify(outcomeCheckSnapshot.criticalAction),
+        JSON.stringify(outcomeCheckSnapshot.checks),
+        input.now,
+      );
+    const created = this.getVersion(id);
+    if (created === null)
+      throw new Error('Created experiment version is missing.');
+    return created;
+  }
+
+  private validateTarget(
+    journey: PersistedJourney,
+    targetStepId: string,
+  ): void {
+    const target = journey.steps.find((step) => step.id === targetStepId);
+    if (target === undefined)
+      throw new Error('Target journey step was not found.');
+    if (target.type !== 'click' && target.type !== 'submit') {
+      throw new Error('Impatient User can target only click or submit steps.');
+    }
+  }
+
+  private validateOutcomeCheckSnapshot(
+    snapshot: OutcomeCheckRunSnapshot,
+    targetStepId: string,
+  ): void {
+    if (snapshot.checks.length === 0) return;
+    if (snapshot.criticalAction === null) {
+      throw new Error(
+        'Outcome Checks exist without an approved Critical Action.',
+      );
+    }
+    if (snapshot.criticalAction.stepId !== targetStepId) {
+      throw new Error(
+        'The test target must be the approved Critical Action for every required Outcome Check.',
+      );
+    }
+  }
+
   private listArtifacts(
     where: string,
     parameter: string,
@@ -927,10 +1334,29 @@ export class ExternalExperimentRepository {
     try {
       return action();
     } catch (error: unknown) {
-      if (error instanceof RunPersistenceError) throw error;
+      if (
+        error instanceof RunPersistenceError ||
+        error instanceof ExternalTestNameExistsError
+      ) {
+        throw error;
+      }
       throw new RunPersistenceError(operation, error);
     }
   }
+}
+
+function alignJourneyWithOutcomeBindings(
+  journey: PersistedJourney,
+  snapshot: OutcomeCheckRunSnapshot,
+): PersistedJourney {
+  const hasGeneratedOutcomeBinding = snapshot.checks.some(
+    (check) =>
+      check.type !== 'final_pathname_matches' &&
+      check.target.generatedBindings.length > 0,
+  );
+  if (!hasGeneratedOutcomeBinding) return journey;
+  const baseline = createOutcomeBaseline(journey);
+  return baseline.generatedInputs.length === 0 ? journey : baseline.journey;
 }
 
 function mapRunSummary(row: RunSummaryRow): ExternalRunSummary {
@@ -968,7 +1394,10 @@ function experimentSelect(suffix: string): string {
                  ev.journey_snapshot_json AS journeySnapshotJson,
                  ev.assertions_snapshot_json AS assertionsSnapshotJson,
                  ev.request_selection_provenance_json AS requestSelectionProvenanceJson,
+                 ev.network_evidence_provenance_json AS networkEvidenceProvenanceJson,
                  ev.assertion_selection_provenance_json AS assertionSelectionProvenanceJson,
+                 ev.critical_action_snapshot_json AS criticalActionSnapshotJson,
+                 ev.outcome_checks_snapshot_json AS outcomeChecksSnapshotJson,
                  ev.created_at AS createdAt
             FROM external_experiment_versions ev
             JOIN external_experiments e ON e.id = ev.experiment_id
@@ -994,10 +1423,21 @@ function mapExperiment(row: ExperimentRow): ExternalExperimentVersion {
       row.requestSelectionProvenanceJson === null
         ? null
         : parseJson(row.requestSelectionProvenanceJson),
+    networkEvidenceProvenance:
+      row.networkEvidenceProvenanceJson === null
+        ? null
+        : parseJson(row.networkEvidenceProvenanceJson),
     assertionSelectionProvenance:
       row.assertionSelectionProvenanceJson === null
         ? []
         : parseJson(row.assertionSelectionProvenanceJson),
+    outcomeCheckSnapshot: outcomeCheckRunSnapshotSchema.parse({
+      criticalAction:
+        row.criticalActionSnapshotJson === null
+          ? null
+          : parseJson(row.criticalActionSnapshotJson),
+      checks: parseJson(row.outcomeChecksSnapshotJson),
+    }),
     journeySnapshot: persistedJourneySchema.parse(
       parseJson(row.journeySnapshotJson),
     ),

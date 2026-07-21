@@ -411,9 +411,10 @@ function LatestResultCell({
       tone={
         run === null
           ? 'neutral'
-          : run.status === 'runner_error' || run.outcomeAggregate === 'failed'
+          : run.canonicalVerdict === 'runner_error' ||
+              run.canonicalVerdict === 'failed'
             ? 'failure'
-            : run.outcomeAggregate === 'passed'
+            : run.canonicalVerdict === 'passed'
               ? 'pass'
               : 'warning'
       }

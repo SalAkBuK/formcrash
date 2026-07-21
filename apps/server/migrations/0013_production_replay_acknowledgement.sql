@@ -1,0 +1,2 @@
+ALTER TABLE project_execution_settings
+ADD COLUMN production_replay_acknowledged_at TEXT;

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import {
   useCallback,
   useEffect,
@@ -13,61 +14,47 @@ import {
 import type {
   CreateExternalExperimentRequest,
   EphemeralRuntimeValues,
-  ExternalRunDetail,
+  ExternalAssertion,
+  ExternalExperimentVersion,
+  NetworkEvidenceCandidate,
+  NetworkEvidenceCandidateList,
   PersistedJourney,
   Project,
   ProjectExecutionSettings,
-  RankedRequestCandidate,
   ReplayPacing,
-  RequestDiscoveryResult,
 } from '@formcrash/contracts';
 
 import { Button } from '../../../components/ui/button';
 import { DisclosurePanel } from '../../../components/ui/disclosure-panel';
 import { StateMessage } from '../../../components/ui/state-message';
 import { StatusBadge } from '../../../components/ui/status-badge';
-import { FormCrashApiError } from '../../../lib/api-client';
 import {
-  createExternalExperiment,
-  discoverRequests,
-  runExternalExperiment,
+  createExternalExperimentSuite,
+  listNetworkEvidenceCandidates,
+  saveProductionReplayAcknowledgement,
 } from '../api/external-experiments';
-import {
-  guidedRecipe,
-  guidedRecipes,
-  type GuidedRecipeId,
-} from '../models/guided-recipes';
-import {
-  approveRequestRecommendationSelections,
-  recommendationProvenance,
-  recommendationSelections,
-  recommendationSetForCandidate,
-  selectedAssertions,
-  type RecommendationSelection,
-} from '../models/assertion-recommendations';
+import { guidedRecipes, type GuidedRecipeId } from '../models/guided-recipes';
 import { guidedStepValueOverrides } from '../models/guided-values';
 import { assessJourneyReadiness } from '../models/journey-readiness';
+import {
+  candidateCanBeApproved,
+  matcherForCandidate,
+  provenanceForCandidate,
+  recipeNetworkAssertions,
+} from '../models/network-evidence';
 import { journeyRuntimeRequirements } from '../models/journey-runtime';
 import {
   describeOutcomeCheck,
   outcomeCheckTypeLabel,
 } from '../models/outcome-check-presentation';
 import {
-  guidedConfirmableCandidate,
-  initialCandidateIndex,
-  matcherForCandidate,
-  selectionProvenance,
-} from '../models/request-selection';
-import { ExternalRunResult } from './external-run-result';
-import {
-  AuthenticationRecoveryPanel,
-  type PendingProtectedOperation,
-  useAuthenticationGate,
-} from './authentication-gate';
-import {
   OutcomeDefinitionPanel,
   type OutcomeDefinitionState,
 } from './outcome-definition-panel';
+import {
+  TechnicalChecksEditor,
+  technicalChecksAreValid,
+} from './technical-checks-editor';
 
 type WizardStep = 1 | 2 | 3;
 export type GuidedWizardStage = 'outcome' | 'safety' | 'review';
@@ -117,8 +104,7 @@ interface Props {
   readonly settings: ProjectExecutionSettings | null;
   readonly selectedJourneyId?: string | null | undefined;
   readonly onSelectedJourneyChange?: ((journeyId: string) => void) | undefined;
-  readonly onOpenAdvanced: () => void;
-  readonly onCompleted: (result: ExternalRunDetail) => void;
+  readonly onSaved: (versions: readonly ExternalExperimentVersion[]) => void;
   readonly onAuthenticationRecaptured: (
     settings: ProjectExecutionSettings,
   ) => void;
@@ -133,8 +119,7 @@ export function GuidedTestPanel({
   settings,
   selectedJourneyId,
   onSelectedJourneyChange,
-  onOpenAdvanced,
-  onCompleted,
+  onSaved,
   onAuthenticationRecaptured,
   initialDraft = null,
   onDraftChange,
@@ -157,7 +142,7 @@ export function GuidedTestPanel({
     {},
   );
   const [productionConfirmed, setProductionConfirmed] = useState(false);
-  const [recipeId, setRecipeId] = useState<GuidedRecipeId>(
+  const [recipeId] = useState<GuidedRecipeId>(
     initialDraft?.recipeId ?? 'duplicate_action',
   );
   const [replayPacing, setReplayPacing] = useState<ReplayPacing>(
@@ -166,30 +151,28 @@ export function GuidedTestPanel({
   const [experimentName, setExperimentName] = useState(
     initialDraft?.experimentName ?? '',
   );
+  const [technicalChecks, setTechnicalChecks] = useState<
+    readonly ExternalAssertion[]
+  >([]);
+  const [networkEvidence, setNetworkEvidence] =
+    useState<NetworkEvidenceCandidateList | null>(null);
+  const [networkEvidenceLoading, setNetworkEvidenceLoading] = useState(false);
+  const [approvedCandidateId, setApprovedCandidateId] = useState<string | null>(
+    null,
+  );
   const [stepValueModes, setStepValueModes] = useState<
     Readonly<Record<string, SafeValueMode>>
   >({});
   const [customStepValues, setCustomStepValues] = useState<
     Readonly<Record<string, string>>
   >({});
-  const [discovery, setDiscovery] = useState<RequestDiscoveryResult | null>(
-    null,
-  );
-  const [selectedCandidate, setSelectedCandidate] =
-    useState<RankedRequestCandidate | null>(null);
-  const [assertionSelections, setAssertionSelections] = useState<
-    readonly RecommendationSelection[]
+  const [savedVersions, setSavedVersions] = useState<
+    readonly ExternalExperimentVersion[]
   >([]);
-  const [result, setResult] = useState<ExternalRunDetail | null>(null);
-  const [busy, setBusy] = useState<'review' | 'run' | null>(null);
+  const [busy, setBusy] = useState<'review' | 'save' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showValidation, setShowValidation] = useState(false);
-  const authentication = useAuthenticationGate({
-    projectId: project.id,
-    onSettingsChange: onAuthenticationRecaptured,
-  });
   const submissionPending = useRef(false);
-  const reviewPending = useRef(false);
   const restoredDraftName = useRef(false);
   const journeyResetReady = useRef(false);
 
@@ -241,15 +224,10 @@ export function GuidedTestPanel({
     () => safeGeneratedTemplates(settings, stepValueOverrides),
     [settings, stepValueOverrides],
   );
-  const recipe = guidedRecipe(recipeId);
-  const assertions = selectedAssertions(assertionSelections);
-  const confirmableCandidate = useMemo(
-    () =>
-      discovery === null || selectedCandidate !== null
-        ? null
-        : guidedConfirmableCandidate(discovery),
-    [discovery, selectedCandidate],
-  );
+  const approvedCandidate =
+    networkEvidence?.items.find(
+      (candidate) => candidate.candidateId === approvedCandidateId,
+    ) ?? null;
   const missingRuntime = runtimeRequirements.filter(
     (requirement) =>
       (runtimeValues[requirement.name] ?? '').trim().length === 0,
@@ -304,46 +282,31 @@ export function GuidedTestPanel({
     if (outcomeState.checks.length === 0) {
       reasons.push('At least one saved Outcome Check is required.');
     }
-    if (missingRuntime.length > 0) {
-      reasons.push(
-        `Provide ${missingRuntime.length} required runtime value${missingRuntime.length === 1 ? '' : 's'}.`,
-      );
-    }
     if (customStepValueMissing) {
       reasons.push('Every custom journey value needs a value or template.');
-    }
-    if (productionBlocked) {
-      reasons.push('Confirm the production-data warning.');
     }
     return reasons;
   }, [
     criticalStep,
     customStepValueMissing,
-    missingRuntime.length,
     outcomeState.checks.length,
-    productionBlocked,
     settings,
   ]);
 
   const reviewBlockers = useMemo(() => {
     const reasons = [...safetyBlockers];
-    if (discovery === null || selectedCandidate === null) {
-      reasons.push('Request discovery has not prepared a runnable experiment.');
+    if (!technicalChecksAreValid(technicalChecks)) {
+      reasons.push('Complete or remove each optional Technical check.');
     }
-    if (assertions.length === 0) {
-      reasons.push('No technical runner assertions are available.');
-    }
-    if (experimentName.trim() === '') {
-      reasons.push('Enter an experiment name.');
+    if (suiteActionLabel(experimentName) === '') {
+      reasons.push('Enter an action label.');
     }
     return reasons;
-  }, [
-    assertions.length,
-    discovery,
-    experimentName,
-    safetyBlockers,
-    selectedCandidate,
-  ]);
+  }, [experimentName, safetyBlockers, technicalChecks]);
+
+  useEffect(() => {
+    setProductionConfirmed(settings?.productionReplayAcknowledged === true);
+  }, [project.id, settings?.productionReplayAcknowledged]);
 
   useEffect(() => {
     const preferred =
@@ -375,13 +338,44 @@ export function GuidedTestPanel({
     setExpectedWorkspaceTab('overview');
     setCompletedSteps(new Set());
     setOutcomeState(initialOutcomeState);
-    setDiscovery(null);
-    setSelectedCandidate(null);
-    setAssertionSelections([]);
-    setResult(null);
+    setTechnicalChecks([]);
+    setNetworkEvidence(null);
+    setApprovedCandidateId(null);
+    setSavedVersions([]);
     setError(null);
     setShowValidation(false);
   }, [journeyId]);
+
+  useEffect(() => {
+    if (journey === null || criticalStep === null) {
+      setNetworkEvidence(null);
+      setApprovedCandidateId(null);
+      return;
+    }
+    let active = true;
+    setNetworkEvidenceLoading(true);
+    setApprovedCandidateId(null);
+    void listNetworkEvidenceCandidates(journey.id, criticalStep.id)
+      .then((result) => {
+        if (active) setNetworkEvidence(result);
+      })
+      .catch(() => {
+        if (active) {
+          setNetworkEvidence({
+            items: [],
+            source: null,
+            explanation:
+              'Network evidence could not be loaded. The test can still be saved with browser outcome coverage only.',
+          });
+        }
+      })
+      .finally(() => {
+        if (active) setNetworkEvidenceLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [criticalStep, journey]);
 
   useEffect(() => {
     if (initialDraft === null) return;
@@ -442,20 +436,17 @@ export function GuidedTestPanel({
       initialDraft.experimentName.trim() !== ''
     ) {
       restoredDraftName.current = true;
-      setExperimentName(initialDraft.experimentName);
+      setExperimentName(suiteActionLabel(initialDraft.experimentName));
       return;
     }
     setExperimentName(
-      boundedName(
-        `${recipe.shortName}: ${outcomeState.criticalAction?.label ?? criticalStep.name}`,
-      ),
+      boundedName(outcomeState.criticalAction?.label ?? criticalStep.name),
     );
   }, [
     criticalStep,
     initialDraft,
     journeyId,
     outcomeState.criticalAction?.label,
-    recipe.shortName,
   ]);
 
   const handleOutcomeState = useCallback((state: OutcomeDefinitionState) => {
@@ -466,9 +457,27 @@ export function GuidedTestPanel({
   }, []);
 
   function selectJourney(nextJourneyId: string): void {
-    authentication.complete();
     setJourneyId(nextJourneyId);
     onSelectedJourneyChange?.(nextJourneyId);
+  }
+
+  async function persistProductionAcknowledgement(
+    acknowledged: boolean,
+  ): Promise<void> {
+    const previous = productionConfirmed;
+    setProductionConfirmed(acknowledged);
+    setError(null);
+    try {
+      const next = await saveProductionReplayAcknowledgement(
+        project.id,
+        acknowledged,
+      );
+      onAuthenticationRecaptured(next);
+      setProductionConfirmed(next.productionReplayAcknowledged === true);
+    } catch (reason: unknown) {
+      setProductionConfirmed(previous);
+      setError(messageOf(reason));
+    }
   }
 
   function completeStep(step: WizardStep): void {
@@ -489,169 +498,65 @@ export function GuidedTestPanel({
     setError(null);
   }
 
-  async function prepareReview(preflightComplete = false): Promise<boolean> {
-    setShowValidation(true);
-    if (
-      reviewPending.current ||
-      busy !== null ||
-      journey === null ||
-      criticalStep === null
-    )
-      return false;
-    if (safetyBlockers.length > 0) return false;
-    const operation = {
-      kind: 'startRequestDiscovery',
-      projectId: project.id,
-      journeyId: journey.id,
-      targetStepId: criticalStep.id,
-    } as const;
-    if (!preflightComplete && !(await authentication.ensure(operation)))
-      return false;
-    reviewPending.current = true;
-    setBusy('review');
-    setError(null);
-    setResult(null);
-    try {
-      const discovered = await discoverRequests(
-        journey.id,
-        criticalStep.id,
-        nonEmptyValues(runtimeValues),
-        !productionBlocked,
-        {
-          recipe: {
-            type: recipe.id,
-            triggerCount: recipe.triggerCount,
-            intervalMs: recipe.intervalMs,
-          },
-          normalizeJourney: true,
-          stepValueOverrides,
-        },
-      );
-      setDiscovery(discovered);
-      const candidateIndex = initialCandidateIndex(discovered);
-      const candidate = discovered.candidates[candidateIndex] ?? null;
-      if (candidate === null) {
-        setSelectedCandidate(null);
-        setAssertionSelections([]);
-        if (guidedConfirmableCandidate(discovered) !== null) {
-          setShowValidation(false);
-          return true;
-        }
-        throw new Error(
-          `${discovered.recommendation.explanation} Open Advanced mode to review the observed requests.`,
-        );
-      }
-      const selections = recommendationSelections(
-        recommendationSetForCandidate(discovered, candidate),
-      );
-      if (selectedAssertions(selections).length === 0) {
-        throw new Error(
-          'Request discovery did not produce a runnable technical assertion set. Open Advanced mode to configure the runner explicitly.',
-        );
-      }
-      setSelectedCandidate(candidate);
-      setAssertionSelections(selections);
-      completeStep(2);
-      navigateToStep(3);
-      setShowValidation(false);
-      return true;
-    } catch (reason: unknown) {
-      handleExecutionFailure(reason, operation);
-      return false;
-    } finally {
-      reviewPending.current = false;
-      setBusy(null);
-    }
-  }
-
-  function confirmDiscoveredRequest(): void {
-    if (discovery === null) return;
-    const candidate = guidedConfirmableCandidate(discovery);
-    if (candidate === null) {
-      setError(
-        'This request can no longer be confirmed in Guided mode. Review the observed requests in Advanced mode.',
-      );
-      return;
-    }
-    const selections = approveRequestRecommendationSelections(
-      recommendationSetForCandidate(discovery, candidate),
-    );
-    if (selectedAssertions(selections).length === 0) {
-      setError(
-        'Request discovery did not produce bounded request checks for this candidate. Open Advanced mode to configure the runner explicitly.',
-      );
-      return;
-    }
-    setSelectedCandidate(candidate);
-    setAssertionSelections(selections);
-    completeStep(2);
-    navigateToStep(3);
-    setShowValidation(false);
-    setError(null);
-  }
-
-  async function saveAndRun(preflightComplete = false): Promise<boolean> {
+  async function saveTest(): Promise<boolean> {
     setShowValidation(true);
     if (
       submissionPending.current ||
       busy !== null ||
       journey === null ||
       criticalStep === null ||
-      discovery === null ||
-      selectedCandidate === null ||
       reviewBlockers.length > 0
     ) {
       return false;
     }
-    const operation = {
-      kind: 'runExperiment',
-      projectId: project.id,
-      journeyId: journey.id,
-    } as const;
-    if (!preflightComplete && !(await authentication.ensure(operation)))
-      return false;
     submissionPending.current = true;
-    setBusy('run');
+    setBusy('save');
     setError(null);
-    setResult(null);
+    setSavedVersions([]);
     try {
-      const input: CreateExternalExperimentRequest = {
-        name: experimentName,
-        targetStepId: criticalStep.id,
-        triggerCount: recipe.triggerCount,
-        intervalMs: recipe.intervalMs,
-        networkMatcher: matcherForCandidate(selectedCandidate),
-        assertions: [...assertions],
-        continueAfterTarget: false,
-        guided: true,
-        normalizeJourney: true,
-        requestSelectionProvenance: selectionProvenance(
-          discovery,
-          selectedCandidate,
-        ),
-        assertionSelectionProvenance: [
-          ...recommendationProvenance(assertionSelections),
-        ],
-        stepValueOverrides,
-      };
-      const version = await createExternalExperiment(journey.id, input);
-      const completed = await runExternalExperiment(
-        version.id,
-        nonEmptyValues(runtimeValues),
-        !productionBlocked,
-        'adaptive',
-        replayPacing,
+      const tests: CreateExternalExperimentRequest[] = guidedRecipes.map(
+        (item) => ({
+          name: boundedName(
+            `${approvedCandidate === null ? 'Browser-only ' : ''}${item.shortName}: ${suiteActionLabel(experimentName)}`,
+          ),
+          targetStepId: criticalStep.id,
+          triggerCount: item.triggerCount,
+          intervalMs: item.intervalMs,
+          networkMatcher:
+            approvedCandidate === null
+              ? null
+              : matcherForCandidate(approvedCandidate),
+          assertions: [
+            ...technicalChecks,
+            ...(approvedCandidate === null
+              ? []
+              : recipeNetworkAssertions(
+                  item.id,
+                  item.triggerCount,
+                  approvedCandidate,
+                )),
+          ],
+          continueAfterTarget: false,
+          guided: true,
+          normalizeJourney: true,
+          requestSelectionProvenance: null,
+          networkEvidenceProvenance:
+            approvedCandidate === null
+              ? null
+              : provenanceForCandidate(approvedCandidate),
+          assertionSelectionProvenance: [],
+          stepValueOverrides,
+        }),
       );
-      if (completed.runnerError?.code === 'authentication_required') {
-        authentication.requireRecovery(operation, 'expired');
-        return false;
-      }
-      setResult(completed);
+      const versions = await createExternalExperimentSuite(journey.id, {
+        tests,
+      });
+      setSavedVersions(versions);
       completeStep(3);
-      onCompleted(completed);
+      onSaved(versions);
       return true;
     } catch (reason: unknown) {
-      handleExecutionFailure(reason, operation);
+      setError(messageOf(reason));
       return false;
     } finally {
       submissionPending.current = false;
@@ -659,28 +564,13 @@ export function GuidedTestPanel({
     }
   }
 
-  function handleExecutionFailure(
-    reason: unknown,
-    operation: PendingProtectedOperation,
-  ): void {
-    if (
-      reason instanceof FormCrashApiError &&
-      reason.code === 'AUTHENTICATION_REQUIRED'
-    ) {
-      authentication.requireRecovery(operation, 'expired');
-      setError(null);
-      return;
-    }
-    setError(messageOf(reason));
-  }
-
   if (journeys.length === 0) {
     return (
       <div className="guided-test guided-wizard-empty">
         <div className="panel guided-onboarding">
           <div>
-            <p className="eyebrow">Guided Test</p>
-            <h2>Set up your first guided test</h2>
+            <p className="eyebrow">Test</p>
+            <h2>Set up your first test</h2>
             <p>
               Record and save one successful journey before defining its
               expected result and repeated-submission experiment.
@@ -690,7 +580,12 @@ export function GuidedTestPanel({
             <a className="button button-primary" href="#recording-workspace">
               Go to journey recording
             </a>
-            <Button onClick={onOpenAdvanced}>Set up authentication</Button>
+            <Link
+              className="button button-secondary"
+              href={`/projects/${project.id}/settings`}
+            >
+              Set up authentication
+            </Link>
           </div>
         </div>
       </div>
@@ -701,18 +596,15 @@ export function GuidedTestPanel({
     <div className="guided-test guided-wizard">
       <header className="guided-wizard-header">
         <div>
-          <p className="eyebrow">Test wizard</p>
-          <h2 aria-label="Define the outcome, check safety, then run">
+          <p className="eyebrow">Test</p>
+          <h2 aria-label="Define the outcome, check safety, then save">
             {project.name}
           </h2>
           <p>
-            Saved Critical Actions and Outcome Checks remain authoritative.
-            Unsaved wizard choices reset when this page is refreshed.
+            Set up the expected result, review safety, then save one reusable
+            test. Saving does not run the journey.
           </p>
         </div>
-        <Button compact onClick={onOpenAdvanced}>
-          Open Advanced mode
-        </Button>
       </header>
 
       <WizardProgress
@@ -724,21 +616,6 @@ export function GuidedTestPanel({
       {error !== null ? (
         <StateMessage variant="error">{error}</StateMessage>
       ) : null}
-
-      <AuthenticationRecoveryPanel
-        gate={authentication}
-        onRetry={(operation) => {
-          const retry =
-            operation.kind === 'startRequestDiscovery'
-              ? prepareReview(true)
-              : operation.kind === 'runExperiment'
-                ? saveAndRun(true)
-                : Promise.resolve(false);
-          void retry.then((started) => {
-            if (started) authentication.complete();
-          });
-        }}
-      />
 
       <section
         aria-labelledby="guided-expected-title"
@@ -756,7 +633,7 @@ export function GuidedTestPanel({
           <label className="guided-context-select">
             Journey and immutable version
             <select
-              aria-label="Guided journey version"
+              aria-label="Scenario journey version"
               value={journeyId}
               onChange={(event) => selectJourney(event.target.value)}
             >
@@ -964,7 +841,9 @@ export function GuidedTestPanel({
                 project.environment === 'production' ? (
                   <ProductionConfirmation
                     checked={productionConfirmed}
-                    onChange={setProductionConfirmed}
+                    onChange={(acknowledged) =>
+                      void persistProductionAcknowledgement(acknowledged)
+                    }
                   />
                 ) : undefined
               }
@@ -1054,10 +933,10 @@ export function GuidedTestPanel({
 
               {runtimeRequirements.length > 0 ? (
                 <div className="guided-safety-section">
-                  <h4>Runtime values required for this run</h4>
+                  <h4>Runtime values for the first explicit run</h4>
                   <p>
-                    Names and source types are safe to display. Secret values
-                    remain masked and never appear in the review.
+                    These values are not persisted with the test and are not
+                    required to save it. Secret values remain masked.
                   </p>
                   <RuntimeInputs
                     labelPrefix="Runtime"
@@ -1158,31 +1037,32 @@ export function GuidedTestPanel({
                   </div>
                 </div>
                 <fieldset className="guided-recipe-selector">
-                  <legend>Repeated-submission recipe</legend>
+                  <legend>Generated Test suite</legend>
+                  <p>
+                    Saving creates all three sibling Tests from this Journey and
+                    its approved Outcome Checks.
+                  </p>
                   <div className="guided-recipe-grid">
                     {guidedRecipes.map((item) => (
-                      <label
-                        className={`guided-recipe-card ${
-                          recipeId === item.id
-                            ? 'guided-recipe-card-selected'
-                            : ''
-                        }`}
+                      <div
+                        className="guided-recipe-card guided-recipe-card-selected"
                         key={item.id}
                       >
-                        <input
-                          checked={recipeId === item.id}
-                          name="guided-recipe"
-                          onChange={() => setRecipeId(item.id)}
-                          type="radio"
-                        />
                         <span>
                           <strong>{item.name}</strong>
                           <small>{item.description}</small>
                         </span>
-                      </label>
+                      </div>
                     ))}
                   </div>
                 </fieldset>
+                <NetworkEvidenceApproval
+                  approvedCandidate={approvedCandidate}
+                  evidence={networkEvidence}
+                  loading={networkEvidenceLoading}
+                  onApprove={setApprovedCandidateId}
+                  onRemove={() => setApprovedCandidateId(null)}
+                />
                 <fieldset className="guided-pacing-selector">
                   <legend>Replay pacing</legend>
                   <div className="guided-pacing-options">
@@ -1233,15 +1113,17 @@ export function GuidedTestPanel({
                 </StateMessage>
               ) : (
                 <StateMessage>
-                  The saved cleanup hook will run after discovery and experiment
-                  execution, but external cleanup still cannot be guaranteed.
+                  The saved cleanup hook will run after test execution, but
+                  external cleanup still cannot be guaranteed.
                 </StateMessage>
               )}
 
               {project.environment === 'production' ? (
                 <ProductionConfirmation
                   checked={productionConfirmed}
-                  onChange={setProductionConfirmed}
+                  onChange={(acknowledged) =>
+                    void persistProductionAcknowledgement(acknowledged)
+                  }
                 />
               ) : null}
 
@@ -1303,45 +1185,7 @@ export function GuidedTestPanel({
                 </StateMessage>
               )}
 
-              {confirmableCandidate !== null ? (
-                <section
-                  aria-labelledby="guided-request-confirmation-title"
-                  className="guided-request-confirmation"
-                >
-                  <StatusBadge tone="warning">Confirmation needed</StatusBadge>
-                  <h4 id="guided-request-confirmation-title">
-                    Confirm the request to stress
-                  </h4>
-                  <p>
-                    FormCrash found one successful state-changing request for{' '}
-                    {outcomeState.criticalAction?.label ??
-                      'the Critical Action'}
-                    , but it uses a different origin from the application.
-                  </p>
-                  <dl>
-                    <div>
-                      <dt>Request</dt>
-                      <dd>
-                        {confirmableCandidate.method}{' '}
-                        {new URL(confirmableCandidate.origin).host}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Path</dt>
-                      <dd>{confirmableCandidate.pathname}</dd>
-                    </div>
-                    <div>
-                      <dt>Response</dt>
-                      <dd>HTTP {confirmableCandidate.status}</dd>
-                    </div>
-                  </dl>
-                  <small>
-                    Use this request only if it represents the business action
-                    you recorded. FormCrash will also enable its bounded
-                    request-count and response checks.
-                  </small>
-                </section>
-              ) : safetyBlockers.length > 0 ? (
+              {safetyBlockers.length > 0 ? (
                 <BlockingReasons
                   heading="Safety & Data is incomplete"
                   reasons={safetyBlockers}
@@ -1349,9 +1193,9 @@ export function GuidedTestPanel({
                 />
               ) : (
                 <StateMessage>
-                  Continuing will replay the Critical Action once to identify
-                  its request. This is the existing Guided analysis behavior and
-                  may create or modify target data.
+                  No request-discovery replay is required. The actual test run
+                  will repeat the approved Critical Action and evaluate the
+                  saved Outcome Checks.
                 </StateMessage>
               )}
 
@@ -1359,24 +1203,15 @@ export function GuidedTestPanel({
                 <Button onClick={() => navigateToStep(1)}>Back</Button>
                 <Button
                   className="guided-wizard-primary"
-                  disabled={
-                    busy !== null ||
-                    authentication.busy ||
-                    authentication.pending !== null ||
-                    safetyBlockers.length > 0
-                  }
-                  onClick={
-                    confirmableCandidate === null
-                      ? () => void prepareReview()
-                      : confirmDiscoveredRequest
-                  }
+                  disabled={busy !== null || safetyBlockers.length > 0}
+                  onClick={() => {
+                    completeStep(2);
+                    navigateToStep(3);
+                    setShowValidation(false);
+                  }}
                   variant="primary"
                 >
-                  {confirmableCandidate !== null
-                    ? 'Use this request'
-                    : busy === 'review'
-                      ? 'Preparing review…'
-                      : 'Continue to Review'}
+                  Review &amp; Save
                 </Button>
               </WizardActions>
             </aside>
@@ -1392,7 +1227,7 @@ export function GuidedTestPanel({
           <WizardStageHeading
             description="Review the exact local choices and saved entities the existing runner will use."
             step="Step 3 of 3"
-            title="Review & Run"
+            title="Review & Save"
           />
 
           <div className="guided-review-layout">
@@ -1401,18 +1236,17 @@ export function GuidedTestPanel({
                 <StatusBadge
                   tone={reviewBlockers.length === 0 ? 'pass' : 'warning'}
                 >
-                  {reviewBlockers.length === 0 ? 'Ready to run' : 'Blocked'}
+                  {reviewBlockers.length === 0 ? 'Ready to save' : 'Blocked'}
                 </StatusBadge>
                 <p>
-                  {impatientUserSummary(
-                    recipe,
-                    outcomeState.criticalAction?.label,
-                  )}
+                  FormCrash will save Double-click, Triple-click, and Delayed
+                  repeat as three sibling Tests for{' '}
+                  {outcomeState.criticalAction?.label ?? 'the Critical Action'}.
                 </p>
               </div>
 
               <label className="guided-experiment-name">
-                Experiment name
+                Action label
                 <input
                   aria-describedby="guided-experiment-name-note"
                   maxLength={160}
@@ -1420,8 +1254,7 @@ export function GuidedTestPanel({
                   onChange={(event) => setExperimentName(event.target.value)}
                 />
                 <small id="guided-experiment-name-note">
-                  Saved only when Run creates the next immutable experiment
-                  version.
+                  Each generated Test prefixes this label with its recipe name.
                 </small>
               </label>
 
@@ -1447,14 +1280,10 @@ export function GuidedTestPanel({
                   />
                 </ReviewGroup>
                 <ReviewGroup title="Repeated submission">
-                  <ReviewRow label="Recipe" value={recipe.name} />
+                  <ReviewRow label="Generated Tests" value="3 sibling Tests" />
                   <ReviewRow
-                    label="Trigger count"
-                    value={String(recipe.triggerCount)}
-                  />
-                  <ReviewRow
-                    label="Trigger interval"
-                    value={`${recipe.intervalMs} ms`}
+                    label="Recipes"
+                    value="Double-click Â· Triple-click Â· Delayed repeat"
                   />
                   <ReviewRow
                     label="Continuation"
@@ -1464,6 +1293,14 @@ export function GuidedTestPanel({
                   <ReviewRow
                     label="Replay pacing"
                     value={pacingLabel(replayPacing)}
+                  />
+                  <ReviewRow
+                    label="Coverage"
+                    value={
+                      approvedCandidate === null
+                        ? 'Browser outcome coverage only'
+                        : `Browser and approved ${approvedCandidate.source === 'recording' ? 'recording' : 'prior-run'} network coverage`
+                    }
                   />
                 </ReviewGroup>
                 <ReviewGroup title="Readiness">
@@ -1506,8 +1343,8 @@ export function GuidedTestPanel({
                       project.environment !== 'production'
                         ? 'Not applicable'
                         : productionConfirmed
-                          ? 'Confirmed for this session'
-                          : 'Required'
+                          ? 'Saved for this project'
+                          : 'Needed only when running'
                     }
                   />
                 </ReviewGroup>
@@ -1542,6 +1379,14 @@ export function GuidedTestPanel({
                 )}
               </div>
 
+              {journey === null ? null : (
+                <TechnicalChecksEditor
+                  assertions={technicalChecks}
+                  journey={journey}
+                  onChange={setTechnicalChecks}
+                />
+              )}
+
               <StateMessage
                 variant={
                   settings?.afterRunHook === null ? 'warning' : 'neutral'
@@ -1553,33 +1398,24 @@ export function GuidedTestPanel({
               </StateMessage>
 
               <DisclosurePanel
-                description="Existing request matcher and runner assertions"
-                title="Advanced technical configuration"
+                description="Outcome evidence and browser checks"
+                title="How FormCrash will measure this"
               >
                 <p>
-                  Guided analysis selected{' '}
-                  <code>
-                    {selectedCandidate === null
-                      ? 'No request prepared'
-                      : `${selectedCandidate.method} ${selectedCandidate.pathname}`}
-                  </code>{' '}
-                  and prepared {assertions.length} technical runner
-                  assertion(s). These are not Outcome Checks.
+                  The run evaluates every approved Outcome Check and{' '}
+                  {technicalChecks.length} optional Technical check(s). Outcome
+                  Checks are not duplicated as technical assertions, and the
+                  test does not perform a separate request-discovery replay
+                  first.
                 </p>
-                <Button compact onClick={onOpenAdvanced}>
-                  Open Advanced mode
-                </Button>
               </DisclosurePanel>
             </div>
             <aside
               className="guided-review-sidebar"
-              aria-label="Pre-flight checks and run action"
+              aria-label="Save checks and action"
             >
-              <h4>Pre-flight checks</h4>
+              <h4>Save checks</h4>
               <div className="guided-preflight-list">
-                <span>
-                  Runner mode <strong>Adaptive</strong>
-                </span>
                 <span>
                   Outcome Checks{' '}
                   <strong>{outcomeState.checks.length} saved</strong>
@@ -1616,22 +1452,21 @@ export function GuidedTestPanel({
 
               {reviewBlockers.length > 0 ? (
                 <BlockingReasons
-                  heading="Run is blocked"
+                  heading="Save is blocked"
                   reasons={reviewBlockers}
                   visible
                 />
               ) : null}
 
-              {busy === 'run' ? (
+              {busy === 'save' ? (
                 <StateMessage variant="loading">
-                  Creating one immutable experiment version and starting the
-                  existing runner…
+                  Saving three new Tests without running them…
                 </StateMessage>
               ) : null}
-              {result !== null ? (
+              {savedVersions.length > 0 ? (
                 <StateMessage>
-                  Run accepted. The existing runner returned run{' '}
-                  <code>{result.runId}</code>.
+                  Three Tests saved as Version 1. Run each explicitly from the
+                  Tests list.
                 </StateMessage>
               ) : null}
 
@@ -1645,33 +1480,27 @@ export function GuidedTestPanel({
                 <Button
                   aria-describedby={
                     reviewBlockers.length > 0
-                      ? 'guided-run-blockers'
+                      ? 'guided-action-blockers'
                       : undefined
                   }
                   className="guided-wizard-primary"
                   disabled={
                     busy !== null ||
-                    authentication.busy ||
-                    authentication.pending !== null ||
                     reviewBlockers.length > 0 ||
-                    result !== null
+                    savedVersions.length > 0
                   }
-                  onClick={() => void saveAndRun()}
+                  onClick={() => void saveTest()}
                   variant="primary"
                 >
-                  {busy === 'run'
-                    ? 'Starting experiment…'
-                    : result !== null
-                      ? 'Run accepted'
-                      : 'Run repeated-submission experiment'}
+                  {busy === 'save'
+                    ? 'Saving Test suite…'
+                    : savedVersions.length > 0
+                      ? 'Test suite saved'
+                      : 'Save 3-Test suite'}
                 </Button>
               </WizardActions>
             </aside>
           </div>
-
-          {result !== null ? (
-            <ExternalRunResult eyebrow="Guided test result" result={result} />
-          ) : null}
         </section>
       ) : null}
     </div>
@@ -1711,10 +1540,10 @@ function WizardProgress({
   const steps = [
     [1, 'Expected Outcome'],
     [2, 'Safety & Data'],
-    [3, 'Review & Run'],
+    [3, 'Review & Save'],
   ] as const;
   return (
-    <nav aria-label="Guided test progress" className="guided-wizard-progress">
+    <nav aria-label="Test setup progress" className="guided-wizard-progress">
       <ol>
         {steps.map(([step, label]) => {
           const current = currentStep === step;
@@ -1815,6 +1644,110 @@ function SafetyCard({
   );
 }
 
+function NetworkEvidenceApproval({
+  evidence,
+  loading,
+  approvedCandidate,
+  onApprove,
+  onRemove,
+}: {
+  readonly evidence: NetworkEvidenceCandidateList | null;
+  readonly loading: boolean;
+  readonly approvedCandidate: NetworkEvidenceCandidate | null;
+  readonly onApprove: (candidateId: string) => void;
+  readonly onRemove: () => void;
+}) {
+  if (loading) {
+    return (
+      <StateMessage variant="loading">
+        Loading sanitized request evidence from the saved recordingâ€¦
+      </StateMessage>
+    );
+  }
+  if (approvedCandidate !== null) {
+    return (
+      <div className="guided-safety-section">
+        <div className="section-heading-row compact-heading">
+          <div>
+            <h4>Approved network evidence</h4>
+            <p>
+              {approvedCandidate.method} {approvedCandidate.host}
+              {approvedCandidate.pathname}
+            </p>
+          </div>
+          <StatusBadge tone="pass">
+            {approvedCandidate.source === 'recording'
+              ? 'Recording approved'
+              : 'Prior run approved'}
+          </StatusBadge>
+        </div>
+        <StateMessage>
+          Each generated recipe will enforce its bounded request attempts, at
+          most one successful response, and no HTTP 5xx. Delayed repeat also
+          allows the approved HTTP {approvedCandidate.status} or 409 response
+          set.
+        </StateMessage>
+        <Button onClick={onRemove}>Use browser outcomes only</Button>
+      </div>
+    );
+  }
+  if (evidence === null || evidence.items.length === 0) {
+    return (
+      <StateMessage variant="warning">
+        <strong>Browser outcome coverage only.</strong>{' '}
+        {evidence?.explanation ??
+          'No approved request matcher is available, so request counts, response statuses, and server-error protection are not evaluated.'}
+      </StateMessage>
+    );
+  }
+  return (
+    <div className="guided-safety-section">
+      <div className="section-heading-row compact-heading">
+        <div>
+          <h4>Optional network evidence</h4>
+          <p>{evidence.explanation}</p>
+        </div>
+        <StatusBadge tone="warning">Approval required</StatusBadge>
+      </div>
+      <p>
+        FormCrash stores only method, origin/host, pathname, status, failure,
+        and timing. Headers, bodies, cookies, authorization, secrets, and query
+        strings are excluded.
+      </p>
+      <div className="guided-value-grid">
+        {evidence.items.slice(0, 5).map((candidate) => {
+          const approvable = candidateCanBeApproved(candidate);
+          return (
+            <article className="guided-value-card" key={candidate.candidateId}>
+              <strong>
+                {candidate.method} {candidate.pathname}
+              </strong>
+              <small>
+                {candidate.host} Â· HTTP {candidate.status ?? 'unavailable'} Â·{' '}
+                {candidate.relativeTimestampMs} ms after action Â· score{' '}
+                {candidate.score}
+              </small>
+              <Button
+                disabled={!approvable}
+                onClick={() => onApprove(candidate.candidateId)}
+                variant="secondary"
+              >
+                {approvable ? 'Use this request' : 'Not safe to approve'}
+              </Button>
+            </article>
+          );
+        })}
+      </div>
+      <StateMessage variant="warning">
+        <strong>
+          Browser outcome coverage only until you approve a request.
+        </strong>{' '}
+        Candidate display alone never enables or claims server protection.
+      </StateMessage>
+    </div>
+  );
+}
+
 function RuntimeInputs({
   labelPrefix,
   requirements,
@@ -1876,8 +1809,8 @@ function ProductionConfirmation({
       <span>
         <strong>I confirm this test may change production data.</strong>
         <small>
-          Baseline capture, request discovery, and repeated triggers execute
-          real actions against the configured target.
+          Saved for this project until you turn it off. Outcome capture and test
+          runs can perform real actions against this target.
         </small>
       </span>
     </label>
@@ -1917,7 +1850,7 @@ function BlockingReasons({
   return (
     <div
       className="guided-blocking-reasons"
-      id={heading === 'Run is blocked' ? 'guided-run-blockers' : undefined}
+      id={heading.endsWith('is blocked') ? 'guided-action-blockers' : undefined}
       role="status"
     >
       <strong>{heading}</strong>
@@ -2003,18 +1936,6 @@ function safeGeneratedTemplates(
   return [...templates];
 }
 
-function impatientUserSummary(
-  recipe: ReturnType<typeof guidedRecipe>,
-  actionLabel: string | undefined,
-): string {
-  const action = actionLabel ?? 'the Critical Action';
-  const timing =
-    recipe.intervalMs === 0
-      ? 'without an added interval'
-      : `${recipe.intervalMs} ms apart`;
-  return `FormCrash will trigger ${action} ${recipe.triggerCount} times, ${timing}.`;
-}
-
 function pacingLabel(pacing: ReplayPacing): string {
   return pacing === 'recorded'
     ? 'Recorded'
@@ -2023,12 +1944,13 @@ function pacingLabel(pacing: ReplayPacing): string {
       : 'Fast';
 }
 
-function nonEmptyValues(
-  values: EphemeralRuntimeValues,
-): EphemeralRuntimeValues {
-  return Object.fromEntries(
-    Object.entries(values).filter(([, value]) => value.trim() !== ''),
-  );
+function suiteActionLabel(value: string): string {
+  return value
+    .trim()
+    .replace(
+      /^(?:Browser-only )?(?:Double-click|Triple-click|Delayed repeat):\s*/u,
+      '',
+    );
 }
 
 function stageForStep(step: WizardStep): GuidedWizardStage {

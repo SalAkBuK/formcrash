@@ -33,6 +33,17 @@ export async function executeRecordedStep(
   }
   const mode = options?.mode ?? 'adaptive';
   const interaction = options?.interaction;
+  const resolvedValue =
+    step.type === 'fill' ||
+    step.type === 'checkbox' ||
+    step.type === 'radio' ||
+    step.type === 'select'
+      ? resolveValue(step)
+      : null;
+  const verificationInteraction =
+    interaction === undefined
+      ? undefined
+      : interactionWithResolvedPostconditions(interaction, step, resolvedValue);
   if (step.type === 'navigate') {
     if (
       interaction !== undefined &&
@@ -82,7 +93,7 @@ export async function executeRecordedStep(
               sideEffectObserved: false,
             });
           }
-          await session.click(locator);
+          await session.click(locator, step.fingerprint);
           resolution = {
             strategy: `semantic-${locator.strategy}`,
             confidence: 0.65,
@@ -91,17 +102,17 @@ export async function executeRecordedStep(
           };
         }
       } else {
-        await session.click(locator);
+        await session.click(locator, step.fingerprint);
       }
       break;
     case 'fill':
       if (interaction !== undefined && session.fillInteraction !== undefined) {
         resolution = await session.fillInteraction(
           interaction,
-          resolveValue(step),
+          resolvedValue ?? '',
         );
       } else {
-        await session.fill(locator, resolveValue(step));
+        await session.fill(locator, resolvedValue ?? '');
       }
       break;
     case 'checkbox':
@@ -112,10 +123,10 @@ export async function executeRecordedStep(
       ) {
         resolution = await session.setCheckedInteraction(
           interaction,
-          resolveValue(step) === 'true',
+          resolvedValue === 'true',
         );
       } else {
-        await session.setChecked(locator, resolveValue(step) === 'true');
+        await session.setChecked(locator, resolvedValue === 'true');
       }
       break;
     case 'select':
@@ -125,10 +136,10 @@ export async function executeRecordedStep(
       ) {
         resolution = await session.selectInteraction(
           interaction,
-          resolveValue(step),
+          resolvedValue ?? '',
         );
       } else {
-        await session.select(locator, resolveValue(step));
+        await session.select(locator, resolvedValue ?? '');
       }
       break;
     case 'submit':
@@ -145,7 +156,9 @@ export async function executeRecordedStep(
   if (interaction === undefined || session.verifyInteraction === undefined) {
     return legacyOutcome(step, locator.strategy);
   }
-  let verification = await session.verifyInteraction(interaction);
+  let verification = await session.verifyInteraction(
+    verificationInteraction ?? interaction,
+  );
   if (verification.passed) {
     return {
       stepId: step.id,
@@ -163,8 +176,10 @@ export async function executeRecordedStep(
     resolution !== undefined &&
     !sideEffectObserved
   ) {
-    await session.click(locator);
-    verification = await session.verifyInteraction(interaction);
+    await session.click(locator, step.fingerprint);
+    verification = await session.verifyInteraction(
+      verificationInteraction ?? interaction,
+    );
     if (verification.passed) {
       return {
         stepId: step.id,
@@ -184,6 +199,35 @@ export async function executeRecordedStep(
     observedState: verification.observed,
     sideEffectObserved,
   });
+}
+
+function interactionWithResolvedPostconditions(
+  interaction: RecordedInteraction,
+  step: RecordedJourneyStep,
+  resolvedValue: string | null,
+): RecordedInteraction {
+  if (resolvedValue === null || step.sensitive) return interaction;
+  if (step.type === 'fill' || step.type === 'select') {
+    return {
+      ...interaction,
+      postconditions: interaction.postconditions.map((condition) =>
+        condition.kind === 'control_value'
+          ? { ...condition, value: resolvedValue }
+          : condition,
+      ),
+    };
+  }
+  if (step.type === 'checkbox' || step.type === 'radio') {
+    return {
+      ...interaction,
+      postconditions: interaction.postconditions.map((condition) =>
+        condition.kind === 'checked'
+          ? { ...condition, value: resolvedValue === 'true' }
+          : condition,
+      ),
+    };
+  }
+  return interaction;
 }
 
 export class UnsupportedSecurityChallengeError extends Error {

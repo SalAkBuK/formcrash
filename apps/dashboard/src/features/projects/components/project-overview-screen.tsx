@@ -877,15 +877,14 @@ export function dominantAction(
       label: 'Configure Test',
     };
   }
-  const configuration = scenario.configurations[0];
-  return configuration === undefined
+  return scenario.configurations.length === 0
     ? {
         href: `/projects/${projectId}/tests/new?journeyId=${scenario.selectedJourney.id}&step=outcome`,
         label: 'Configure Test',
       }
     : {
-        href: `/projects/${projectId}/tests/${configuration.id}`,
-        label: 'Run Scenario Again',
+        href: `/projects/${projectId}/journeys/new`,
+        label: 'Record Scenario',
       };
 }
 
@@ -897,11 +896,14 @@ function setupTone(scenario: ScenarioLineage | null): StatusTone {
 
 function runTone(run: ExternalRunSummary | null): StatusTone {
   if (run === null) return 'neutral';
-  if (run.status === 'runner_error' || run.outcomeAggregate === 'failed')
+  if (
+    run.canonicalVerdict === 'runner_error' ||
+    run.canonicalVerdict === 'failed'
+  ) {
     return 'failure';
-  if (run.outcomeAggregate === 'passed') return 'pass';
-  if (run.outcomeAggregate === 'could_not_verify') return 'warning';
-  return 'neutral';
+  }
+  if (run.canonicalVerdict === 'passed') return 'pass';
+  return 'warning';
 }
 
 function safeOrigin(value: string): string {

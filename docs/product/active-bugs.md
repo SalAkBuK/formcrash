@@ -25,9 +25,18 @@ must survive UI and information-architecture work.
   bridge now waits for server acceptance, visibly identifies the clicked element,
   reports a failed connection instead of discarding the error, and must prove that
   its visible selector UI was installed before the server reports that it is
-  waiting. Real-Chromium coverage now executes a `tsx`-serialized Outcome selector
+  waiting. While selection is open, both the dashboard and the Chromium selector
+  banner show the exact safe synthetic values created by that baseline, so the
+  user can distinguish the new record from older rows; reusable Outcome Checks
+  continue to persist only the generated template, never that one-off literal.
+  Baseline replay also replaces safe business-code inputs such as a
+  recorded parking-slot code with a run-specific generated identifier, and the
+  saved Test snapshot now carries that same generated identity into every Run.
+  Final Run evidence also centers the unique generated-identity match before
+  capture so rows inside nested scrolling tables and lists are visible.
+  Real-Chromium coverage now executes a `tsx`-serialized Outcome selector
   that requires the generated `__name` helper, matching the development runtime
-  failure mode. Guided-mode coverage also proves that the production confirmation
+  failure mode. Standard test-editor coverage also proves that the production confirmation
   is visible beside the baseline action, gates replay, and is submitted exactly
   once with the confirmed replay. Choosing the captured final page now opens the
   Outcome Check review instead of updating a hidden form. Generated-identity row
@@ -47,7 +56,7 @@ must survive UI and information-architecture work.
 
 - **Status:** Fixed but manually unverified
 - **User impact:** A persisted final-pathname assertion can display `Exactly one
-  matching item should appear`, causing users to review the wrong expectation.
+matching item should appear`, causing users to review the wrong expectation.
 - **Affected flow:** Saved Outcome Check lists, detail views, baseline review, and
   Run result rendering.
 - **Automated coverage:** Complete for this defect. Dashboard regressions reload
@@ -64,40 +73,35 @@ must survive UI and information-architecture work.
 
 ## Request discovery
 
-- **Status:** Partially fixed
-- **User impact:** Guided discovery may replay the state-changing Critical Action
-  and still fail to identify its mutation request, creating target data without
-  producing a usable candidate.
-- **Affected flow:** Configure Tests, request discovery, approved matcher
-  selection, and baseline verification.
-- **Automated coverage:** Server ranking now includes the deployed Towerdesk
-  cross-origin resident-mutation shape. Guided coverage proves that one rank-one,
-  successful, cross-origin business mutation remains unselected until the user
-  explicitly chooses `Use this request`, that the confirmation enables only its
-  bounded network recommendations, that the matcher and review provenance are
-  persisted, and that Strict Mode and rerenders do not repeat discovery.
-  Ambiguous, weak, failed, and no-candidate results remain blocked. Recording-time
-  network evidence is still not covered or persisted as the initial candidate
-  source.
+- **Status:** Fixed but manually unverified
+- **User impact:** The standard test editor no longer replays the state-changing
+  Critical Action to discover its mutation request. Recording-time evidence is
+  preferred; legacy journeys may reuse only already persisted Run observations.
+- **Affected flow:** Optional approved matcher selection and network-specific
+  verification. It must not be reintroduced as a prerequisite for
+  browser-visible Scenario tests.
+- **Automated coverage:** Recording-time and legacy prior-run candidates use the
+  same deterministic ranking, remain unselected until `Use this request`, and
+  persist bounded source provenance in the next immutable test version. Failed,
+  incomplete, and read-only candidates remain blocked. Every built-in approved
+  network recipe is contract-enforced, while the no-matcher path remains
+  browser-only. Strict Mode and rerenders do not execute discovery.
 - **Manual verification:** Not completed for the visible production Towerdesk
   journey because verification would create another tenant. It still requires an
-  explicitly authorized visible-browser run proving that the cross-origin request
-  can be confirmed without another discovery replay. Separate verification is
-  also required when a mutation is observed while recording and then absent
-  during discovery.
-- **Fix timing:** Before discovery is treated as reliable for state-changing
-  Guided flows.
-- **Regression protection:** Preserve the bounded explicit confirmation for one
-  strong cross-origin mutation. Persist bounded recording-time candidates,
-  display them before replay, use baseline replay to verify an approved matcher,
-  and keep a recording-versus-verification discrepancy visible.
+  explicitly authorized visible-browser run proving that a recorded cross-origin
+  mutation can be approved without another state-changing replay.
+- **Fix timing:** Automated implementation complete; retain until visible-browser
+  acceptance can verify the recording candidate against an authorized target.
+- **Regression protection:** Preserve bounded sanitization, explicit approval,
+  recording/prior-run provenance, browser-only fallback, and recipe enforcement.
+  Never reintroduce a state-changing discovery replay into the standard path.
 
-## Configure Tests navigation
+## Test editor navigation
 
 - **Status:** Fixed but manually unverified
 - **User impact:** A regression can produce rapid identical route requests,
   disrupt replay, and destabilize wizard state.
-- **Affected flow:** Configure Tests navigation, direct links, step changes,
+- **Affected flow:** Test editor navigation, direct links, step changes,
   rerenders, and browser back/forward navigation.
 - **Automated coverage:** Targeted regression coverage exists for explicit URL
   updates, idle/rerender stability, initialization deduplication, and React Strict
@@ -109,6 +113,26 @@ must survive UI and information-architecture work.
   targeted regression suite and manual flow both pass on the current UI.
 - **Regression protection:** Keep URL changes tied to explicit actions and retain
   idempotence and exactly-once initialization tests through any restructure.
+
+## Duplicate test workspaces and unstable test links
+
+- **Status:** Fixed automatically; visible-browser verification remains open.
+- **User impact:** The former hidden Advanced branch duplicated settings,
+  request discovery, assertions, saved versions, run history, and destructive
+  controls. Test-detail URLs also named their stable route parameter as a version
+  identity, obscuring the actual record model.
+- **Affected flow:** Project -> Journey -> Tests -> Test detail -> Run.
+- **Automated coverage:** The dashboard renders one test editor, saves without
+  running, atomically creates Double-click, Triple-click, and Delayed repeat as
+  three sibling Tests from one approved Journey and Outcome snapshot, resolves
+  historical version links to the stable Test route, lists multiple Tests per
+  Journey, preserves immutable version history, and links a Run back to its
+  owning Project, Journey, and Test. Automatically generated network assertions
+  are not mislabeled as custom Technical checks.
+- **Manual verification:** Current layout and browser back/forward behavior still
+  require a visible dashboard pass.
+- **Regression protection:** Keep reusable browser checks in the standalone
+  Technical checks editor and never restore a mode switch or parallel workspace.
 
 ## Authentication
 

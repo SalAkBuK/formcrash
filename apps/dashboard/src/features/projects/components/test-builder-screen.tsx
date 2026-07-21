@@ -137,8 +137,12 @@ export function TestBuilderScreen({
         guidedDraft={draft}
         journeys={journeys}
         onGuidedDraftChange={handleDraftChange}
-        onGuidedCompleted={() => {
+        onGuidedSaved={(versions) => {
           window.sessionStorage.removeItem(draftKey(projectId));
+          const savedJourneyId = versions[0]?.journeyId ?? selectedJourneyId;
+          if (savedJourneyId !== null) {
+            router.push(`/projects/${projectId}/journeys/${savedJourneyId}`);
+          }
         }}
         onGuidedStageChange={(stage) => updateLocation(stage)}
         onSelectedJourneyChange={(journeyId) => {

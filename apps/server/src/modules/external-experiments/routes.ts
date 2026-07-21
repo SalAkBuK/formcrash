@@ -2,6 +2,8 @@ import {
   authCaptureSessionSchema,
   authValidationResultSchema,
   createExternalExperimentRequestSchema,
+  createExternalExperimentSuiteRequestSchema,
+  createExternalExperimentVersionRequestSchema,
   deleteResourceResponseSchema,
   externalExperimentListSchema,
   externalExperimentVersionSchema,
@@ -10,14 +12,21 @@ import {
   externalRunComparisonResponseSchema,
   externalRunListQuerySchema,
   externalRunListSchema,
+  externalTestDetailSchema,
+  externalTestSummaryListSchema,
+  networkEvidenceCandidateListSchema,
   projectExecutionSettingsInputSchema,
+  productionReplayAcknowledgementInputSchema,
   requestDiscoveryRequestSchema,
   runExternalExperimentRequestSchema,
 } from '@formcrash/contracts';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 
 import { ScreenshotStore } from '../../artifacts/screenshot-store.js';
-import type { ExternalExperimentRepository } from '../../persistence/external-experiment-repository.js';
+import {
+  ExternalTestNameExistsError,
+  type ExternalExperimentRepository,
+} from '../../persistence/external-experiment-repository.js';
 import type { ProjectJourneyRepository } from '../../persistence/project-journey-repository.js';
 import { BrowserOwnershipConflictError } from '../../runner/infrastructure/browser-ownership.js';
 import type {
@@ -35,6 +44,7 @@ import {
   MissingRuntimeVariablesError,
 } from '../../runner/external/runtime-values.js';
 import { compareExternalRuns } from '../../runner/outcomes/external-run-comparison.js';
+import { rankRequestCandidates } from '../../runner/external/request-recommendation.js';
 
 interface ProjectParams {
   readonly projectId: string;
@@ -47,6 +57,9 @@ interface JourneyParams {
 }
 interface ExperimentParams {
   readonly experimentVersionId: string;
+}
+interface TestParams {
+  readonly testId: string;
 }
 interface RunParams {
   readonly runId: string;
@@ -125,6 +138,32 @@ export function registerExternalExperimentRoutes(
         );
       } catch (error: unknown) {
         return invalid(reply, 'INVALID_PROJECT_SETTINGS', publicMessage(error));
+      }
+    },
+  );
+
+  app.put<{ Params: ProjectParams }>(
+    '/api/projects/:projectId/settings/production-replay-acknowledgement',
+    async (request, reply) => {
+      const parsed = productionReplayAcknowledgementInputSchema.safeParse(
+        request.body,
+      );
+      if (!parsed.success) {
+        return invalid(
+          reply,
+          'INVALID_PRODUCTION_REPLAY_ACKNOWLEDGEMENT',
+          parsed.error.issues[0]?.message,
+        );
+      }
+      try {
+        return reply.send(
+          dependencies.settings.setProductionReplayAcknowledgement(
+            request.params.projectId,
+            parsed.data.acknowledged,
+          ),
+        );
+      } catch {
+        return notFound(reply, 'Project');
       }
     },
   );
@@ -270,6 +309,95 @@ export function registerExternalExperimentRoutes(
     },
   );
 
+  app.get<{
+    Params: JourneyParams;
+    Querystring: { readonly targetStepId?: string };
+  }>(
+    '/api/journeys/:journeyId/network-evidence-candidates',
+    async (request, reply) => {
+      const journey = dependencies.projects.getJourney(
+        request.params.journeyId,
+      );
+      if (journey === null) return notFound(reply, 'Journey');
+      const targetStepId = request.query.targetStepId;
+      const target = journey.steps.find((step) => step.id === targetStepId);
+      if (
+        targetStepId === undefined ||
+        target === undefined ||
+        !['click', 'submit'].includes(target.type)
+      ) {
+        return invalid(
+          reply,
+          'INCOMPATIBLE_TARGET_STEP',
+          'Choose a recorded click or submit step.',
+        );
+      }
+
+      const recordingEvidence =
+        dependencies.projects.listRecordingRequestEvidence(
+          journey.id,
+          targetStepId,
+        );
+      const priorRun =
+        recordingEvidence.length === 0
+          ? dependencies.experiments
+              .listPriorRunRequestEvidence(journey.id, targetStepId)
+              .find((item) => item.evidence.length > 0)
+          : undefined;
+      const evidence =
+        recordingEvidence.length > 0
+          ? recordingEvidence
+          : (priorRun?.evidence ?? []);
+      const source =
+        recordingEvidence.length > 0
+          ? ('recording' as const)
+          : priorRun === undefined
+            ? null
+            : ('prior_run' as const);
+      const ranked = rankRequestCandidates({
+        candidates: evidence.map((item) => ({
+          method: item.method,
+          pathname: item.pathname,
+          origin: item.origin,
+          status: item.status,
+          failed: item.failed,
+          relativeTimestampMs: item.relativeTimestampMs,
+          occurrences: item.occurrences,
+        })),
+        targetOrigin: new URL(journey.steps[0]?.url ?? target.url).origin,
+        journeyName: journey.name,
+        targetStepName: target.name,
+        targetPathname: new URL(target.url).pathname,
+      });
+      return reply.send(
+        networkEvidenceCandidateListSchema.parse({
+          items: ranked.candidates.map((candidate) => ({
+            ...candidate,
+            source,
+            sourceRunId: priorRun?.runId ?? null,
+            actionStepId: targetStepId,
+            host: new URL(candidate.origin).host,
+            observedAt:
+              evidence.find(
+                (item) =>
+                  item.method === candidate.method &&
+                  item.origin === candidate.origin &&
+                  item.pathname === candidate.pathname &&
+                  item.status === candidate.status,
+              )?.observedAt ?? new Date(0).toISOString(),
+          })),
+          source,
+          explanation:
+            source === 'recording'
+              ? 'Sanitized mutation candidates were captured during the original recording. Approving one does not replay the journey.'
+              : source === 'prior_run'
+                ? 'This legacy journey has no recording-time candidate. These sanitized candidates came from an existing run and require explicit approval before reuse.'
+                : 'No bounded recording or prior-run request evidence is available. This test will remain browser-only.',
+        }),
+      );
+    },
+  );
+
   app.post<{ Params: JourneyParams }>(
     '/api/journeys/:journeyId/experiments',
     async (request, reply) => {
@@ -299,14 +427,108 @@ export function registerExternalExperimentRoutes(
           'Impatient User can target only recorded click or submit steps.',
         );
       }
-      const experiment = dependencies.experiments.createVersion({
-        projectId: journey.projectId,
-        journey,
+      try {
+        const experiment = dependencies.experiments.createTest({
+          projectId: journey.projectId,
+          journey,
+          request: parsed.data,
+        });
+        return reply
+          .status(201)
+          .send(externalExperimentVersionSchema.parse(experiment));
+      } catch (error: unknown) {
+        if (error instanceof ExternalTestNameExistsError) {
+          return reply.status(409).send({
+            error: {
+              code: 'TEST_NAME_EXISTS',
+              message: error.message,
+            },
+          });
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post<{ Params: JourneyParams }>(
+    '/api/journeys/:journeyId/experiment-suite',
+    async (request, reply) => {
+      const parsed = createExternalExperimentSuiteRequestSchema.safeParse(
+        request.body,
+      );
+      if (!parsed.success) {
+        return invalid(
+          reply,
+          'INVALID_EXPERIMENT_SUITE',
+          parsed.error.issues[0]?.message,
+        );
+      }
+      const journey = dependencies.projects.getJourney(
+        request.params.journeyId,
+      );
+      if (journey === null) return notFound(reply, 'Journey');
+      const target = journey.steps.find(
+        (step) => step.id === parsed.data.tests[0]?.targetStepId,
+      );
+      if (
+        target === undefined ||
+        (target.type !== 'click' && target.type !== 'submit')
+      ) {
+        return invalid(
+          reply,
+          'INCOMPATIBLE_TARGET_STEP',
+          'Impatient User can target only recorded click or submit steps.',
+        );
+      }
+      try {
+        const versions = dependencies.experiments.createTestSuite({
+          projectId: journey.projectId,
+          journey,
+          requests: parsed.data.tests,
+        });
+        return reply
+          .status(201)
+          .send(externalExperimentListSchema.parse({ items: versions }));
+      } catch (error: unknown) {
+        if (error instanceof ExternalTestNameExistsError) {
+          return reply.status(409).send({
+            error: {
+              code: 'TEST_NAME_EXISTS',
+              message: error.message,
+            },
+          });
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post<{ Params: TestParams }>(
+    '/api/external-experiments/:testId/versions',
+    async (request, reply) => {
+      const parsed = createExternalExperimentVersionRequestSchema.safeParse(
+        request.body,
+      );
+      if (!parsed.success) {
+        return invalid(
+          reply,
+          'INVALID_EXPERIMENT_VERSION',
+          parsed.error.issues[0]?.message,
+        );
+      }
+      if (
+        dependencies.experiments.getLatestVersion(request.params.testId) ===
+        null
+      ) {
+        return notFound(reply, 'Test');
+      }
+      const version = dependencies.experiments.createVersion({
+        testId: request.params.testId,
         request: parsed.data,
       });
       return reply
         .status(201)
-        .send(externalExperimentVersionSchema.parse(experiment));
+        .send(externalExperimentVersionSchema.parse(version));
     },
   );
 
@@ -326,10 +548,54 @@ export function registerExternalExperimentRoutes(
     },
   );
 
+  app.get<{ Params: JourneyParams }>(
+    '/api/journeys/:journeyId/tests',
+    async (request, reply) => {
+      if (dependencies.projects.getJourney(request.params.journeyId) === null) {
+        return notFound(reply, 'Journey');
+      }
+      return reply.send(
+        externalTestSummaryListSchema.parse({
+          items: dependencies.experiments.listTestSummaries(
+            request.params.journeyId,
+          ),
+        }),
+      );
+    },
+  );
+
+  app.get<{ Params: TestParams }>(
+    '/api/external-tests/:testId',
+    async (request, reply) => {
+      const detail = dependencies.experiments.getTestDetail(
+        request.params.testId,
+      );
+      return detail === null
+        ? notFound(reply, 'Test')
+        : reply.send(externalTestDetailSchema.parse(detail));
+    },
+  );
+
+  app.delete<{ Params: TestParams }>(
+    '/api/external-tests/:testId',
+    async (request, reply) => {
+      const artifacts = dependencies.experiments.deleteTest(
+        request.params.testId,
+      );
+      if (artifacts === null) return notFound(reply, 'Test');
+      artifactStore.remove(artifacts);
+      return reply.send(
+        deleteResourceResponseSchema.parse({
+          deletedId: request.params.testId,
+        }),
+      );
+    },
+  );
+
   app.get<{ Params: ExperimentParams }>(
     '/api/external-experiments/:experimentVersionId',
     async (request, reply) => {
-      const experiment = dependencies.experiments.getVersion(
+      const experiment = dependencies.experiments.resolveVersion(
         request.params.experimentVersionId,
       );
       return experiment === null

@@ -181,6 +181,18 @@ export function registerProjectRoutes(
     },
   );
 
+  app.get<{ Params: ProjectParams }>(
+    '/api/projects/:projectId/recordings/active',
+    async (request, reply) => {
+      if (repository.getProject(request.params.projectId) === null) {
+        return notFound(reply, 'Project');
+      }
+      return reply.send(
+        recordings.getActiveForProject(request.params.projectId),
+      );
+    },
+  );
+
   app.get<{ Params: RecordingParams }>(
     '/api/projects/:projectId/recordings/:sessionId',
     async (request, reply) => {

@@ -64,7 +64,7 @@ describe('Outcome Check run persistence', () => {
       target: outcomeTarget(),
       binding: generatedEmailBinding(),
     });
-    const version = experiments.createVersion({
+    const version = experiments.createTest({
       projectId: project.id,
       journey,
       request: {
@@ -75,16 +75,17 @@ describe('Outcome Check run persistence', () => {
         networkMatcher: null,
         assertions: [
           {
-            id: 'complete',
+            id: `outcome-${check.id}`,
             type: 'text_appeared',
-            text: 'Complete',
-            description: 'Completion appears.',
+            text: generatedEmailBinding().template,
+            description: check.description,
           },
         ],
         continueAfterTarget: false,
         requestSelectionProvenance: null,
       },
     });
+    expect(version.assertions).toEqual([]);
     experiments.createRun({
       runId: 'outcome-run',
       experiment: version,
@@ -92,7 +93,6 @@ describe('Outcome Check run persistence', () => {
       projectName: project.name,
       journeyName: journey.name,
       safeResolvedValues: {},
-      outcomeCheckSnapshot: { criticalAction: action, checks: [check] },
       startedAt: '2026-07-17T00:00:00.000Z',
     });
     experiments.finalizeRun({
@@ -173,6 +173,30 @@ describe('Outcome Check run persistence', () => {
         },
       ],
     });
+    expect(experiments.getVersion(version.id)).toMatchObject({
+      outcomeCheckSnapshot: {
+        criticalAction: { id: action.id },
+        checks: [{ id: check.id }],
+      },
+    });
+    const nextVersion = experiments.createVersion({
+      testId: version.experimentId,
+      request: {
+        targetStepId: version.targetStepId,
+        triggerCount: version.triggerCount,
+        intervalMs: version.intervalMs,
+        networkMatcher: version.networkMatcher,
+        assertions: version.assertions,
+        continueAfterTarget: version.continueAfterTarget,
+        guided: version.guided,
+        requestSelectionProvenance: version.requestSelectionProvenance,
+        assertionSelectionProvenance: version.assertionSelectionProvenance,
+      },
+    });
+    expect(nextVersion.outcomeCheckSnapshot).toMatchObject({
+      criticalAction: { id: action.id },
+      checks: [{ id: replacement.id }],
+    });
     expect(replacement.id).not.toBe(check.id);
     experiments.createRun({
       runId: 'dangling-evidence-run',
@@ -181,7 +205,6 @@ describe('Outcome Check run persistence', () => {
       projectName: project.name,
       journeyName: journey.name,
       safeResolvedValues: {},
-      outcomeCheckSnapshot: { criticalAction: action, checks: [replacement] },
       startedAt: '2026-07-17T00:00:02.000Z',
     });
     expect(() =>
@@ -303,7 +326,7 @@ describe('Outcome Check run persistence', () => {
         normalizationRule: 'test',
       },
     });
-    const version = experiments.createVersion({
+    const version = experiments.createTest({
       projectId: project.id,
       journey,
       request: {
@@ -378,7 +401,6 @@ describe('Outcome Check run persistence', () => {
     const database = new FormCrashDatabase(temporary.config.databasePath);
     database.migrate(legacyMigrationDirectory);
     const projects = new ProjectJourneyRepository(database.connection);
-    const experiments = new ExternalExperimentRepository(database.connection);
     const project = projects.createProject({
       name: 'Actual legacy run',
       targetUrl: 'http://127.0.0.1:49999/legacy',
@@ -407,27 +429,111 @@ describe('Outcome Check run persistence', () => {
         normalizationRule: 'legacy test',
       },
     });
-    const version = experiments.createVersion({
-      projectId: project.id,
-      journey,
-      request: {
-        name: 'Legacy double submit',
-        targetStepId: 'legacy-submit',
-        triggerCount: 2,
-        intervalMs: 0,
-        networkMatcher: null,
-        assertions: [
-          {
-            id: 'legacy-complete',
-            type: 'text_appeared',
-            text: 'Complete',
-            description: 'Completion appeared.',
-          },
-        ],
-        continueAfterTarget: false,
-        requestSelectionProvenance: null,
+    const outcomes = new OutcomeCheckRepository(database.connection);
+    const criticalAction = outcomes.approveCriticalAction(journey, {
+      stepId: 'legacy-submit',
+      label: 'Submit',
+    });
+    const backfilledCheck = outcomes.saveOutcomeCheck({
+      journeyId: journey.id,
+      criticalActionId: criticalAction.id,
+      type: 'final_pathname_matches',
+      description: 'The legacy pathname remains visible.',
+      expectedPathname: '/legacy',
+    });
+    const backfilledElementCheck = outcomes.saveOutcomeCheck({
+      journeyId: journey.id,
+      criticalActionId: criticalAction.id,
+      type: 'visible_element_exists',
+      description: 'The legacy confirmation remains visible.',
+      target: {
+        locator: { strategy: 'text', value: 'Complete' },
+        fingerprint: {
+          tagName: 'div',
+          dataFormcrash: null,
+          dataTestId: null,
+          id: null,
+          role: null,
+          accessibleName: null,
+          name: null,
+          cssPath: '#complete',
+        },
+        preview: 'Complete',
+        reliability: 'high',
+        warnings: [],
+        generatedBindings: [],
       },
     });
+    const version = {
+      id: 'pre-outcome-version',
+      experimentId: 'pre-outcome-test',
+      projectId: project.id,
+      journeyId: journey.id,
+      name: 'Legacy double submit',
+      experimentType: 'impatient_user' as const,
+      version: 1,
+      targetStepId: 'legacy-submit',
+      triggerCount: 2 as const,
+      intervalMs: 0 as const,
+      networkMatcher: null,
+      assertions: [
+        {
+          id: 'legacy-complete',
+          type: 'text_appeared' as const,
+          text: 'Complete',
+          description: 'Completion appeared.',
+        },
+        {
+          id: `outcome-${backfilledCheck.id}`,
+          type: 'final_url_contains' as const,
+          value: '/legacy',
+          description: backfilledCheck.description,
+        },
+      ],
+      continueAfterTarget: false,
+      guided: false,
+      requestSelectionProvenance: null,
+      assertionSelectionProvenance: [],
+      journeySnapshot: journey,
+      createdAt: '2026-07-16T00:00:00.000Z',
+    };
+    database.connection
+      .prepare(
+        `INSERT INTO external_experiments
+          (id, project_id, journey_id, name, experiment_type, created_at)
+         VALUES (?, ?, ?, ?, 'impatient_user', ?)`,
+      )
+      .run(
+        version.experimentId,
+        project.id,
+        journey.id,
+        version.name,
+        version.createdAt,
+      );
+    database.connection
+      .prepare(
+        `INSERT INTO external_experiment_versions
+          (id, experiment_id, version, configuration_json,
+           journey_snapshot_json, assertions_snapshot_json,
+           request_selection_provenance_json,
+           assertion_selection_provenance_json, created_at)
+         VALUES (?, ?, 1, ?, ?, ?, NULL, NULL, ?)`,
+      )
+      .run(
+        version.id,
+        version.experimentId,
+        JSON.stringify({
+          targetStepId: version.targetStepId,
+          triggerCount: version.triggerCount,
+          intervalMs: version.intervalMs,
+          networkMatcher: null,
+          continueAfterTarget: false,
+          guided: false,
+        }),
+        JSON.stringify(journey),
+        JSON.stringify(version.assertions),
+        version.createdAt,
+      );
     database.connection
       .prepare(
         `INSERT INTO external_runs
@@ -505,9 +611,50 @@ describe('Outcome Check run persistence', () => {
       );
 
     database.migrate();
-    const migrated = new ExternalExperimentRepository(
+    const migratedExperiments = new ExternalExperimentRepository(
       database.connection,
-    ).getRun('pre-outcome-run');
+    );
+    expect(migratedExperiments.getVersion(version.id)).toMatchObject({
+      assertions: [{ id: 'legacy-complete' }],
+      outcomeCheckSnapshot: {
+        criticalAction: { id: criticalAction.id, stepId: 'legacy-submit' },
+        checks: [
+          { id: backfilledCheck.id, expectedPathname: '/legacy' },
+          {
+            id: backfilledElementCheck.id,
+            target: {
+              fingerprint: {
+                dataFormcrash: null,
+                dataTestId: null,
+                id: null,
+                role: null,
+                accessibleName: null,
+                name: null,
+              },
+            },
+          },
+        ],
+      },
+    });
+    expect(() =>
+      database.connection
+        .prepare(
+          'UPDATE external_experiment_versions SET outcome_checks_snapshot_json = ? WHERE id = ?',
+        )
+        .run('[]', version.id),
+    ).toThrow('external experiment versions are immutable');
+    expect(outcomes.deleteOutcomeCheck(journey.id, backfilledCheck.id)).toBe(
+      'deleted',
+    );
+    expect(migratedExperiments.getVersion(version.id)).toMatchObject({
+      outcomeCheckSnapshot: {
+        checks: [
+          { id: backfilledCheck.id, expectedPathname: '/legacy' },
+          { id: backfilledElementCheck.id },
+        ],
+      },
+    });
+    const migrated = migratedExperiments.getRun('pre-outcome-run');
     expect(migrated).toMatchObject({
       status: 'passed',
       lifecycleStatus: 'completed',

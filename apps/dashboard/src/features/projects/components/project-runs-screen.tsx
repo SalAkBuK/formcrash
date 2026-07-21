@@ -73,7 +73,7 @@ export function ProjectRunsScreen({
     const normalized = query.trim().toLowerCase();
     return runs.filter(
       (run) =>
-        (status === 'all' || run.status === status) &&
+        (status === 'all' || run.canonicalVerdict === status) &&
         (normalized === '' ||
           `${run.experimentName} ${run.journeyName} ${run.runId}`
             .toLowerCase()
@@ -128,6 +128,7 @@ export function ProjectRunsScreen({
               <option value="all">All outcomes</option>
               <option value="passed">Passed</option>
               <option value="failed">Failed</option>
+              <option value="could_not_verify">Could not verify</option>
               <option value="runner_error">Runner error</option>
             </select>
           </div>
@@ -286,11 +287,14 @@ function ComparisonBadge({
 }
 
 function runTone(run: ExternalRunSummary): StatusTone {
-  if (run.status === 'runner_error' || run.outcomeAggregate === 'failed')
+  if (
+    run.canonicalVerdict === 'runner_error' ||
+    run.canonicalVerdict === 'failed'
+  ) {
     return 'failure';
-  if (run.outcomeAggregate === 'passed') return 'pass';
-  if (run.outcomeAggregate === 'could_not_verify') return 'warning';
-  return 'neutral';
+  }
+  if (run.canonicalVerdict === 'passed') return 'pass';
+  return 'warning';
 }
 
 function outcomeSummary(run: ExternalRunSummary): string {

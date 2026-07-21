@@ -49,8 +49,25 @@ describe('Outcome baseline capture lifecycle', () => {
         template: '{{unique.email}}',
       }),
     );
+    expect(capture.generatedInputs).toContainEqual(
+      expect.objectContaining({
+        stepId: 'slot-code',
+        template: '{{unique.text}}',
+      }),
+    );
+    expect(
+      capture.generatedInputs.find((input) => input.stepId === 'email')
+        ?.resolvedValue,
+    ).toMatch(/^formcrash\+[a-f0-9]{12}@example\.test$/u);
+    expect(
+      capture.generatedInputs.find((input) => input.stepId === 'slot-code')
+        ?.resolvedValue,
+    ).toMatch(/^FC-[a-f0-9]{12}$/u);
     expect(setup.browser.filledValues).toContainEqual(
       expect.stringMatching(/^formcrash\+[a-f0-9]{12}@example\.test$/u),
+    );
+    expect(setup.browser.filledValues).toContainEqual(
+      expect.stringMatching(/^FC-[a-f0-9]{12}$/u),
     );
     expect(setup.browser.closed).toBe(false);
     expect(setup.ownership.activeWorkload).toBe('outcome_capture');
@@ -89,7 +106,9 @@ describe('Outcome baseline capture lifecycle', () => {
         ],
       },
     });
-    expect(JSON.stringify(selected)).not.toContain(generatedEmail);
+    expect(JSON.stringify(selected?.selectedTarget)).not.toContain(
+      generatedEmail,
+    );
 
     const check = await setup.manager.approve(capture.id, {
       type: 'matching_item_appears_exactly_once',
@@ -143,7 +162,9 @@ describe('Outcome baseline capture lifecycle', () => {
         (warning) => warning.code === 'dynamic_locator',
       ),
     ).toBe(false);
-    expect(JSON.stringify(selected)).not.toContain(generatedEmail);
+    expect(JSON.stringify(selected?.selectedTarget)).not.toContain(
+      generatedEmail,
+    );
 
     const check = await setup.manager.approve(capture.id, {
       type: 'matching_item_appears_exactly_once',
@@ -248,7 +269,12 @@ describe('Outcome baseline capture lifecycle', () => {
         (warning) => warning.code === 'dynamic_locator',
       ),
     ).toBe(true);
-    expect(JSON.stringify(unboundDynamic)).not.toContain(generatedEmail);
+    expect(
+      JSON.stringify({
+        selectedTarget: unboundDynamic?.selectedTarget,
+        selectionWarnings: unboundDynamic?.selectionWarnings,
+      }),
+    ).not.toContain(generatedEmail);
 
     setup.browser.emitSelection({
       ...stableSelection('Iframe tenant result', {
@@ -497,13 +523,28 @@ function createSetup(
         value: { kind: 'safe', value: 'recorded@example.test' },
         sensitive: false,
       },
+      {
+        id: 'slot-code',
+        name: 'Fill Slot Code *',
+        type: 'fill',
+        timestamp: 2,
+        url: project.targetUrl,
+        locator: { strategy: 'id', value: 'code' },
+        fingerprint: {
+          ...fingerprint('input', 'code', 'text'),
+          accessibleName: 'Slot Code *',
+          label: 'Slot Code *',
+        },
+        value: { kind: 'safe', value: 'A-23023' },
+        sensitive: false,
+      },
       ...(includeSecret
         ? [
             {
               id: 'secret',
               name: 'Fill secret',
               type: 'fill' as const,
-              timestamp: 2,
+              timestamp: 3,
               url: project.targetUrl,
               locator: { strategy: 'name' as const, value: 'secret' },
               fingerprint: fingerprint('input', 'secret', 'password'),
@@ -519,7 +560,7 @@ function createSetup(
         id: 'submit',
         name: 'Submit Tenant',
         type: 'submit',
-        timestamp: 3,
+        timestamp: 4,
         url: project.targetUrl,
         locator: { strategy: 'data-testid', value: 'tenant-form' },
         fingerprint: fingerprint('form', 'tenant-form', null),

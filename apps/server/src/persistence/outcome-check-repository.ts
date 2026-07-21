@@ -7,6 +7,7 @@ import {
   type ApproveCriticalActionRequest,
   type CriticalAction,
   type OutcomeCheck,
+  type OutcomeCheckRunSnapshot,
   type PersistedJourney,
 } from '@formcrash/contracts';
 import type Database from 'better-sqlite3';
@@ -182,6 +183,13 @@ export class OutcomeCheckRepository {
         }),
       ),
     }).items;
+  }
+
+  snapshot(journeyId: string): OutcomeCheckRunSnapshot {
+    return {
+      criticalAction: this.getCriticalAction(journeyId),
+      checks: [...this.listOutcomeChecks(journeyId)],
+    };
   }
 
   deleteOutcomeCheck(

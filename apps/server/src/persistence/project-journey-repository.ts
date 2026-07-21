@@ -11,6 +11,7 @@ import {
   recordedJourneyStepSchema,
   recordingSessionSchema,
   recordingWarningSchema,
+  recordedRequestEvidenceSchema,
   traceSummarySchema,
   type CreateProjectRequest,
   type JourneyRecordingMetadata,
@@ -23,6 +24,7 @@ import {
   type RecordingSession,
   type RecordingSessionStatus,
   type RecordingWarning,
+  type RecordedRequestEvidence,
   type TraceCaptureStatus,
   type TraceSummary,
 } from '@formcrash/contracts';
@@ -66,6 +68,7 @@ interface RecordingRow {
   readonly captureFormat: string;
   readonly traceStatus: string;
   readonly traceSummaryJson: string | null;
+  readonly requestEvidenceJson: string;
 }
 
 interface RecordingTraceRow {
@@ -208,14 +211,15 @@ export class ProjectJourneyRepository {
       captureFormat: 'hybrid-v2',
       traceStatus: 'capturing',
       traceSummary: null,
+      requestEvidence: [],
     });
     this.database
       .prepare(
         `INSERT INTO recording_sessions
           (id, project_id, status, steps_json, warnings_json, error_message,
            started_at, completed_at, capture_format, trace_status,
-           trace_summary_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           trace_summary_json, request_evidence_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         session.id,
@@ -229,6 +233,7 @@ export class ProjectJourneyRepository {
         session.captureFormat,
         session.traceStatus,
         null,
+        '[]',
       );
     return session;
   }
@@ -242,6 +247,7 @@ export class ProjectJourneyRepository {
     readonly completedAt?: string | null;
     readonly traceStatus?: TraceCaptureStatus;
     readonly traceSummary?: TraceSummary | null;
+    readonly requestEvidence?: readonly RecordedRequestEvidence[];
   }): RecordingSession {
     const current = this.getRecordingSession(input.id);
     if (current === null) throw new Error('Recording session was not found.');
@@ -256,7 +262,7 @@ export class ProjectJourneyRepository {
         `UPDATE recording_sessions
             SET status = ?, steps_json = ?, warnings_json = ?,
                 error_message = ?, completed_at = ?, trace_status = ?,
-                trace_summary_json = ?
+                trace_summary_json = ?, request_evidence_json = ?
           WHERE id = ?`,
       )
       .run(
@@ -277,6 +283,12 @@ export class ProjectJourneyRepository {
           : input.traceSummary === null
             ? null
             : JSON.stringify(traceSummarySchema.parse(input.traceSummary)),
+        JSON.stringify(
+          recordedRequestEvidenceSchema
+            .array()
+            .max(500)
+            .parse(input.requestEvidence ?? current.requestEvidence),
+        ),
         input.id,
       );
     const updated = this.getRecordingSession(input.id);
@@ -291,7 +303,8 @@ export class ProjectJourneyRepository {
                 warnings_json AS warningsJson, error_message AS errorMessage,
                 started_at AS startedAt, completed_at AS completedAt,
                 capture_format AS captureFormat, trace_status AS traceStatus,
-                trace_summary_json AS traceSummaryJson
+                trace_summary_json AS traceSummaryJson,
+                request_evidence_json AS requestEvidenceJson
            FROM recording_sessions WHERE id = ?`,
       )
       .get(sessionId) as RecordingRow | undefined;
@@ -304,7 +317,22 @@ export class ProjectJourneyRepository {
         row.traceSummaryJson === null
           ? null
           : (JSON.parse(row.traceSummaryJson) as unknown),
+      requestEvidence: JSON.parse(row.requestEvidenceJson) as unknown,
     });
+  }
+
+  listRecordingRequestEvidence(
+    journeyId: string,
+    actionStepId: string,
+  ): readonly RecordedRequestEvidence[] {
+    const journey = this.getJourney(journeyId);
+    const sessionId = journey?.recordingMetadata.recordingSessionId ?? null;
+    if (sessionId === null) return [];
+    return (
+      this.getRecordingSession(sessionId)?.requestEvidence.filter(
+        (candidate) => candidate.actionStepId === actionStepId,
+      ) ?? []
+    );
   }
 
   saveJourney(input: {

@@ -1,12 +1,6 @@
 'use client';
 
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type {
   ApproveOutcomeCheckRequest,
   CriticalAction,
@@ -304,19 +298,36 @@ export function OutcomeDefinitionPanel({
   const target = capture?.selectedTarget ?? null;
   const captureActive =
     capture !== null &&
-    ![
-      'completed',
-      'expired',
-      'runner_error',
-      'selection_cancelled',
-    ].includes(capture.status);
+    !['completed', 'expired', 'runner_error', 'selection_cancelled'].includes(
+      capture.status,
+    );
   const requiresTarget = checkType !== 'final_pathname_matches';
   const requiresBinding = checkType === 'matching_item_appears_exactly_once';
   const selectedStep =
     compatibleSteps.find((step) => step.id === stepId) ?? null;
+  const resolvedGeneratedInputs =
+    capture?.generatedInputs.filter(
+      (
+        input,
+      ): input is typeof input & {
+        readonly resolvedValue: string;
+      } => typeof input.resolvedValue === 'string',
+    ) ?? [];
+  const showGeneratedInputs =
+    capture !== null &&
+    [
+      'awaiting_selection',
+      'selection_ready',
+      'selection_rejected',
+      'selection_cancelled',
+    ].includes(capture.status) &&
+    resolvedGeneratedInputs.length > 0;
 
   function useFinalPage(): void {
-    if (capture?.finalPathname === null || capture?.finalPathname === undefined) {
+    if (
+      capture?.finalPathname === null ||
+      capture?.finalPathname === undefined
+    ) {
       return;
     }
     setCheckType('final_pathname_matches');
@@ -365,14 +376,16 @@ export function OutcomeDefinitionPanel({
         {activeSection === 'checks' ? null : (
           <>
             <div className="outcome-definition-step">
-              <h3>Choose the action to stress</h3>
+              <h3>What should FormCrash test?</h3>
               <p>
-                Select the action FormCrash should repeat or disrupt during this
-                test.
+                Choose the final action that creates or updates the record.
+                FormCrash replays every earlier journey step normally—including
+                navigation and switching buildings—then stresses only this
+                action.
               </p>
               <div className="outcome-form-grid">
                 <label>
-                  Recorded action
+                  Action to test
                   <select
                     aria-label={`${journey.name} Critical Action`}
                     disabled={criticalAction !== null && checks.length > 0}
@@ -399,30 +412,35 @@ export function OutcomeDefinitionPanel({
                     ))}
                   </select>
                 </label>
-                <label>
-                  Action name
-                  <input
-                    aria-label={`${journey.name} Action name`}
-                    maxLength={160}
-                    value={actionLabel}
-                    onChange={(event) => setActionLabel(event.target.value)}
-                  />
-                  <small>Used in test results and reports.</small>
-                </label>
+                <details>
+                  <summary>Rename this action in results</summary>
+                  <label>
+                    Result label
+                    <input
+                      aria-label={`${journey.name} result label`}
+                      maxLength={160}
+                      value={actionLabel}
+                      onChange={(event) => setActionLabel(event.target.value)}
+                    />
+                  </label>
+                </details>
               </div>
               {selectedStep === null ? null : (
                 <div
                   aria-label="Selected action details"
                   className="critical-action-preview"
                 >
-                  <strong>{actionName(selectedStep, journey)}</strong>
+                  <strong>How this test will run</strong>
                   <span>
-                    Step {journey.steps.indexOf(selectedStep) + 1} of{' '}
-                    {journey.steps.length}
+                    Replay the first {journey.steps.indexOf(selectedStep)}{' '}
+                    journey steps normally. The selected action{' '}
+                    {plainActionType(selectedStep).toLowerCase()}.
                   </span>
-                  <span>{plainActionType(selectedStep)}</span>
                   {actionPageContext(selectedStep.url) === null ? null : (
-                    <small>{actionPageContext(selectedStep.url)}</small>
+                    <small>
+                      The selected action happens on{' '}
+                      {actionPageContext(selectedStep.url)}.
+                    </small>
                   )}
                 </div>
               )}
@@ -437,11 +455,11 @@ export function OutcomeDefinitionPanel({
                 onClick={() => void saveCriticalAction()}
                 type="button"
               >
-                {busy === 'action' ? 'Saving action…' : 'Use this action'}
+                {busy === 'action' ? 'Saving action…' : 'Confirm this action'}
               </button>
               {criticalAction === null ? null : (
                 <p className="guided-ready-note">
-                  Selected action: {criticalAction.label}
+                  Action confirmed. Earlier journey steps will run normally.
                 </p>
               )}
               {checks.length > 0 ? (
@@ -454,13 +472,13 @@ export function OutcomeDefinitionPanel({
             </div>
 
             <div className="outcome-definition-step">
-              <p className="eyebrow">Successful baseline</p>
+              <p className="eyebrow">Confirm the saved journey</p>
               <p>
-                This executes the real saved journey against the {environment}{' '}
-                target. It can send state-changing requests and create test
-                data. Use a controlled non-production environment whenever
-                possible. Existing preparation, authentication, production
-                confirmation, and cleanup settings apply to this replay.
+                FormCrash now replays the whole saved journey—including building
+                changes—to confirm it can reach the successful result on the{' '}
+                {environment} target. This can create test data. Existing
+                preparation, authentication, production confirmation, and
+                cleanup settings apply.
               </p>
               {productionConfirmation}
               <div className="guided-ready-note">
@@ -490,20 +508,52 @@ export function OutcomeDefinitionPanel({
                   type="button"
                 >
                   {busy === 'capture'
-                    ? 'Replaying baseline…'
-                    : 'Replay and choose result'}
+                    ? 'Replaying journey…'
+                    : 'Replay journey and choose result'}
                 </button>
                 {capture === null ? null : (
                   <span>{captureStatusLabel(capture.status)}</span>
                 )}
               </div>
+              {showGeneratedInputs ? (
+                <div
+                  aria-label="Generated values for this baseline"
+                  className="outcome-generated-values"
+                  role="status"
+                >
+                  <div>
+                    <p className="eyebrow">Find the new record</p>
+                    <strong>
+                      Use these exact generated values in Chromium
+                    </strong>
+                  </div>
+                  <dl>
+                    {resolvedGeneratedInputs.map((input) => (
+                      <div key={input.stepId}>
+                        <dt>{input.stepName}</dt>
+                        <dd>
+                          <code>{input.resolvedValue}</code>
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <small>
+                    Click the new row, confirmation, or result containing one of
+                    these values. They identify this baseline only and are not
+                    saved in the reusable Outcome Check.
+                  </small>
+                </div>
+              ) : null}
               {capture?.status === 'awaiting_selection' ? (
                 <div className="guided-ready-note" role="status">
-                  <strong>Baseline succeeded. Choose the proof in Chromium.</strong>
+                  <strong>
+                    Baseline succeeded. Choose the proof in Chromium.
+                  </strong>
                   <span>
                     Leave Chromium open and click the visible result that proves
                     this journey succeeded. Then return here. If arriving at the
-                    current page is sufficient proof, use the final page instead.
+                    current page is sufficient proof, use the final page
+                    instead.
                   </span>
                   {capture.finalPathname === null ? null : (
                     <button
@@ -892,8 +942,8 @@ function RunnerFailureMessage({ message }: { readonly message: string }) {
       <div>
         <strong>
           {selectionSetupFailed
-            ? 'Baseline completed, but result selection failed'
-            : 'Baseline replay could not complete'}
+            ? 'Journey completed, but result selection failed'
+            : 'Saved journey could not complete'}
         </strong>
         <p>{friendlyRunnerFailure(technicalDetail)}</p>
       </div>
@@ -919,6 +969,12 @@ function captureStatusLabel(status: OutcomeCaptureSession['status']): string {
 }
 
 function friendlyRunnerFailure(message: string): string {
+  if (
+    message.includes('strict mode violation') &&
+    message.includes('resolved to')
+  ) {
+    return 'A recorded label matched more than one element, so FormCrash could not safely identify the original control. Switching pages or buildings is supported; the problem was the ambiguous saved locator.';
+  }
   if (
     message.includes(
       'Baseline replay completed, but Outcome Check selection could not start.',

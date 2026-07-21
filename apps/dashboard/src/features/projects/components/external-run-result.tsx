@@ -2,10 +2,10 @@
 
 import type {
   ExternalRunDetail,
-  ExternalRunPresentationCondition,
   ReplayLocator,
   RunArtifact,
 } from '@formcrash/contracts';
+import { deriveExternalRunVerdict } from '@formcrash/contracts';
 
 import { getExternalArtifactUrl } from '../api/external-experiments';
 
@@ -21,87 +21,27 @@ export function ExternalRunResult({
   }
 
   const presentation = result.presentation;
+  const verdict = canonicalRunVerdict(result);
+  const presentationMatchesOverallVerdict =
+    presentation.primaryStatus === verdict.canonicalVerdict;
+  const verdictHeadline = presentationMatchesOverallVerdict
+    ? overallResultHeadline(result)
+    : overallTechnicalHeadline(result);
   const screenshots = [...result.artifacts].sort(
     (left, right) => screenshotPriority(left) - screenshotPriority(right),
   );
 
   return (
     <div
-      className={`external-result outcome-${presentation.primaryStatus}`}
+      className={`external-result outcome-${verdict.canonicalVerdict}`}
       role="status"
     >
       <header className="external-outcome-primary">
-        <div className="external-outcome-status-row">
-          <div>
-            <p className="eyebrow">{eyebrow}</p>
-            <span className="external-outcome-status">
-              {statusLabel(presentation.primaryStatus)}
-            </span>
-          </div>
-          <span className="external-outcome-aggregate">
-            {
-              result.outcomeCheckResults.filter(
-                (check) => check.status === 'passed',
-              ).length
-            }
-            /{result.outcomeCheckResults.length} Outcome Checks passed
-          </span>
-        </div>
-        <h3>{presentation.headline}</h3>
-        <p>{presentation.outcomeSummary}</p>
+        <p className="eyebrow">{eyebrow}</p>
+        <h3>{verdictHeadline}</h3>
       </header>
 
-      {presentation.expectedCondition !== null &&
-      presentation.observedCondition !== null ? (
-        <section
-          aria-labelledby={`expected-observed-${result.runId}`}
-          className="external-result-section"
-        >
-          <p className="eyebrow">Approved outcome</p>
-          <h4 id={`expected-observed-${result.runId}`}>
-            Expected versus observed
-          </h4>
-          {presentation.approvedExpectedOutcomeDescription !== null ? (
-            <p>{presentation.approvedExpectedOutcomeDescription}</p>
-          ) : null}
-          <div className="external-condition-grid">
-            <ConditionCard
-              condition={presentation.expectedCondition}
-              label="Expected"
-            />
-            <ConditionCard
-              condition={presentation.observedCondition}
-              label="Observed"
-            />
-          </div>
-          {presentation.templateBinding !== null ? (
-            <p className="external-binding">
-              <strong>Binding:</strong>{' '}
-              <code>{presentation.templateBinding.template}</code>
-            </p>
-          ) : null}
-        </section>
-      ) : null}
-
-      <section
-        aria-labelledby={`what-happened-${result.runId}`}
-        className="external-result-section"
-      >
-        <p className="eyebrow">Observed facts</p>
-        <h4 id={`what-happened-${result.runId}`}>What happened</h4>
-        {presentation.observations.length > 0 ? (
-          <ul className="external-observation-list">
-            {presentation.observations.map((observation, index) => (
-              <li key={`${observation.kind}-${index}`}>{observation.text}</li>
-            ))}
-          </ul>
-        ) : (
-          <p>
-            No approved application-outcome observation was available for this
-            run.
-          </p>
-        )}
-      </section>
+      <VerdictExplanation result={result} />
 
       {presentation.whyItMatters !== null ? (
         <section
@@ -127,45 +67,6 @@ export function ExternalRunResult({
           ) : null}
         </section>
       ) : null}
-
-      <section
-        aria-labelledby={`evidence-boundaries-${result.runId}`}
-        className="external-result-section"
-      >
-        <p className="eyebrow">Evidence boundaries</p>
-        <h4 id={`evidence-boundaries-${result.runId}`}>
-          What the result does and does not establish
-        </h4>
-        <div className="external-boundary-grid">
-          <div>
-            <strong>Observed</strong>
-            <p>
-              {presentation.observations.length > 0
-                ? presentation.observations.map((item) => item.text).join(' ')
-                : 'No approved browser-visible outcome was established.'}
-            </p>
-          </div>
-          <div>
-            <strong>Conclusion</strong>
-            <p>
-              {presentation.conclusion ??
-                'No application-outcome conclusion was reached.'}
-            </p>
-          </div>
-          <div>
-            <strong>Unknown</strong>
-            {presentation.unknowns.length > 0 ? (
-              <ul>
-                {presentation.unknowns.map((unknown) => (
-                  <li key={unknown}>{unknown}</li>
-                ))}
-              </ul>
-            ) : (
-              <p>No additional outcome unknowns were recorded.</p>
-            )}
-          </div>
-        </div>
-      </section>
 
       <section
         aria-labelledby={`visual-evidence-${result.runId}`}
@@ -208,60 +109,6 @@ export function ExternalRunResult({
           </p>
         )}
       </section>
-
-      {presentation.checks.length > 0 ? (
-        <section
-          aria-labelledby={`outcome-checks-${result.runId}`}
-          className="external-result-section"
-        >
-          <p className="eyebrow">Developer-approved outcomes</p>
-          <h4 id={`outcome-checks-${result.runId}`}>
-            Individual Outcome Checks
-          </h4>
-          <div className="external-outcome-check-list">
-            {presentation.checks.map((check) => (
-              <article
-                className={`external-outcome-check check-${check.status}`}
-                key={check.outcomeCheckId}
-              >
-                <div>
-                  <span>{checkTypeLabel(check.type)}</span>
-                  <strong>{check.headline}</strong>
-                </div>
-                <p>{check.approvedDescription}</p>
-                <dl>
-                  <div>
-                    <dt>Expected</dt>
-                    <dd>{conditionValue(check.expectedCondition)}</dd>
-                  </div>
-                  <div>
-                    <dt>Observed</dt>
-                    <dd>{conditionValue(check.observedCondition)}</dd>
-                  </div>
-                  {check.templateBinding !== null ? (
-                    <div>
-                      <dt>Binding</dt>
-                      <dd>
-                        <code>{check.templateBinding.template}</code>
-                      </dd>
-                    </div>
-                  ) : null}
-                </dl>
-                {check.reason !== null ? <p>{check.reason}</p> : null}
-                {check.evidenceReferences.screenshotArtifactIds[0] !==
-                undefined ? (
-                  <a
-                    className="external-evidence-link"
-                    href={`#evidence-${check.evidenceReferences.screenshotArtifactIds[0]}`}
-                  >
-                    View relevant screenshot evidence
-                  </a>
-                ) : null}
-              </article>
-            ))}
-          </div>
-        </section>
-      ) : null}
 
       <details className="external-technical-evidence">
         <summary>Technical evidence</summary>
@@ -316,8 +163,10 @@ export function ExternalRunResult({
               <div>
                 <dt>Request selection</dt>
                 <dd>
-                  {result.experimentSnapshot.requestSelectionProvenance
-                    ?.selectionMode ?? 'Not recorded'}
+                  {result.experimentSnapshot.networkEvidenceProvenance != null
+                    ? `${result.experimentSnapshot.networkEvidenceProvenance.source.replace('_', ' ')} approval`
+                    : (result.experimentSnapshot.requestSelectionProvenance
+                        ?.selectionMode ?? 'Not recorded')}
                 </dd>
               </div>
               <div>
@@ -469,6 +318,64 @@ export function ExternalRunResult({
   );
 }
 
+function VerdictExplanation({
+  result,
+}: {
+  readonly result: ExternalRunDetail;
+}) {
+  const title =
+    result.canonicalVerdict === 'passed'
+      ? 'Why this run passed'
+      : result.canonicalVerdict === 'failed'
+        ? 'Why this run failed'
+        : result.canonicalVerdict === 'could_not_verify'
+          ? 'Why this run could not be verified'
+          : 'Why this run stopped';
+
+  return (
+    <section
+      aria-labelledby={`verdict-explanation-${result.runId}`}
+      className={`external-result-section external-verdict-explanation${result.canonicalVerdict === 'passed' ? '' : ' external-result-impact'}`}
+    >
+      <h4 id={`verdict-explanation-${result.runId}`}>{title}</h4>
+      <p className="external-verdict-narrative">
+        {plainLanguageVerdict(result)}
+      </p>
+      <div className="external-result-checks">
+        <ResultCheck {...browserResultExplanation(result)} />
+        {result.assertions.length > 0 ? (
+          <ResultCheck {...requestResultExplanation(result)} />
+        ) : null}
+      </div>
+      <p className="external-evidence-limit">
+        <strong>Evidence limit:</strong> FormCrash checked the visible page and
+        observed browser requests. It did not inspect database records or hidden
+        backend side effects.
+      </p>
+    </section>
+  );
+}
+
+function ResultCheck({
+  detail,
+  label,
+  status,
+}: {
+  readonly detail: string;
+  readonly label: string;
+  readonly status: 'Could not verify' | 'Failed' | 'Passed';
+}) {
+  return (
+    <article className={`external-result-check check-${statusToken(status)}`}>
+      <div>
+        <span>{label}</span>
+        <strong>{status}</strong>
+      </div>
+      <p>{detail}</p>
+    </article>
+  );
+}
+
 function NotConfiguredRunResult({
   result,
 }: {
@@ -481,10 +388,12 @@ function NotConfiguredRunResult({
   const screenshot = result.artifacts.find((artifact) =>
     artifact.mimeType.startsWith('image/'),
   );
+  const verdict = canonicalRunVerdict(result);
+  const technicalChecksOnly = verdict.verdictBasis === 'technical_checks_only';
 
   return (
     <div
-      className="external-result external-result-not-configured outcome-not_configured"
+      className={`external-result external-result-not-configured outcome-${verdict.canonicalVerdict}`}
       role="status"
     >
       <header className="not-configured-banner">
@@ -492,17 +401,24 @@ function NotConfiguredRunResult({
           !
         </span>
         <div>
-          <p className="eyebrow">Outcome unverified</p>
-          <h2>{result.presentation.headline}</h2>
+          <p className="eyebrow">
+            {technicalChecksOnly ? 'Legacy run evidence' : 'Outcome unverified'}
+          </p>
+          <h2>{canonicalVerdictLabel(result)}</h2>
           <p>
-            {result.outcomeCheckSnapshot.checks.length === 0
-              ? 'No approved Outcome Checks were configured for this immutable run snapshot.'
-              : result.presentation.outcomeSummary}
+            {technicalChecksOnly
+              ? 'No approved Outcome Checks were configured for this immutable run snapshot. This verdict is supported by technical checks only.'
+              : result.outcomeCheckSnapshot.checks.length === 0
+                ? 'No required checks were configured for this immutable run snapshot, so the application outcome could not be verified.'
+                : result.presentation.outcomeSummary}
           </p>
         </div>
         <div className="not-configured-actions">
-          <a className="button button-primary" href="/projects">
-            Configure Outcome Check
+          <a
+            className="button button-primary"
+            href={`/projects/${result.projectId}/tests/${result.experimentSnapshot.experimentId}#edit-test`}
+          >
+            Edit test
           </a>
           <a className="button button-secondary" href="#technical-run-detail">
             View technical evidence
@@ -697,38 +613,6 @@ function formatDuration(milliseconds: number | null): string {
     : `${(milliseconds / 1000).toFixed(1)} s`;
 }
 
-function ConditionCard({
-  condition,
-  label,
-}: {
-  readonly condition: ExternalRunPresentationCondition;
-  readonly label: string;
-}) {
-  return (
-    <div>
-      <span>{label}</span>
-      <strong>{conditionValue(condition)}</strong>
-      <small>{condition.description}</small>
-    </div>
-  );
-}
-
-function conditionValue(condition: ExternalRunPresentationCondition): string {
-  if (condition.kind === 'visible_match_count') {
-    return condition.count === null
-      ? 'Unavailable'
-      : `${condition.count} visible matching result${condition.count === 1 ? '' : 's'}`;
-  }
-  if (condition.kind === 'approved_target_visibility') {
-    if (condition.visible === null) return 'Unavailable';
-    return condition.visible ? 'Visible' : 'Not visible';
-  }
-  if (condition.kind === 'pathname') {
-    return condition.pathname ?? 'Unavailable';
-  }
-  return 'Unavailable';
-}
-
 function RequestObservationTable({
   result,
 }: {
@@ -778,21 +662,241 @@ function RequestObservationTable({
   );
 }
 
-function statusLabel(
-  status: ExternalRunDetail['presentation']['primaryStatus'],
-): string {
-  if (status === 'could_not_verify') return 'Could not verify';
-  if (status === 'not_configured') return 'Not configured';
-  if (status === 'runner_error') return 'Runner error';
-  return capitalize(status);
+function overallResultHeadline(result: ExternalRunDetail): string {
+  if (
+    result.canonicalVerdict === 'passed' &&
+    result.experimentSnapshot.networkMatcher !== null &&
+    result.assertions.length > 0
+  ) {
+    return 'Passed: Repeated submissions were handled safely.';
+  }
+  return result.presentation.headline;
 }
 
-function checkTypeLabel(
-  type: ExternalRunDetail['presentation']['checks'][number]['type'],
-): string {
-  if (type === 'matching_item_appears_exactly_once') return 'Exact-once check';
-  if (type === 'visible_element_exists') return 'Visible confirmation check';
-  return 'Final pathname check';
+function overallTechnicalHeadline(result: ExternalRunDetail): string {
+  if (result.canonicalVerdict === 'could_not_verify') {
+    return 'Could not verify: Required technical evidence was unavailable.';
+  }
+  if (result.canonicalVerdict === 'runner_error') {
+    return 'FormCrash could not complete the journey.';
+  }
+  const failedTypes = new Set(
+    result.assertions
+      .filter(
+        (assertion) =>
+          assertion.status === 'failed' || assertion.status === 'error',
+      )
+      .map((assertion) => assertion.type),
+  );
+  if (failedTypes.has('network_no_server_errors')) {
+    const requests = requestStatistics(result);
+    const response = serverErrorResponseLabel(requests.serverErrors);
+    return `Failed: ${requests.serverErrors.length} of ${requests.total} repeated requests returned ${response}.`;
+  }
+  if (
+    failedTypes.has('network_success_max') ||
+    failedTypes.has('network_success_exact')
+  ) {
+    return 'Failed: The number of successful requests was unsafe.';
+  }
+  if (
+    failedTypes.has('network_request_max') ||
+    failedTypes.has('network_request_exact')
+  ) {
+    return 'Failed: The request behavior exceeded the Test limits.';
+  }
+  if (
+    failedTypes.has('network_expected_status') ||
+    failedTypes.has('network_all_status')
+  ) {
+    return 'Failed: A response returned an unexpected status.';
+  }
+  return 'Failed: A required technical check did not pass.';
+}
+
+function plainLanguageVerdict(result: ExternalRunDetail): string {
+  const action =
+    result.outcomeCheckSnapshot.criticalAction?.label ?? 'the selected action';
+  const actionSentence = `FormCrash triggered "${action}" ${triggerCountLabel(result.triggerAttempts)}.`;
+  const requests = requestStatistics(result);
+  if (requests.serverErrors.length > 0) {
+    const succeeded = `${requests.successful} matching request${requests.successful === 1 ? '' : 's'} succeeded`;
+    const failed = `${requests.serverErrors.length} returned ${serverErrorResponseLabel(requests.serverErrors)}`;
+    return `${actionSentence} ${capitalize(succeeded)}, but ${failed}. The Run failed because the backend reported an internal server error instead of handling the repeated attempt safely.`;
+  }
+  if (result.canonicalVerdict === 'passed') {
+    return `${actionSentence} The Run passed because the visible application result and repeated-request handling both met their requirements.`;
+  }
+  if (result.canonicalVerdict === 'runner_error') {
+    return `${actionSentence} FormCrash could not finish the journey, so it could not establish a reliable application result.`;
+  }
+  return `${actionSentence} The Run failed because the visible application result did not meet the approved expectation.`;
+}
+
+function browserResultExplanation(result: ExternalRunDetail): {
+  readonly detail: string;
+  readonly label: string;
+  readonly status: 'Could not verify' | 'Failed' | 'Passed';
+} {
+  const exactOnce = result.outcomeCheckResults.find(
+    (check) => check.type === 'matching_item_appears_exactly_once',
+  );
+  if (exactOnce !== undefined) {
+    if (exactOnce.status === 'passed') {
+      return {
+        detail: 'Exactly one matching result appeared in the page.',
+        label: 'Visible application result',
+        status: 'Passed',
+      };
+    }
+    if (exactOnce.status === 'failed') {
+      return {
+        detail:
+          exactOnce.observedCount === null
+            ? 'The expected matching result did not appear reliably.'
+            : `${exactOnce.observedCount} matching results appeared; the Test expected exactly one.`,
+        label: 'Visible application result',
+        status: 'Failed',
+      };
+    }
+  }
+  const status =
+    result.presentation.primaryStatus === 'passed'
+      ? 'Passed'
+      : result.presentation.primaryStatus === 'failed'
+        ? 'Failed'
+        : 'Could not verify';
+  return {
+    detail:
+      result.presentation.conclusion ?? result.presentation.outcomeSummary,
+    label: 'Visible application result',
+    status,
+  };
+}
+
+function requestResultExplanation(result: ExternalRunDetail): {
+  readonly detail: string;
+  readonly label: string;
+  readonly status: 'Could not verify' | 'Failed' | 'Passed';
+} {
+  const requests = requestStatistics(result);
+  const label =
+    result.experimentSnapshot.networkMatcher === null
+      ? 'Additional checks'
+      : 'Repeated-request handling';
+  if (requests.serverErrors.length > 0) {
+    return {
+      detail: `${requests.serverErrors.length} of ${requests.total} matching requests returned ${serverErrorResponseLabel(requests.serverErrors)}. A repeated attempt should be ignored or rejected intentionally—not reported as an internal server error.`,
+      label,
+      status: 'Failed',
+    };
+  }
+  if (requests.total === 0 && result.assertionAggregate === 'passed') {
+    return {
+      detail: `All ${result.assertions.length} additional technical ${result.assertions.length === 1 ? 'check passed' : 'checks passed'}.`,
+      label,
+      status: 'Passed',
+    };
+  }
+  if (result.assertionAggregate === 'passed') {
+    const rejected = requests.clientRejections.length;
+    const rejectionText =
+      rejected === 0
+        ? ''
+        : ` ${rejected} ${rejected === 1 ? 'was' : 'were'} rejected cleanly with ${statusList(requests.clientRejections)}.`;
+    return {
+      detail: `${requests.successful} of ${requests.total} matching requests succeeded.${rejectionText} No matching request returned a server error.`,
+      label,
+      status: 'Passed',
+    };
+  }
+  const failedCheck = result.assertions.find(
+    (assertion) => assertion.status !== 'passed',
+  );
+  if (result.assertionAggregate === 'failed' && failedCheck !== undefined) {
+    return {
+      detail: `${failedCheck.observedDescription} This did not meet the required behavior: ${failedCheck.expectedDescription}`,
+      label,
+      status: 'Failed',
+    };
+  }
+  return {
+    detail: 'The required request or technical evidence was unavailable.',
+    label,
+    status: 'Could not verify',
+  };
+}
+
+function requestStatistics(result: ExternalRunDetail): {
+  readonly clientRejections: readonly number[];
+  readonly serverErrors: readonly number[];
+  readonly successful: number;
+  readonly total: number;
+} {
+  const matched = result.networkObservations.filter(
+    (observation) => observation.matched,
+  );
+  const statuses = matched.flatMap((observation) =>
+    observation.status === null ? [] : [observation.status],
+  );
+  return {
+    clientRejections: statuses.filter(
+      (status) => status >= 400 && status < 500,
+    ),
+    serverErrors: statuses.filter((status) => status >= 500),
+    successful: statuses.filter((status) => status >= 200 && status < 400)
+      .length,
+    total: matched.length,
+  };
+}
+
+function serverErrorResponseLabel(statuses: readonly number[]): string {
+  const uniqueStatuses = [...new Set(statuses)];
+  return uniqueStatuses.length === 1
+    ? `HTTP ${uniqueStatuses[0]}`
+    : 'HTTP 5xx errors';
+}
+
+function statusList(statuses: readonly number[]): string {
+  return [...new Set(statuses)].map((status) => `HTTP ${status}`).join(' and ');
+}
+
+function triggerCountLabel(count: number): string {
+  if (count === 1) return 'once';
+  if (count === 2) return 'twice';
+  return `${count} times`;
+}
+
+function statusToken(status: 'Could not verify' | 'Failed' | 'Passed'): string {
+  return status.toLowerCase().replaceAll(' ', '-');
+}
+
+function canonicalVerdictLabel(result: ExternalRunDetail): string {
+  const verdict = canonicalRunVerdict(result);
+  if (
+    verdict.canonicalVerdict === 'passed' &&
+    verdict.verdictBasis === 'technical_checks_only'
+  ) {
+    return 'Passed — technical checks only';
+  }
+  if (verdict.canonicalVerdict === 'could_not_verify') {
+    return 'Could not verify';
+  }
+  if (verdict.canonicalVerdict === 'runner_error') return 'Runner error';
+  return capitalize(verdict.canonicalVerdict);
+}
+
+function canonicalRunVerdict(result: ExternalRunDetail) {
+  if (
+    result.canonicalVerdict !== undefined &&
+    result.verdictBasis !== undefined
+  ) {
+    return {
+      canonicalVerdict: result.canonicalVerdict,
+      verdictBasis: result.verdictBasis,
+    };
+  }
+  return deriveExternalRunVerdict(result);
 }
 
 function capitalize(value: string): string {

@@ -109,6 +109,7 @@ export interface RecordingCallbacks {
 
 export interface RecordingBrowserSession {
   close(): Promise<void>;
+  observeNetwork?(observer: (observation: NetworkObservation) => void): void;
   recordedVideoPaths?(): readonly string[];
   currentUrl?(): string;
   detectAuthenticationRequired?(): Promise<AuthenticationRequirementDetection | null>;
@@ -116,7 +117,10 @@ export interface RecordingBrowserSession {
 
 export interface ReplayBrowserSession {
   navigate(url: string): Promise<void>;
-  click(locator: ReplayLocator): Promise<void>;
+  click(
+    locator: ReplayLocator,
+    fingerprint?: TargetFingerprint | null,
+  ): Promise<void>;
   fill(locator: ReplayLocator, value: string): Promise<void>;
   setChecked(locator: ReplayLocator, checked: boolean): Promise<void>;
   select(locator: ReplayLocator, value: string): Promise<void>;
@@ -136,6 +140,10 @@ export interface ReplayBrowserSession {
     locator: ReplayLocator,
     containingText?: string,
   ): Promise<VisibleMatchCount>;
+  focusUniqueVisibleMatch?(
+    locator: ReplayLocator,
+    containingText?: string,
+  ): Promise<boolean>;
   isDisabled(locator: ReplayLocator): Promise<boolean>;
   textVisible(text: string): Promise<boolean>;
   inputValue(locator: ReplayLocator): Promise<string | null>;
@@ -172,6 +180,7 @@ export interface ReplayBrowserSession {
   inspectSemanticElements?(): Promise<readonly SemanticElementSnapshot[]>;
   enterOutcomeSelection?(
     onSelection: (selection: OutcomeElementSelection) => void,
+    generatedValues?: readonly OutcomeSelectionGeneratedValue[],
   ): Promise<void>;
   onClosed?(callback: () => void): void;
   detectSecurityChallenge?(): Promise<SecurityChallengeDetection | null>;
@@ -179,6 +188,12 @@ export interface ReplayBrowserSession {
   currentUrl(): string;
   settle(milliseconds: number): Promise<void>;
   close(): Promise<void>;
+}
+
+export interface OutcomeSelectionGeneratedValue {
+  readonly label: string;
+  readonly stepName: string;
+  readonly value: string;
 }
 
 export interface InteractionTargetResolution {
@@ -379,8 +394,19 @@ class PlaywrightExternalSession
     await this.page.waitForTimeout(Math.min(150, this.timeoutMs));
   }
 
-  async click(locator: ReplayLocator): Promise<void> {
-    const target = resolveLocator(this.page, locator);
+  async click(
+    locator: ReplayLocator,
+    fingerprint?: TargetFingerprint | null,
+  ): Promise<void> {
+    const recordedTarget = resolveLocator(this.page, locator);
+    const recordedMatchCount = await recordedTarget.count().catch(() => 0);
+    const recoveredTarget =
+      recordedMatchCount <= 1 ||
+      fingerprint === undefined ||
+      fingerprint === null
+        ? null
+        : await resolveFingerprintTarget(this.page, fingerprint);
+    const target = recoveredTarget ?? recordedTarget;
     try {
       await target.click();
     } catch (error: unknown) {
@@ -742,6 +768,31 @@ class PlaywrightExternalSession
     };
   }
 
+  async focusUniqueVisibleMatch(
+    locator: ReplayLocator,
+    containingText?: string,
+  ): Promise<boolean> {
+    const matches = resolveLocator(this.page, locator);
+    const totalLocatorMatchCount = await matches.count();
+    if (totalLocatorMatchCount > 100) return false;
+    let uniqueMatch: Locator | null = null;
+    for (let index = 0; index < totalLocatorMatchCount; index += 1) {
+      const match = matches.nth(index);
+      if (!(await match.isVisible())) continue;
+      if (containingText !== undefined) {
+        const text = (await match.innerText()).replace(/\s+/gu, ' ').trim();
+        if (!text.includes(containingText)) continue;
+      }
+      if (uniqueMatch !== null) return false;
+      uniqueMatch = match;
+    }
+    if (uniqueMatch === null) return false;
+    await uniqueMatch.evaluate((element) => {
+      element.scrollIntoView({ block: 'center', inline: 'nearest' });
+    });
+    return true;
+  }
+
   async isDisabled(locator: ReplayLocator): Promise<boolean> {
     const target = resolveLocator(this.page, locator);
     if ((await target.count()) === 0) return false;
@@ -841,6 +892,7 @@ class PlaywrightExternalSession
 
   async enterOutcomeSelection(
     onSelection: (selection: OutcomeElementSelection) => void,
+    generatedValues: readonly OutcomeSelectionGeneratedValue[] = [],
   ): Promise<void> {
     if (this.outcomeSelectionActive) return;
     this.outcomeSelectionActive = true;
@@ -850,7 +902,10 @@ class PlaywrightExternalSession
         return this.handleOutcomeSelection(frame, payload, onSelection);
       },
     );
-    const script = buildOutcomeSelectorInitScript();
+    const script = buildOutcomeSelectorInitScript(
+      installOutcomeSelector.toString(),
+      generatedValues,
+    );
     await this.context.addInitScript({ content: script });
     await this.page.mainFrame().evaluate(script);
     await Promise.all(
@@ -858,7 +913,7 @@ class PlaywrightExternalSession
         .frames()
         .filter((frame) => frame !== this.page.mainFrame())
         .map(async (frame) => {
-        await frame.evaluate(script).catch(() => undefined);
+          await frame.evaluate(script).catch(() => undefined);
         }),
     );
     const ready = await this.page.evaluate<boolean>(
@@ -1263,6 +1318,64 @@ function resolveLocator(page: Page | Frame, locator: ReplayLocator) {
   }
 }
 
+async function resolveFingerprintTarget(
+  page: Page | Frame,
+  fingerprint: TargetFingerprint,
+): Promise<Locator | null> {
+  const candidates: Locator[] = [];
+  if (fingerprint.cssPath !== '') {
+    candidates.push(page.locator(fingerprint.cssPath));
+  }
+  if (fingerprint.role !== null && fingerprint.accessibleName !== null) {
+    candidates.push(
+      page.getByRole(fingerprint.role as never, {
+        name: fingerprint.accessibleName,
+        exact: true,
+      }),
+    );
+  }
+  if (
+    fingerprint.text !== null &&
+    /^[a-z][a-z0-9-]*$/u.test(fingerprint.tagName)
+  ) {
+    candidates.push(
+      page.locator(fingerprint.tagName).filter({
+        hasText: new RegExp(
+          `^\\s*${escapeRegularExpression(fingerprint.text)}\\s*$`,
+          'u',
+        ),
+      }),
+    );
+  }
+
+  for (const candidate of candidates) {
+    if ((await candidate.count().catch(() => 0)) !== 1) continue;
+    if (!(await candidate.isVisible().catch(() => false))) continue;
+    const matches = await candidate
+      .evaluate(
+        (element, expected) => {
+          const normalizedText = (element.textContent ?? '')
+            .replace(/\s+/gu, ' ')
+            .trim();
+          return (
+            element.tagName.toLowerCase() === expected.tagName &&
+            (expected.text === null || normalizedText === expected.text) &&
+            (expected.name === null ||
+              element.getAttribute('name') === expected.name)
+          );
+        },
+        {
+          tagName: fingerprint.tagName,
+          text: fingerprint.text,
+          name: fingerprint.name,
+        },
+      )
+      .catch(() => false);
+    if (matches) return candidate;
+  }
+  return null;
+}
+
 export class InteractionResolutionError extends Error {
   constructor(
     message: string,
@@ -1422,15 +1535,18 @@ const rawOutcomeSelectionSchema = z.object({
 
 export function buildOutcomeSelectorInitScript(
   selectorSource: string = installOutcomeSelector.toString(),
+  generatedValues: readonly OutcomeSelectionGeneratedValue[] = [],
 ): string {
   return `(() => {
     const __name = (target, value) =>
       Object.defineProperty(target, "name", { value, configurable: true });
-    (${selectorSource})();
+    (${selectorSource})(${JSON.stringify(generatedValues)});
   })();`;
 }
 
-function installOutcomeSelector(): void {
+function installOutcomeSelector(
+  generatedValues: readonly OutcomeSelectionGeneratedValue[] = [],
+): void {
   type Binding = (payload: unknown) => Promise<void>;
   const bindings = window as typeof window & {
     __formcrashSelectOutcome?: Binding;
@@ -1443,8 +1559,18 @@ function installOutcomeSelector(): void {
   helper.setAttribute('data-formcrash-outcome-ui', 'true');
   helper.setAttribute('data-formcrash-outcome-banner', 'true');
   helper.setAttribute('role', 'status');
-  helper.textContent =
-    'FormCrash outcome capture: click the tenant row, confirmation, or other visible result that proves success. Do not close this window.';
+  const visibleGeneratedValues = generatedValues.slice(0, 4);
+  const generatedValueHint =
+    visibleGeneratedValues.length === 0
+      ? ''
+      : ` Find the new record using ${visibleGeneratedValues
+          .map((item) => `${item.stepName}: ${item.value}`)
+          .join(' · ')}${
+          generatedValues.length > visibleGeneratedValues.length
+            ? ' · More generated values are shown in the FormCrash dashboard.'
+            : ''
+        }`;
+  helper.textContent = `FormCrash outcome capture:${generatedValueHint} Click the matching tenant row, confirmation, or other visible result that proves success. Do not close this window.`;
   const helperStyles: Readonly<Record<string, string>> = {
     display: 'block',
     position: 'fixed',
@@ -1673,7 +1799,10 @@ function installOutcomeSelector(): void {
           'Result selected. Return to the dashboard to review and approve it. Keep this window open.';
       },
       () => {
-        if (selectable instanceof HTMLElement || selectable instanceof SVGElement) {
+        if (
+          selectable instanceof HTMLElement ||
+          selectable instanceof SVGElement
+        ) {
           selectable.style.outline = previousOutline;
           selectable.style.outlineOffset = previousOutlineOffset;
         }

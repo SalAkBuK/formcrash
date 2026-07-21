@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   confirmAuthenticationCapture: vi.fn(),
   continueWithoutAuthentication: vi.fn(),
   createExternalExperiment: vi.fn(),
+  createExternalExperimentSuite: vi.fn(),
   deleteExternalExperimentVersion: vi.fn(),
   deleteExternalRun: vi.fn(),
   discoverRequests: vi.fn(),
@@ -34,8 +35,10 @@ const mocks = vi.hoisted(() => ({
   deleteOutcomeCheck: vi.fn(),
   startOutcomeCapture: vi.fn(),
   listExternalExperiments: vi.fn(),
+  listNetworkEvidenceCandidates: vi.fn(),
   listExternalRuns: vi.fn(),
   runExternalExperiment: vi.fn(),
+  saveProductionReplayAcknowledgement: vi.fn(),
   saveProjectSettings: vi.fn(),
   startAuthenticationCapture: vi.fn(),
   testAuthentication: vi.fn(),
@@ -165,6 +168,7 @@ const version = {
   continueAfterTarget: false,
   guided: false,
   requestSelectionProvenance: null,
+  outcomeCheckSnapshot: { criticalAction: null, checks: [] },
   journeySnapshot: journey,
   createdAt: '2026-07-16T00:00:00.000Z',
 };
@@ -211,6 +215,16 @@ beforeEach(() => {
     'http://localhost:4100/api/external-runs/run-1/artifacts/screen-1',
   );
   mocks.getProjectSettings.mockResolvedValue(settings);
+  mocks.saveProductionReplayAcknowledgement.mockImplementation(
+    (_projectId: string, acknowledged: boolean) =>
+      Promise.resolve({
+        ...settings,
+        productionReplayAcknowledged: acknowledged,
+        productionReplayAcknowledgedAt: acknowledged
+          ? '2026-07-16T00:00:00.000Z'
+          : null,
+      }),
+  );
   mocks.getCriticalAction.mockResolvedValue(criticalAction);
   mocks.listOutcomeChecks.mockResolvedValue([outcomeCheck]);
   mocks.getActiveOutcomeCapture.mockResolvedValue(null);
@@ -237,6 +251,11 @@ beforeEach(() => {
     completedAt: '2026-07-16T00:06:00.000Z',
   });
   mocks.listExternalExperiments.mockResolvedValue([version]);
+  mocks.listNetworkEvidenceCandidates.mockResolvedValue({
+    items: [],
+    source: null,
+    explanation: 'No bounded evidence is available.',
+  });
   mocks.listExternalRuns.mockResolvedValue({
     items: [],
     limit: 20,
@@ -313,6 +332,26 @@ beforeEach(() => {
     }),
   );
   mocks.createExternalExperiment.mockResolvedValue(version);
+  mocks.createExternalExperimentSuite.mockImplementation(
+    async (
+      journeyId: string,
+      input: { readonly tests: readonly CreateExternalExperimentRequest[] },
+    ) => {
+      const first = await mocks.createExternalExperiment(
+        journeyId,
+        input.tests[0]!,
+      );
+      return input.tests.map((test, index) => ({
+        ...first,
+        id: `${first.id}-suite-${index + 1}`,
+        experimentId: `${first.experimentId}-suite-${index + 1}`,
+        name: test.name,
+        triggerCount: test.triggerCount,
+        intervalMs: test.intervalMs,
+        assertions: test.assertions,
+      }));
+    },
+  );
   const runResult = {
     runId: 'run-1',
     experimentVersionId: version.id,
@@ -500,32 +539,33 @@ describe('external experiment dashboard workflow', () => {
     );
 
     expect(
-      screen.getByRole('heading', { name: 'Choose the action to stress' }),
+      screen.getByRole('heading', { name: 'What should FormCrash test?' }),
     ).toBeVisible();
     expect(
       screen.getByText(
-        'Select the action FormCrash should repeat or disrupt during this test.',
+        /replays every earlier journey step normally—including navigation and switching buildings/u,
       ),
     ).toBeVisible();
     expect(screen.getByLabelText('Selected action details')).toHaveTextContent(
-      'Place order',
+      'How this test will run',
     );
     expect(screen.getByLabelText('Selected action details')).toHaveTextContent(
-      'Step 8 of 8',
+      'Replay the first 7 journey steps normally',
     );
     expect(screen.getByLabelText('Selected action details')).toHaveTextContent(
-      'Activates the selected control',
+      'activates the selected control',
     );
     expect(screen.getByLabelText('Selected action details')).toHaveTextContent(
-      'Checkout page',
+      'The selected action happens on Checkout page',
     );
-    expect(screen.getByText('Action name')).toBeVisible();
-    expect(screen.getByText('Used in test results and reports.')).toBeVisible();
+    expect(screen.getByText('Rename this action in results')).toBeVisible();
     expect(
       screen.queryByText(/\(click\)|Recorded click or submit/u),
     ).toBeNull();
 
-    await user.click(screen.getByRole('button', { name: 'Use this action' }));
+    await user.click(
+      screen.getByRole('button', { name: 'Confirm this action' }),
+    );
     await waitFor(() =>
       expect(mocks.approveCriticalAction).toHaveBeenCalledOnce(),
     );
@@ -536,7 +576,7 @@ describe('external experiment dashboard workflow', () => {
     );
 
     const baseline = screen.getByRole('button', {
-      name: 'Replay and choose result',
+      name: 'Replay journey and choose result',
     });
     expect(baseline).toBeDisabled();
     const outcomeConfiguration = document.querySelector(
@@ -557,8 +597,8 @@ describe('external experiment dashboard workflow', () => {
     );
     expect(mocks.getProjectSettings).toHaveBeenCalledTimes(2);
     expect(mocks.testAuthentication).toHaveBeenCalledOnce();
-    expect(mocks.listExternalRuns).toHaveBeenCalledOnce();
-    expect(mocks.listExternalExperiments).toHaveBeenCalledOnce();
+    expect(mocks.listExternalRuns).not.toHaveBeenCalled();
+    expect(mocks.listExternalExperiments).not.toHaveBeenCalled();
     expect(mocks.getCriticalAction).toHaveBeenCalledOnce();
     expect(mocks.listOutcomeChecks).toHaveBeenCalledOnce();
     expect(mocks.getActiveOutcomeCapture).toHaveBeenCalledOnce();
@@ -573,9 +613,7 @@ describe('external experiment dashboard workflow', () => {
     expect(
       screen.getByRole('tab', { name: /Outcome Checks/u }),
     ).toHaveAttribute('aria-selected', 'true');
-    expect(
-      screen.getByText('Final pathname:', { exact: false }),
-    ).toBeVisible();
+    expect(screen.getByText('Final pathname:', { exact: false })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Approve check' })).toBeEnabled();
   });
 
@@ -584,18 +622,36 @@ describe('external experiment dashboard workflow', () => {
 
     expect(
       await screen.findByRole('heading', {
-        name: 'Set up your first guided test',
+        name: 'Set up your first test',
       }),
     ).toBeVisible();
     expect(
       screen.getByRole('link', { name: 'Go to journey recording' }),
     ).toHaveAttribute('href', '#recording-workspace');
     expect(
-      screen.getByRole('button', { name: 'Set up authentication' }),
-    ).toBeVisible();
+      screen.getByRole('link', { name: 'Set up authentication' }),
+    ).toHaveAttribute('href', `/projects/${project.id}/settings`);
   });
 
-  it('does not start request discovery before authentication succeeds', async () => {
+  it('presents one step-by-step setup flow without mode choices', async () => {
+    render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
+
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Define the outcome, check safety, then save',
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('navigation', { name: 'Test setup progress' }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('tablist', { name: 'Test mode' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('Recommended')).not.toBeInTheDocument();
+    expect(screen.queryByText('Advanced')).not.toBeInTheDocument();
+  });
+
+  it('reaches review without a request-discovery replay', async () => {
     const user = userEvent.setup();
     mocks.testAuthentication.mockResolvedValue({
       projectId: project.id,
@@ -616,33 +672,24 @@ describe('external experiment dashboard workflow', () => {
       await screen.findByLabelText('Runtime SECRET_TOKEN'),
       'runtime-only',
     );
-    await user.click(
-      screen.getByRole('button', { name: 'Continue to Review' }),
-    );
+    await user.click(screen.getByRole('button', { name: 'Review & Save' }));
 
-    expect(await screen.findByText('Sign-in required')).toBeVisible();
+    expect(
+      await screen.findByRole('heading', { name: 'Review & Save' }),
+    ).toBeVisible();
     expect(mocks.discoverRequests).not.toHaveBeenCalled();
   });
 
-  it('does not create or run an experiment before its authentication preflight', async () => {
+  it('saves without an authentication preflight or a run', async () => {
     const user = userEvent.setup();
-    mocks.testAuthentication
-      .mockResolvedValueOnce({
-        projectId: project.id,
-        status: 'valid',
-        outcome: 'authenticated',
-        currentUrl: project.targetUrl,
-        message: 'Connected.',
-        checkedAt: '2026-07-16T00:00:00.000Z',
-      })
-      .mockResolvedValueOnce({
-        projectId: project.id,
-        status: 'invalid',
-        outcome: 'authentication_expired',
-        currentUrl: 'http://localhost:4300/login',
-        message: 'Expired.',
-        checkedAt: '2026-07-16T00:01:00.000Z',
-      });
+    mocks.testAuthentication.mockResolvedValueOnce({
+      projectId: project.id,
+      status: 'invalid',
+      outcome: 'authentication_expired',
+      currentUrl: 'http://localhost:4300/login',
+      message: 'Expired.',
+      checkedAt: '2026-07-16T00:01:00.000Z',
+    });
     render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
 
     await user.click(
@@ -654,18 +701,18 @@ describe('external experiment dashboard workflow', () => {
       await screen.findByLabelText('Runtime SECRET_TOKEN'),
       'runtime-only',
     );
-    await user.click(
-      screen.getByRole('button', { name: 'Continue to Review' }),
-    );
-    await screen.findByRole('heading', { name: 'Review & Run' });
+    await user.click(screen.getByRole('button', { name: 'Review & Save' }));
+    await screen.findByRole('heading', { name: 'Review & Save' });
     await user.click(
       screen.getByRole('button', {
-        name: 'Run repeated-submission experiment',
+        name: 'Save 3-Test suite',
       }),
     );
 
-    expect(await screen.findByText('Authentication expired')).toBeVisible();
-    expect(mocks.createExternalExperiment).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(mocks.createExternalExperiment).toHaveBeenCalledOnce(),
+    );
+    expect(mocks.testAuthentication).not.toHaveBeenCalled();
     expect(mocks.runExternalExperiment).not.toHaveBeenCalled();
   });
 
@@ -689,7 +736,9 @@ describe('external experiment dashboard workflow', () => {
     ).toBeVisible();
     await user.click(screen.getByRole('tab', { name: /Critical Action/u }));
     expect(
-      screen.getByRole('button', { name: 'Replay and choose result' }),
+      screen.getByRole('button', {
+        name: 'Replay journey and choose result',
+      }),
     ).toBeVisible();
   });
 
@@ -743,7 +792,7 @@ describe('external experiment dashboard workflow', () => {
     );
 
     expect(
-      await screen.findByText('Baseline replay could not complete'),
+      await screen.findByText('Saved journey could not complete'),
     ).toBeVisible();
     expect(
       screen.getByText(/controlled browser closed before the saved journey/u),
@@ -782,16 +831,14 @@ describe('external experiment dashboard workflow', () => {
     );
 
     expect(
-      await screen.findByText(
-        'Baseline completed, but result selection failed',
-      ),
+      await screen.findByText('Journey completed, but result selection failed'),
     ).toBeVisible();
     expect(
       screen.getByText(
         'The saved journey completed and may already have changed target data, but FormCrash could not start result selection. Do not immediately replay the mutation; review the target data first.',
       ),
     ).toBeVisible();
-    expect(screen.queryByText('Baseline replay could not complete')).toBeNull();
+    expect(screen.queryByText('Saved journey could not complete')).toBeNull();
   });
 
   it('offers another selection or final-page recovery for a rejected result', async () => {
@@ -836,7 +883,7 @@ describe('external experiment dashboard workflow', () => {
     expect(screen.getByRole('button', { name: 'Approve check' })).toBeEnabled();
   });
 
-  it('keeps authentication unknown, redacts runtime values, and requires production confirmation', async () => {
+  it('keeps authentication unknown, redacts values, and persists production confirmation', async () => {
     const user = userEvent.setup();
     const productionProject = {
       ...project,
@@ -865,18 +912,22 @@ describe('external experiment dashboard workflow', () => {
     await user.type(runtimeInput, 'production-secret');
     expect(screen.queryByText('production-secret')).not.toBeInTheDocument();
     const continueButton = screen.getByRole('button', {
-      name: 'Continue to Review',
+      name: 'Review & Save',
     });
-    expect(continueButton).toBeDisabled();
+    expect(continueButton).toBeEnabled();
     await user.click(
       screen.getByRole('checkbox', {
         name: /I confirm this test may change production data/u,
       }),
     );
+    expect(mocks.saveProductionReplayAcknowledgement).toHaveBeenCalledWith(
+      project.id,
+      true,
+    );
     expect(continueButton).toBeEnabled();
   });
 
-  it('prevents duplicate run submissions while experiment creation is pending', async () => {
+  it('prevents duplicate save submissions while test creation is pending', async () => {
     const user = userEvent.setup();
     const journeyWithoutRuntime = {
       ...journey,
@@ -902,48 +953,36 @@ describe('external experiment dashboard workflow', () => {
       }),
     );
     const continueButton = screen.getByRole('button', {
-      name: 'Continue to Review',
+      name: 'Review & Save',
     });
     await waitFor(() => expect(continueButton).toBeEnabled());
     await user.click(continueButton);
-    const runButton = await screen.findByRole('button', {
-      name: 'Run repeated-submission experiment',
+    const saveButton = await screen.findByRole('button', {
+      name: 'Save 3-Test suite',
     });
-    await user.click(runButton);
-    await user.click(runButton);
+    await user.click(saveButton);
+    await user.click(saveButton);
 
     expect(mocks.createExternalExperiment).toHaveBeenCalledTimes(1);
     expect(
-      screen.getByRole('button', { name: 'Starting experiment…' }),
+      screen.getByRole('button', { name: 'Saving Test suite…' }),
     ).toBeDisabled();
     resolveCreation(version);
     expect(
-      await screen.findByText(/existing runner returned run/u),
+      await screen.findByText(/Three Tests saved as Version 1/u),
     ).toBeVisible();
-    expect(mocks.runExternalExperiment).toHaveBeenCalledTimes(1);
+    expect(mocks.runExternalExperiment).not.toHaveBeenCalled();
   });
 
-  it('offers authentication recapture directly in Guided mode after expiry', async () => {
+  it('shows a clear conflict when a test name already exists', async () => {
     const user = userEvent.setup();
-    const refreshedSettings = {
-      ...settings,
-      authentication: {
-        configured: true,
-        available: true,
-        capturedAt: '2026-07-16T00:06:00.000Z',
-        missingReason: null,
-      },
-    };
-    mocks.discoverRequests.mockRejectedValueOnce(
+    mocks.createExternalExperiment.mockRejectedValueOnce(
       new FormCrashApiError(
         409,
-        'AUTHENTICATION_REQUIRED',
-        'The saved authentication session appears to have expired.',
+        'TEST_NAME_EXISTS',
+        'A test named "Accidental double-click: Submit profile" already exists for this journey.',
       ),
     );
-    mocks.getProjectSettings
-      .mockResolvedValueOnce(settings)
-      .mockResolvedValueOnce(refreshedSettings);
 
     render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
     await user.click(
@@ -955,42 +994,22 @@ describe('external experiment dashboard workflow', () => {
       await screen.findByLabelText('Runtime SECRET_TOKEN'),
       'runtime-only',
     );
-    await user.click(
-      screen.getByRole('button', { name: 'Continue to Review' }),
-    );
+    await user.click(screen.getByRole('button', { name: 'Review & Save' }));
 
-    expect(await screen.findByText('Authentication expired')).toBeVisible();
-    await user.click(
-      screen.getByRole('button', { name: 'Capture sign-in again' }),
-    );
-    expect(mocks.startAuthenticationCapture).toHaveBeenCalledWith(project.id);
     await user.click(
       await screen.findByRole('button', {
-        name: 'Save signed-in session',
+        name: 'Save 3-Test suite',
       }),
     );
 
-    expect(mocks.confirmAuthenticationCapture).toHaveBeenCalledWith(
-      project.id,
-      awaitingAuthenticationCapture.id,
-    );
-    expect(await screen.findByText('Authentication saved')).toBeVisible();
     expect(
-      screen.getByRole('button', { name: 'Retry request discovery' }),
+      await screen.findByText(/already exists for this journey/u),
     ).toBeVisible();
-    expect(mocks.discoverRequests).toHaveBeenCalledOnce();
-    await user.click(
-      screen.getByRole('button', { name: 'Retry request discovery' }),
-    );
-    await waitFor(() =>
-      expect(mocks.discoverRequests).toHaveBeenCalledTimes(2),
-    );
-    expect(
-      screen.getAllByRole('button', { name: 'Open Advanced mode' })[0],
-    ).toBeVisible();
+    expect(mocks.createExternalExperiment).toHaveBeenCalledOnce();
+    expect(mocks.runExternalExperiment).not.toHaveBeenCalled();
   });
 
-  it('lets Guided analysis replace a recorded parking-slot value', async () => {
+  it('saves generated and custom values without a discovery replay', async () => {
     const user = userEvent.setup();
     const parkingJourney = {
       ...journey,
@@ -1044,23 +1063,21 @@ describe('external experiment dashboard workflow', () => {
     const customValue = screen.getByLabelText('Fill Parking Slot custom value');
     await user.clear(customValue);
     await user.type(customValue, 'P-204');
+    await user.click(screen.getByRole('button', { name: 'Review & Save' }));
     await user.click(
-      screen.getByRole('button', { name: 'Continue to Review' }),
+      await screen.findByRole('button', {
+        name: 'Save 3-Test suite',
+      }),
     );
 
-    await waitFor(() => expect(mocks.discoverRequests).toHaveBeenCalled());
-    expect(mocks.discoverRequests).toHaveBeenCalledWith(
-      parkingJourney.id,
-      'submit-profile',
-      { SECRET_TOKEN: 'runtime-only' },
-      true,
-      expect.anything(),
+    await waitFor(() =>
+      expect(mocks.createExternalExperiment).toHaveBeenCalledOnce(),
     );
-    const serializedDiscoveryCalls = JSON.stringify(
-      mocks.discoverRequests.mock.calls,
-    );
-    expect(serializedDiscoveryCalls).toContain('"fill-name":"{{unique.name}}"');
-    expect(serializedDiscoveryCalls).toContain('"fill-parking-slot":"P-204"');
+    expect(lastCreatedExperiment().stepValueOverrides).toMatchObject({
+      'fill-name': '{{unique.name}}',
+      'fill-parking-slot': 'P-204',
+    });
+    expect(mocks.discoverRequests).not.toHaveBeenCalled();
   });
 
   it('guides a user from a journey to a recommended test and explains the result', async () => {
@@ -1069,7 +1086,7 @@ describe('external experiment dashboard workflow', () => {
 
     expect(
       await screen.findByRole('heading', {
-        name: 'Define the outcome, check safety, then run',
+        name: 'Define the outcome, check safety, then save',
       }),
     ).toBeVisible();
     await user.click(
@@ -1086,43 +1103,20 @@ describe('external experiment dashboard workflow', () => {
     );
     expect(screen.getByText('Accidental double-click')).toBeVisible();
     expect(screen.getByText('Impatient triple-click')).toBeVisible();
-    expect(screen.getByText('Server duplicate handling')).toBeVisible();
-    await user.click(screen.getByText('Server duplicate handling'));
+    expect(screen.getByText('Delayed repeated action')).toBeVisible();
 
     await user.type(
       screen.getByLabelText('Runtime SECRET_TOKEN'),
       'runtime-only',
     );
     await user.click(screen.getByText('Fast'));
-    await user.click(
-      screen.getByRole('button', { name: 'Continue to Review' }),
-    );
+    await user.click(screen.getByRole('button', { name: 'Review & Save' }));
 
-    await waitFor(() =>
-      expect(mocks.discoverRequests).toHaveBeenCalledWith(
-        journey.id,
-        'submit-profile',
-        { SECRET_TOKEN: 'runtime-only' },
-        true,
-        {
-          recipe: {
-            type: 'server_duplicate_handling',
-            triggerCount: 2,
-            intervalMs: 300,
-          },
-          normalizeJourney: true,
-          stepValueOverrides: {
-            'fill-name': '{{unique.name}}',
-          },
-        },
-      ),
-    );
+    expect(mocks.discoverRequests).not.toHaveBeenCalled();
     expect(
-      await screen.findByRole('heading', { name: 'Review & Run' }),
+      await screen.findByRole('heading', { name: 'Review & Save' }),
     ).toBeVisible();
-    expect(
-      screen.getByText(/trigger Submit profile 2 times, 300 ms apart/u),
-    ).toBeVisible();
+    expect(screen.getByText(/save Double-click, Triple-click/u)).toBeVisible();
     expect(
       screen.getAllByText('The journey should finish at /profiles/created.')
         .length,
@@ -1130,198 +1124,107 @@ describe('external experiment dashboard workflow', () => {
     expect(screen.queryByText('runtime-only')).not.toBeInTheDocument();
     await user.click(
       screen.getByRole('button', {
-        name: 'Run repeated-submission experiment',
+        name: 'Save 3-Test suite',
       }),
     );
 
     await waitFor(() =>
-      expect(mocks.createExternalExperiment).toHaveBeenCalledWith(
+      expect(mocks.createExternalExperimentSuite).toHaveBeenCalledWith(
         journey.id,
         expect.objectContaining({
-          targetStepId: 'submit-profile',
-          triggerCount: 2,
-          intervalMs: 300,
-          continueAfterTarget: false,
-          guided: true,
-          normalizeJourney: true,
-          stepValueOverrides: {
-            'fill-name': '{{unique.name}}',
-          },
-          networkMatcher: {
-            method: 'POST',
-            pathname: '/api/profile',
-            host: 'localhost:4300',
-          },
+          tests: expect.arrayContaining([
+            expect.objectContaining({ triggerCount: 2, intervalMs: 0 }),
+            expect.objectContaining({ triggerCount: 3, intervalMs: 100 }),
+            expect.objectContaining({ triggerCount: 2, intervalMs: 300 }),
+          ]),
         }),
       ),
     );
     const guidedCreated = lastCreatedExperiment();
-    expect(guidedCreated).toMatchObject({
-      requestSelectionProvenance: {
-        selectionMode: 'confirmed_recommendation',
-        discoveryId: '11111111-2222-4333-8444-555555555555',
-        discoveryOutcome: 'recommended',
-        selectedCandidateId: 'request-222222222222222222222222',
-        userOverrodeRecommendation: false,
-      },
-    });
-    expect(guidedCreated.assertions).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          type: 'network_request_max',
-          maximum: 2,
-        }),
-        expect.objectContaining({
-          type: 'network_success_max',
-          maximum: 1,
-        }),
-        expect.objectContaining({
-          type: 'network_all_status',
-          allowedStatuses: [201, 409],
-        }),
-      ]),
-    );
-    expect(guidedCreated.assertionSelectionProvenance).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ origin: 'generated' }),
-      ]),
-    );
-    expect(mocks.runExternalExperiment).toHaveBeenCalledWith(
-      'version-1',
-      {
-        SECRET_TOKEN: 'runtime-only',
-      },
-      true,
-      'adaptive',
-      'fast',
-    );
+    expect(guidedCreated.requestSelectionProvenance).toBeNull();
+    expect(guidedCreated.assertions).toEqual([]);
+    expect(guidedCreated.assertionSelectionProvenance).toEqual([]);
+    expect(mocks.runExternalExperiment).not.toHaveBeenCalled();
     expect(
-      await screen.findByText(/existing runner returned run/u),
+      await screen.findByText(/Three Tests saved as Version 1/u),
     ).toBeVisible();
   });
 
-  it('configures discovery, an immutable version, runtime values and a prominent result', async () => {
+  it('approves recording-time evidence without replay and saves enforced network checks', async () => {
+    mocks.listNetworkEvidenceCandidates.mockResolvedValueOnce({
+      source: 'recording',
+      explanation:
+        'Sanitized mutation candidates were captured during the original recording.',
+      items: [
+        {
+          candidateId: 'request-999999999999999999999999',
+          rank: 1,
+          score: 58,
+          classification: 'likely_business_mutation',
+          confidence: 'review',
+          recommended: false,
+          reasons: [
+            {
+              code: 'mutation_method',
+              label: 'POST can change server state.',
+              scoreImpact: 50,
+            },
+          ],
+          source: 'recording',
+          sourceRunId: null,
+          actionStepId: 'submit-profile',
+          method: 'POST',
+          origin: 'https://api.example.test',
+          host: 'api.example.test',
+          pathname: '/v1/profiles',
+          status: 201,
+          failed: false,
+          relativeTimestampMs: 18,
+          occurrences: 1,
+          observedAt: '2026-07-16T00:00:01.000Z',
+        },
+      ],
+    });
     const user = userEvent.setup();
     render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
 
     await user.click(
-      await screen.findByRole('tab', {
-        name: /Advanced/,
+      await screen.findByRole('button', {
+        name: 'Continue to Safety & Data',
       }),
-    );
-    expect(
-      await screen.findByRole('heading', {
-        name: 'Authentication and runtime inputs',
-      }),
-    ).toBeVisible();
-    expect(screen.getByText('Create Failure Experiment')).toBeVisible();
-    const target = screen.getByLabelText('Target step');
-    expect(
-      Array.from((target as HTMLSelectElement).options).find(
-        (option) => option.value === 'fill-name',
-      )?.disabled,
-    ).toBe(true);
-    expect(
-      screen.getByRole('button', {
-        name: 'Save immutable experiment version',
-      }),
-    ).toBeDisabled();
-    expect(
-      screen.getByText(/Network assertions cannot run without a matcher/),
-    ).toBeVisible();
-
-    await user.type(screen.getByLabelText('SECRET_TOKEN'), 'runtime-only');
-    await user.click(screen.getByRole('button', { name: 'Discover requests' }));
-    expect(
-      await screen.findByRole('option', {
-        name: 'POST /api/profile — 201 · 1x · score 108',
-      }),
-    ).toBeVisible();
-    expect(screen.getAllByText('Generated unchanged')).toHaveLength(4);
-    expect(screen.queryByText('Manually added')).not.toBeInTheDocument();
-    const generatedMaximum = screen.getAllByLabelText('Maximum')[0]!;
-    await user.clear(generatedMaximum);
-    await user.type(generatedMaximum, '1');
-    await user.selectOptions(
-      screen.getByLabelText('Required network matcher'),
-      '1',
-    );
-    await user.click(screen.getByRole('button', { name: 'Add assertion' }));
-    expect(screen.getByText('Manually added')).toBeVisible();
-    await user.selectOptions(
-      screen.getByLabelText('Assertion 5 type'),
-      'network_no_server_errors',
     );
     await user.click(
-      screen.getByRole('button', {
-        name: 'Save immutable experiment version',
-      }),
+      await screen.findByRole('button', { name: 'Use this request' }),
     );
-    await waitFor(() =>
-      expect(mocks.createExternalExperiment).toHaveBeenCalledWith(
-        journey.id,
-        expect.objectContaining({
-          targetStepId: 'submit-profile',
-          triggerCount: 2,
-          networkMatcher: {
-            method: 'POST',
-            pathname: '/api/profile',
-            host: 'localhost:4300',
-          },
-        }),
-      ),
+    await user.type(
+      screen.getByLabelText('Runtime SECRET_TOKEN'),
+      'runtime-only',
     );
-    expect(lastCreatedExperiment().assertions).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ type: 'network_request_max' }),
-        expect.objectContaining({ type: 'network_no_server_errors' }),
-      ]),
-    );
-    expect(lastCreatedExperiment().assertionSelectionProvenance).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ origin: 'generated' }),
-        expect.objectContaining({ origin: 'generated_modified' }),
-        expect.objectContaining({ origin: 'manual' }),
-      ]),
-    );
+    await user.click(screen.getByRole('button', { name: 'Review & Save' }));
+    await user.click(screen.getByRole('button', { name: 'Save 3-Test suite' }));
 
-    await user.click(screen.getByRole('button', { name: 'Run' }));
-    expect(
-      await screen.findByRole('heading', {
-        name: 'This run has technical evidence, but no approved Outcome Check was configured.',
-      }),
-    ).toBeVisible();
-    expect(screen.getByText('Technical evidence')).toBeVisible();
-    expect(screen.getAllByText('POST /api/profile').length).toBeGreaterThan(0);
-    expect(
-      screen.getByRole('img', { name: 'final-result screenshot' }),
-    ).toBeVisible();
-    expect(screen.getByText('Final application state')).toBeVisible();
-    expect(
-      screen.getByText(
-        'The stable page state preserved when FormCrash evaluates and records the result.',
-      ),
-    ).toBeVisible();
-    expect(
-      screen.getByRole('link', {
-        name: 'Open final application state screenshot',
-      }),
-    ).toHaveAttribute(
-      'href',
-      'http://localhost:4100/api/external-runs/run-1/artifacts/screen-1',
+    await waitFor(() =>
+      expect(mocks.createExternalExperiment).toHaveBeenCalledOnce(),
     );
-    expect(mocks.runExternalExperiment).toHaveBeenCalledWith(
-      'version-1',
-      {
-        SECRET_TOKEN: 'runtime-only',
-      },
-      true,
-      'adaptive',
-      'recorded',
-    );
+    const created = lastCreatedExperiment();
+    expect(created.networkMatcher).toEqual({
+      method: 'POST',
+      pathname: '/v1/profiles',
+      host: 'api.example.test',
+    });
+    expect(created.networkEvidenceProvenance).toMatchObject({
+      source: 'recording',
+      candidateId: 'request-999999999999999999999999',
+    });
+    expect(created.assertions.map((assertion) => assertion.type)).toEqual([
+      'network_request_max',
+      'network_success_max',
+      'network_no_server_errors',
+    ]);
+    expect(mocks.discoverRequests).not.toHaveBeenCalled();
   });
 
-  it('confirms one strong cross-origin mutation once before Guided mode uses it', async () => {
+  it('does not require a cross-origin request confirmation replay', async () => {
     mocks.discoverRequests.mockResolvedValueOnce(
       withAssertionRecommendations({
         discoveryId: '99999999-aaaa-4bbb-8ccc-dddddddddddd',
@@ -1387,60 +1290,35 @@ describe('external experiment dashboard workflow', () => {
       await screen.findByLabelText('Runtime SECRET_TOKEN'),
       'runtime-only',
     );
-    await user.click(
-      screen.getByRole('button', { name: 'Continue to Review' }),
-    );
+    await user.click(screen.getByRole('button', { name: 'Review & Save' }));
 
     expect(
       await screen.findByRole('heading', {
-        name: 'Confirm the request to stress',
+        name: 'Review & Save',
       }),
     ).toBeVisible();
-    expect(screen.getByText('POST api.towerdeskpro.com')).toBeVisible();
-    expect(
-      screen.getByText('/api/org/buildings/building-1/residents'),
-    ).toBeVisible();
-    expect(mocks.discoverRequests).toHaveBeenCalledOnce();
+    expect(mocks.discoverRequests).not.toHaveBeenCalled();
     expect(mocks.createExternalExperiment).not.toHaveBeenCalled();
 
     view.rerender(panel);
-    expect(mocks.discoverRequests).toHaveBeenCalledOnce();
-    await user.click(screen.getByRole('button', { name: 'Use this request' }));
-    expect(
-      await screen.findByRole('heading', { name: 'Review & Run' }),
-    ).toBeVisible();
-    expect(mocks.discoverRequests).toHaveBeenCalledOnce();
+    expect(mocks.discoverRequests).not.toHaveBeenCalled();
 
     await user.click(
       screen.getByRole('button', {
-        name: 'Run repeated-submission experiment',
+        name: 'Save 3-Test suite',
       }),
     );
     await waitFor(() =>
       expect(mocks.createExternalExperiment).toHaveBeenCalledOnce(),
     );
     expect(lastCreatedExperiment()).toMatchObject({
-      networkMatcher: {
-        method: 'POST',
-        pathname: '/api/org/buildings/building-1/residents',
-        host: 'api.towerdeskpro.com',
-      },
-      requestSelectionProvenance: {
-        selectionMode: 'manual_override',
-        discoveryOutcome: 'review',
-        selectedCandidateId: 'request-999999999999999999999999',
-        recommendedMatcher: null,
-        userOverrodeRecommendation: false,
-      },
+      networkMatcher: null,
+      requestSelectionProvenance: null,
     });
-    expect(
-      lastCreatedExperiment().assertionSelectionProvenance?.every(
-        (entry) => entry.action === 'enabled',
-      ),
-    ).toBe(true);
+    expect(lastCreatedExperiment().assertionSelectionProvenance).toEqual([]);
   });
 
-  it('keeps ambiguous mutations out of bounded Guided confirmation', async () => {
+  it('does not pause the standard flow for ambiguous request selection', async () => {
     mocks.discoverRequests.mockResolvedValueOnce(
       withAssertionRecommendations({
         discoveryId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
@@ -1513,24 +1391,21 @@ describe('external experiment dashboard workflow', () => {
       await screen.findByLabelText('Runtime SECRET_TOKEN'),
       'runtime-only',
     );
-    await user.click(
-      screen.getByRole('button', { name: 'Continue to Review' }),
-    );
+    await user.click(screen.getByRole('button', { name: 'Review & Save' }));
     expect(
-      await screen.findByText(
-        /Multiple plausible state-changing requests have similar evidence/u,
-      ),
+      await screen.findByRole('heading', {
+        name: 'Review & Save',
+      }),
     ).toBeVisible();
     expect(
-      screen.queryByRole('button', { name: 'Use this request' }),
+      screen.queryByRole('button', { name: 'Use POST /api/profile' }),
     ).not.toBeInTheDocument();
     expect(mocks.createExternalExperiment).not.toHaveBeenCalled();
-    expect(
-      screen.getAllByRole('button', { name: 'Open Advanced mode' }).length,
-    ).toBeGreaterThan(0);
+    expect(mocks.discoverRequests).not.toHaveBeenCalled();
+    expect(screen.queryByText('Advanced')).not.toBeInTheDocument();
   });
 
-  it('does not fabricate a Guided request matcher when discovery has no suitable candidate', async () => {
+  it('does not require a request matcher when Outcome Checks are available', async () => {
     mocks.discoverRequests.mockResolvedValueOnce(
       withAssertionRecommendations({
         discoveryId: 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff',
@@ -1557,67 +1432,16 @@ describe('external experiment dashboard workflow', () => {
       await screen.findByLabelText('Runtime SECRET_TOKEN'),
       'runtime-only',
     );
-    await user.click(
-      screen.getByRole('button', { name: 'Continue to Review' }),
-    );
+    await user.click(screen.getByRole('button', { name: 'Review & Save' }));
     expect(
-      await screen.findByText(/No browser request was observed after the action/u),
+      await screen.findByRole('heading', { name: 'Review & Save' }),
     ).toBeVisible();
     expect(
       screen.queryByRole('button', { name: 'Use this request' }),
     ).not.toBeInTheDocument();
     expect(mocks.createExternalExperiment).not.toHaveBeenCalled();
-    expect(
-      screen.getAllByRole('button', { name: 'Open Advanced mode' }).length,
-    ).toBeGreaterThan(0);
-  });
-
-  it('persists an Advanced manual override instead of silently keeping the recommendation', async () => {
-    const user = userEvent.setup();
-    render(<ExternalExperimentPanel project={project} journeys={[journey]} />);
-
-    await user.click(
-      await screen.findByRole('tab', {
-        name: /Advanced/,
-      }),
-    );
-    await user.type(screen.getByLabelText('SECRET_TOKEN'), 'runtime-only');
-    await user.click(screen.getByRole('button', { name: 'Discover requests' }));
-    await user.selectOptions(
-      await screen.findByLabelText('Required network matcher'),
-      '0',
-    );
-    await user.click(
-      screen.getByRole('button', {
-        name: 'Save immutable experiment version',
-      }),
-    );
-
-    await waitFor(() =>
-      expect(mocks.createExternalExperiment).toHaveBeenCalledWith(
-        journey.id,
-        expect.objectContaining({
-          networkMatcher: {
-            method: 'GET',
-            pathname: '/api/profile',
-            host: 'localhost:4300',
-          },
-        }),
-      ),
-    );
-    expect(lastCreatedExperiment()).toMatchObject({
-      requestSelectionProvenance: {
-        selectionMode: 'manual_override',
-        discoveryOutcome: 'recommended',
-        selectedCandidateId: 'request-111111111111111111111111',
-        recommendedMatcher: {
-          method: 'POST',
-          pathname: '/api/profile',
-          host: 'localhost:4300',
-        },
-        userOverrodeRecommendation: true,
-      },
-    });
+    expect(mocks.discoverRequests).not.toHaveBeenCalled();
+    expect(screen.queryByText('Advanced')).not.toBeInTheDocument();
   });
 });
 

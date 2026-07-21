@@ -1,7 +1,7 @@
 # Conceptual data model
 
-This document describes the server-owned metadata model. Chunk 3 implements the
-Priority 0 subset in SQLite through ordered SQL migrations. Identifiers are opaque
+This document describes the server-owned metadata model implemented in SQLite
+through ordered SQL migrations. Identifiers are opaque
 strings, timestamps are UTC, JSON is validated at repository boundaries, and
 binary screenshots stay on disk.
 
@@ -45,14 +45,40 @@ or recording creates a real query requirement.
 
 - `id`, `projectId`, `journeyId`, `name`, `experimentType`, and `createdAt`.
 - Stable identity groups replays and comparisons across immutable versions.
+- Creating a new test always inserts a new Experiment and its Version 1. Names
+  are unique within one journey; a duplicate is a `TEST_NAME_EXISTS` conflict,
+  never an implicit version operation.
 
 ### ExperimentVersion
 
 - `id`, `experimentId`, `version`, configuration JSON, journey snapshot JSON,
-  assertion snapshot JSON, and `createdAt`.
+  custom-assertion snapshot JSON, Critical Action snapshot JSON, Outcome Check
+  snapshot JSON, and `createdAt`.
 - Selected journey-step identity and deterministic Impatient User configuration.
 - Complete serialized journey, injector, assertion, and target configuration.
 - `schemaVersion`, `createdAt`, and a content hash for diagnostic integrity.
+- Editing is an explicit operation addressed by stable `experimentId`; it
+  appends the next version without changing the test identity or executing a
+  run. Reads accept historical version IDs for compatibility and resolve stable
+  IDs to their latest version.
+- Each newly saved version owns the journey's current Critical Action and all
+  approved Outcome Checks. Runs never resolve those checks through the mutable
+  journey tables. A later Outcome Check appears in an existing test only after
+  Edit saves another version.
+- `assertions_snapshot_json` contains only optional custom technical checks.
+  Outcome-Check-derived duplicates are removed at the persistence boundary.
+
+### Stable test read models
+
+- Journey-level test lists group `ExperimentVersion` records by the owning
+  `Experiment.id` and return only the latest version for configuration display.
+- Each stable summary includes version and run counts plus the latest Run
+  summary, so the Journey workspace never infers identity from a version ID.
+- Stable test detail returns the latest configuration together with immutable
+  version history and bounded run history. Historical version-ID reads resolve
+  to the owning stable test for backward-compatible navigation.
+- These are read models over the existing Experiment, ExperimentVersion, and Run
+  relationships; Chunk 3 adds no tables and rewrites no historical data.
 
 ### RecoveryAssertion
 
@@ -88,7 +114,7 @@ or recording creates a real query requirement.
 
 ## External experiment tables
 
-Chunk 6 adds parallel `external_experiments`, immutable
+The external execution path uses `external_experiments`, immutable
 `external_experiment_versions`, `external_runs`, append-only
 `external_run_events`, `external_assertion_results`, and `external_artifacts`.
 The original Priority 0 sample tables retain their locked mode and assertion
@@ -117,6 +143,22 @@ evidence IDs. Versions created before migration 0006 load with an empty list.
 The snapshot excludes raw HTML, arbitrary page text, query strings,
 request/response bodies, cookies, authorization headers, authentication state,
 and runtime secrets.
+
+Migration 0014 adds immutable Critical Action and Outcome Check snapshots to
+external experiment versions. It backfills every existing version from the
+approved checks in effect at migration time and leaves historical Run snapshots
+and results unchanged. Migration 0016 removes matching generated
+`outcome-{checkId}` technical duplicates. Migration 0017 restores explicit null
+fingerprint fields that SQLite merge-patch semantics removed from the 0014
+backfill. Existing version immutability is restored before each repair completes.
+
+Migration 0015 adds bounded recording request evidence to recording sessions and
+immutable network-evidence approval provenance to external experiment versions.
+Recording evidence contains only action identity, method, origin/host, pathname,
+status/failure, bounded action-relative timing, occurrence count, and observation
+time. Version provenance records whether the approved candidate came from the
+original `recording` or an existing `prior_run`; request/response bodies,
+headers, cookies, authorization, query strings, and secrets remain excluded.
 
 ## Implemented database enforcement
 

@@ -23,6 +23,9 @@ const projectsApi = vi.hoisted(() => ({
 const experimentApi = vi.hoisted(() => ({
   confirmAuthenticationCapture: vi.fn(),
   getProjectSettings: vi.fn(),
+  listJourneyExternalTests: vi.fn(),
+  runExternalExperiment: vi.fn(),
+  saveProductionReplayAcknowledgement: vi.fn(),
   startAuthenticationCapture: vi.fn(),
 }));
 
@@ -50,6 +53,12 @@ vi.mock(
         readonly journeyId: string;
         readonly stage: string;
       } | null;
+      readonly onGuidedSaved: (
+        versions: readonly {
+          readonly experimentId: string;
+          readonly journeyId: string;
+        }[],
+      ) => void;
       readonly onGuidedStageChange: (stage: 'safety') => void;
     }) => (
       <div>
@@ -63,15 +72,28 @@ vi.mock(
         >
           Continue test setup
         </button>
+        <button
+          onClick={() =>
+            props.onGuidedSaved([
+              {
+                experimentId: 'stable-test-one',
+                journeyId: 'journey-one',
+              },
+            ])
+          }
+          type="button"
+        >
+          Save configured test
+        </button>
       </div>
     ),
   }),
 );
 
-vi.mock('../src/features/projects/components/journey-detail', () => ({
-  JourneyDetail: (props: { readonly onOpenTest?: () => void }) => (
+vi.mock('../src/features/projects/components/saved-journey-detail', () => ({
+  SavedJourneyDetail: (props: { readonly onOpenTest?: () => void }) => (
     <button onClick={props.onOpenTest} type="button">
-      Configure test
+      Configure Scenario test
     </button>
   ),
 }));
@@ -124,6 +146,7 @@ beforeEach(() => {
   navigation.search = 'journeyId=journey-one&step=outcome';
   projectsApi.getProject.mockResolvedValue(project);
   projectsApi.listJourneys.mockResolvedValue([journey]);
+  experimentApi.listJourneyExternalTests.mockResolvedValue([]);
   experimentApi.getProjectSettings.mockResolvedValue({
     projectId: project.id,
     variables: [],
@@ -147,7 +170,9 @@ describe('Configure Test navigation', () => {
     );
 
     await user.click(
-      await screen.findByRole('button', { name: 'Configure test' }),
+      await screen.findByRole('button', {
+        name: 'Configure Scenario test',
+      }),
     );
 
     expect(navigation.push).toHaveBeenCalledTimes(1);
@@ -210,5 +235,28 @@ describe('Configure Test navigation', () => {
       expect(screen.getByTestId('hydrated-stage')).toHaveTextContent('outcome'),
     );
     expect(navigation.replace).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a saved three-Test suite to its Saved Journey without running it', async () => {
+    const user = userEvent.setup();
+    window.sessionStorage.setItem(
+      `formcrash:guided-test-draft:v1:${project.id}`,
+      JSON.stringify({ journeyId: journey.id, stage: 'outcome' }),
+    );
+    render(<TestBuilderScreen projectId={project.id} />);
+
+    await user.click(
+      await screen.findByRole('button', { name: 'Save configured test' }),
+    );
+
+    expect(navigation.push).toHaveBeenCalledWith(
+      `/projects/${project.id}/journeys/${journey.id}`,
+    );
+    expect(experimentApi.runExternalExperiment).not.toHaveBeenCalled();
+    expect(
+      window.sessionStorage.getItem(
+        `formcrash:guided-test-draft:v1:${project.id}`,
+      ),
+    ).toBeNull();
   });
 });

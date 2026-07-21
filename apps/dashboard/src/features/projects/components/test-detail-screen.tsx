@@ -5,7 +5,9 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import type {
   EphemeralRuntimeValues,
+  ExternalAssertion,
   ExternalExperimentVersion,
+  ExternalRunSummary,
   Project,
   ProjectExecutionSettings,
   ReplayMode,
@@ -14,29 +16,46 @@ import type {
 
 import { StateMessage } from '../../../components/ui/state-message';
 import { StatusBadge } from '../../../components/ui/status-badge';
-import { formatLocalDateTime } from '../../../lib/formatters';
 import {
-  deleteExternalExperimentVersion,
-  getExternalExperimentVersion,
+  createExternalExperimentVersion,
+  deleteExternalTest,
+  getExternalTestDetail,
   getProjectSettings,
-  listProjectExternalExperiments,
   runExternalExperiment,
+  saveProductionReplayAcknowledgement,
 } from '../api/external-experiments';
 import { getProject } from '../api/projects';
+import { formatLocalDateTime, sentenceCase } from '../../../lib/formatters';
 import { journeyRuntimeRequirements } from '../models/journey-runtime';
+import {
+  recipeIdForConfiguration,
+  recipeNetworkAssertionsForStatus,
+} from '../models/network-evidence';
+import {
+  hasEvaluatedNetworkCoverage,
+  testCoverageLabel,
+  testRecipeLabel,
+} from '../models/test-coverage';
+import {
+  TechnicalChecksEditor,
+  technicalChecksAreValid,
+} from './technical-checks-editor';
 
 interface TestData {
   readonly project: Project;
   readonly settings: ProjectExecutionSettings;
   readonly version: ExternalExperimentVersion;
   readonly versions: readonly ExternalExperimentVersion[];
+  readonly runs: readonly ExternalRunSummary[];
+  readonly runCount: number;
+  readonly versionCount: number;
 }
 
 export function TestDetailScreen({
-  experimentVersionId,
+  testId,
   projectId,
 }: {
-  readonly experimentVersionId: string;
+  readonly testId: string;
   readonly projectId: string;
 }) {
   const router = useRouter();
@@ -45,6 +64,12 @@ export function TestDetailScreen({
   const [replayMode, setReplayMode] = useState<ReplayMode>('adaptive');
   const [replayPacing, setReplayPacing] = useState<ReplayPacing>('recorded');
   const [productionConfirmed, setProductionConfirmed] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editedTriggerCount, setEditedTriggerCount] = useState<2 | 3>(2);
+  const [editedIntervalMs, setEditedIntervalMs] = useState<0 | 100 | 300>(0);
+  const [editedAssertions, setEditedAssertions] = useState<
+    readonly ExternalAssertion[]
+  >([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,14 +78,32 @@ export function TestDetailScreen({
     void Promise.all([
       getProject(projectId),
       getProjectSettings(projectId),
-      getExternalExperimentVersion(experimentVersionId),
-      listProjectExternalExperiments(projectId),
+      getExternalTestDetail(testId),
     ])
-      .then(([project, settings, version, versions]) => {
+      .then(([project, settings, detail]) => {
         if (!active) return;
+        const version = detail.latestVersion;
         if (version.projectId !== projectId)
           throw new Error('This test does not belong to the selected project.');
-        setData({ project, settings, version, versions });
+        setData({
+          project,
+          settings,
+          version,
+          versions: detail.versions,
+          runs: detail.runs,
+          runCount: detail.runCount,
+          versionCount: detail.versionCount,
+        });
+        setEditedTriggerCount(version.triggerCount);
+        setEditedIntervalMs(version.intervalMs);
+        setEditedAssertions(version.assertions);
+        if (window.location.hash === '#edit-test') setEditing(true);
+        setProductionConfirmed(settings.productionReplayAcknowledged === true);
+        if (testId !== version.experimentId) {
+          router.replace(
+            `/projects/${projectId}/tests/${version.experimentId}`,
+          );
+        }
       })
       .catch((reason: unknown) => {
         if (active) setError(messageOf(reason));
@@ -68,7 +111,7 @@ export function TestDetailScreen({
     return () => {
       active = false;
     };
-  }, [experimentVersionId, projectId]);
+  }, [projectId, router, testId]);
 
   const requirements = useMemo(
     () =>
@@ -84,9 +127,6 @@ export function TestDetailScreen({
     return <StateMessage variant="error">{error}</StateMessage>;
   if (data === null)
     return <StateMessage variant="loading">Loading saved test…</StateMessage>;
-  const family = data.versions.filter(
-    (item) => item.experimentId === data.version.experimentId,
-  );
   const blocked =
     busy !== null ||
     requirements.some((item) => (values[item.name] ?? '').trim() === '') ||
@@ -109,20 +149,102 @@ export function TestDetailScreen({
       setBusy(null);
     }
   }
+  async function saveProductionAcknowledgement(
+    acknowledged: boolean,
+  ): Promise<void> {
+    const previous = productionConfirmed;
+    setProductionConfirmed(acknowledged);
+    setError(null);
+    try {
+      const settings = await saveProductionReplayAcknowledgement(
+        projectId,
+        acknowledged,
+      );
+      setData((current) =>
+        current === null ? null : { ...current, settings },
+      );
+      setProductionConfirmed(settings.productionReplayAcknowledged === true);
+    } catch (reason: unknown) {
+      setProductionConfirmed(previous);
+      setError(messageOf(reason));
+    }
+  }
   async function remove(): Promise<void> {
     if (
       !window.confirm(
-        `Delete "${data!.version.name}" version ${data!.version.version} and its associated runs and screenshots? This cannot be undone.`,
+        `Delete test "${data!.version.name}" and all ${data!.versionCount} saved version${data!.versionCount === 1 ? '' : 's'}, ${data!.runCount} run${data!.runCount === 1 ? '' : 's'}, and screenshots? This cannot be undone.`,
       )
     )
       return;
     setBusy('delete');
     setError(null);
     try {
-      await deleteExternalExperimentVersion(data!.version.id);
+      await deleteExternalTest(data!.version.experimentId);
       router.push(`/projects/${projectId}/tests`);
     } catch (reason: unknown) {
       setError(messageOf(reason));
+      setBusy(null);
+    }
+  }
+
+  function beginEditing(): void {
+    setEditedTriggerCount(data!.version.triggerCount);
+    setEditedIntervalMs(data!.version.intervalMs);
+    setEditedAssertions(data!.version.assertions);
+    setEditing(true);
+  }
+
+  async function saveNewVersion(): Promise<void> {
+    setBusy('save-version');
+    setError(null);
+    try {
+      const current = data!.version;
+      const assertions =
+        current.networkEvidenceProvenance == null
+          ? [...editedAssertions]
+          : [
+              ...editedAssertions.filter(
+                (assertion) => !assertion.type.startsWith('network_'),
+              ),
+              ...recipeNetworkAssertionsForStatus(
+                recipeIdForConfiguration(editedTriggerCount, editedIntervalMs),
+                editedTriggerCount,
+                current.networkEvidenceProvenance.observedStatus,
+              ),
+            ];
+      const created = await createExternalExperimentVersion(
+        current.experimentId,
+        {
+          targetStepId: current.targetStepId,
+          triggerCount: editedTriggerCount,
+          intervalMs: editedIntervalMs,
+          networkMatcher: current.networkMatcher,
+          assertions,
+          continueAfterTarget: current.continueAfterTarget,
+          guided: current.guided,
+          requestSelectionProvenance: current.requestSelectionProvenance,
+          networkEvidenceProvenance: current.networkEvidenceProvenance,
+          assertionSelectionProvenance: [
+            ...current.assertionSelectionProvenance,
+          ],
+        },
+      );
+      setData((existing) =>
+        existing === null
+          ? null
+          : {
+              ...existing,
+              version: created,
+              versions: [created, ...existing.versions],
+              versionCount: existing.versionCount + 1,
+            },
+      );
+      setEditing(false);
+      setEditedAssertions(created.assertions);
+      router.replace(`/projects/${projectId}/tests/${created.experimentId}`);
+    } catch (reason: unknown) {
+      setError(messageOf(reason));
+    } finally {
       setBusy(null);
     }
   }
@@ -133,41 +255,108 @@ export function TestDetailScreen({
         <div>
           <p className="eyebrow">Saved test</p>
           <h2>{data.version.name}</h2>
-          <p>
-            <Link
-              href={`/projects/${projectId}/journeys/${data.version.journeyId}`}
-            >
-              {data.version.journeySnapshot.name} v
-              {data.version.journeySnapshot.version}
-            </Link>
-          </p>
+          <Link
+            aria-label={`Open ${data.version.journeySnapshot.name} journey version ${data.version.journeySnapshot.version}`}
+            className="crm-related-record-link"
+            href={`/projects/${projectId}/journeys/${data.version.journeyId}`}
+          >
+            <span className="crm-related-record-kind">Journey</span>
+            <strong>{data.version.journeySnapshot.name}</strong>
+            <span className="crm-related-record-meta">
+              Version {data.version.journeySnapshot.version}
+              <span aria-hidden="true">→</span>
+            </span>
+          </Link>
           <div className="crm-status-line">
-            <StatusBadge tone={data.version.guided ? 'pass' : 'neutral'}>
-              {data.version.guided ? 'Guided' : 'Advanced'}
-            </StatusBadge>
+            <StatusBadge tone="pass">Saved test</StatusBadge>
             <StatusBadge tone="disruption">Impatient User</StatusBadge>
             <span>Version {data.version.version}</span>
           </div>
         </div>
-        <label>
-          Immutable version
-          <select
-            aria-label="Test version"
-            onChange={(event) =>
-              router.push(`/projects/${projectId}/tests/${event.target.value}`)
-            }
-            value={data.version.id}
+        <div className="journey-card-actions">
+          <span>
+            {data.versionCount} immutable version
+            {data.versionCount === 1 ? '' : 's'}
+          </span>
+          <button
+            className="button button-secondary button-compact"
+            disabled={busy !== null}
+            onClick={beginEditing}
+            type="button"
           >
-            {family.map((item) => (
-              <option key={item.id} value={item.id}>
-                Version {item.version} · {formatLocalDateTime(item.createdAt)}
-              </option>
-            ))}
-          </select>
-        </label>
+            Edit test
+          </button>
+        </div>
       </header>
       {error !== null ? (
         <StateMessage variant="error">{error}</StateMessage>
+      ) : null}
+      {editing ? (
+        <section className="panel crm-summary-panel" id="edit-test">
+          <p className="eyebrow">Edit test</p>
+          <h3>Save a new immutable version</h3>
+          <p>
+            The stable test name and historical versions stay unchanged. Saving
+            creates Version {data.version.version + 1} without running it and
+            snapshots every currently approved Outcome Check.
+          </p>
+          <div className="crm-form-grid">
+            <label>
+              Trigger count
+              <select
+                aria-label="Edited trigger count"
+                onChange={(event) =>
+                  setEditedTriggerCount(Number(event.target.value) as 2 | 3)
+                }
+                value={editedTriggerCount}
+              >
+                <option value={2}>2</option>
+                <option value={3}>3</option>
+              </select>
+            </label>
+            <label>
+              Trigger interval
+              <select
+                aria-label="Edited trigger interval"
+                onChange={(event) =>
+                  setEditedIntervalMs(
+                    Number(event.target.value) as 0 | 100 | 300,
+                  )
+                }
+                value={editedIntervalMs}
+              >
+                <option value={0}>0 ms</option>
+                <option value={100}>100 ms</option>
+                <option value={300}>300 ms</option>
+              </select>
+            </label>
+          </div>
+          <TechnicalChecksEditor
+            assertions={editedAssertions}
+            journey={data.version.journeySnapshot}
+            onChange={setEditedAssertions}
+          />
+          <div className="journey-card-actions">
+            <button
+              className="button button-primary button-compact"
+              disabled={
+                busy !== null || !technicalChecksAreValid(editedAssertions)
+              }
+              onClick={() => void saveNewVersion()}
+              type="button"
+            >
+              {busy === 'save-version' ? 'Saving…' : 'Save new version'}
+            </button>
+            <button
+              className="button button-secondary button-compact"
+              disabled={busy !== null}
+              onClick={() => setEditing(false)}
+              type="button"
+            >
+              Cancel
+            </button>
+          </div>
+        </section>
       ) : null}
       <div className="crm-record-grid">
         <section className="panel crm-summary-panel">
@@ -183,8 +372,18 @@ export function TestDetailScreen({
               <dd>{data.version.intervalMs} ms</dd>
             </div>
             <div>
-              <dt>Assertions</dt>
-              <dd>{data.version.assertions.length}</dd>
+              <dt>Required Outcome Checks</dt>
+              <dd>{data.version.outcomeCheckSnapshot.checks.length}</dd>
+            </div>
+            <div>
+              <dt>Custom technical checks</dt>
+              <dd>
+                {
+                  data.version.assertions.filter(
+                    (assertion) => !assertion.type.startsWith('network_'),
+                  ).length
+                }
+              </dd>
             </div>
             <div>
               <dt>Continue after target</dt>
@@ -201,6 +400,25 @@ export function TestDetailScreen({
               </dd>
             </div>
           </dl>
+          <div className="guided-review-outcomes">
+            <strong>Frozen Outcome Check snapshot</strong>
+            {data.version.outcomeCheckSnapshot.checks.length === 0 ? (
+              <p>No approved Outcome Checks were included in this version.</p>
+            ) : (
+              <ul>
+                {data.version.outcomeCheckSnapshot.checks.map((check) => (
+                  <li key={check.id}>{check.description}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+          {!hasEvaluatedNetworkCoverage(data.version) ? (
+            <StateMessage variant="warning">
+              <strong>{testCoverageLabel(data.version)}.</strong> This version
+              does not evaluate request counts, response statuses, or server
+              errors.
+            </StateMessage>
+          ) : null}
         </section>
         <section className="panel crm-run-panel">
           <p className="eyebrow">Run test</p>
@@ -254,11 +472,12 @@ export function TestDetailScreen({
               <input
                 checked={productionConfirmed}
                 onChange={(event) =>
-                  setProductionConfirmed(event.target.checked)
+                  void saveProductionAcknowledgement(event.target.checked)
                 }
                 type="checkbox"
               />{' '}
-              I understand this test can change real production data.
+              Save my acknowledgement that browser runs can change real
+              production data.
             </label>
           ) : null}
           <button
@@ -271,11 +490,74 @@ export function TestDetailScreen({
           </button>
         </section>
       </div>
+      <div className="crm-record-grid">
+        <section className="panel crm-summary-panel">
+          <p className="eyebrow">Version history</p>
+          <h3>Immutable configurations</h3>
+          <div className="crm-table-wrap">
+            <table className="crm-table">
+              <thead>
+                <tr>
+                  <th>Version</th>
+                  <th>Recipe</th>
+                  <th>Timing</th>
+                  <th>Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.versions.map((version) => (
+                  <tr key={version.id}>
+                    <td>
+                      <strong>Version {version.version}</strong>
+                    </td>
+                    <td>{testRecipeLabel(version)}</td>
+                    <td>
+                      {version.triggerCount} triggers, {version.intervalMs} ms
+                    </td>
+                    <td>{formatLocalDateTime(version.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section className="panel crm-summary-panel">
+          <p className="eyebrow">Run history</p>
+          <h3>
+            {data.runCount} saved run{data.runCount === 1 ? '' : 's'}
+          </h3>
+          {data.runs.length === 0 ? (
+            <StateMessage variant="neutral">
+              This test has not been run yet.
+            </StateMessage>
+          ) : (
+            <div className="experiment-version-list">
+              {data.runs.map((run) => (
+                <article className="journey-card" key={run.runId}>
+                  <div>
+                    <Link
+                      className="crm-primary-link"
+                      href={`/external-runs/${run.runId}`}
+                    >
+                      <strong>{runVerdictLabel(run)}</strong>
+                    </Link>
+                    <span>{formatLocalDateTime(run.startedAt)}</span>
+                    <small>
+                      Version {versionNumberForRun(run, data.versions)} ·{' '}
+                      {run.triggerAttempts} trigger attempts
+                    </small>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
       <details className="panel crm-danger-zone">
         <summary>Test administration</summary>
         <p>
-          Deleting an immutable test version also removes its associated runs
-          and screenshots.
+          Deleting this Test permanently removes every immutable version, Run,
+          and screenshot that belongs to it.
         </p>
         <button
           className="button button-destructive"
@@ -283,7 +565,7 @@ export function TestDetailScreen({
           onClick={() => void remove()}
           type="button"
         >
-          {busy === 'delete' ? 'Deleting…' : 'Delete this version'}
+          {busy === 'delete' ? 'Deleting…' : 'Delete test'}
         </button>
       </details>
     </main>
@@ -294,4 +576,34 @@ function messageOf(reason: unknown): string {
   return reason instanceof Error
     ? reason.message
     : 'The test operation could not be completed.';
+}
+
+function runVerdictLabel(run: ExternalRunSummary): string {
+  if (
+    run.lifecycleStatus === 'created' ||
+    run.lifecycleStatus === 'starting' ||
+    run.lifecycleStatus === 'running' ||
+    run.lifecycleStatus === 'evaluating'
+  ) {
+    return sentenceCase(run.lifecycleStatus);
+  }
+  if (run.canonicalVerdict === 'runner_error') return 'Runner error';
+  if (run.canonicalVerdict === 'could_not_verify') return 'Could not verify';
+  if (
+    run.canonicalVerdict === 'passed' &&
+    run.verdictBasis === 'technical_checks_only'
+  ) {
+    return 'Passed — technical checks only';
+  }
+  return sentenceCase(run.canonicalVerdict);
+}
+
+function versionNumberForRun(
+  run: ExternalRunSummary,
+  versions: readonly ExternalExperimentVersion[],
+): number | string {
+  return (
+    versions.find((version) => version.id === run.experimentVersionId)
+      ?.version ?? 'Unknown'
+  );
 }

@@ -817,7 +817,7 @@ export function JourneyDetail(props: JourneyDetailProps) {
           onClick={props.onOpenTest}
           type="button"
         >
-          Open Guided configuration
+          New test
         </button>
         <button
           className="button button-destructive"

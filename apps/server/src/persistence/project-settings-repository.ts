@@ -17,6 +17,7 @@ export interface StoredProjectSettings {
   readonly variables: readonly RuntimeVariableDeclarationInput[];
   readonly beforeRunHook: HttpHook | null;
   readonly afterRunHook: HttpHook | null;
+  readonly productionReplayAcknowledgedAt: string | null;
   readonly updatedAt: string;
 }
 
@@ -42,6 +43,7 @@ interface SettingsRow {
   readonly variablesJson: string;
   readonly beforeHookJson: string | null;
   readonly afterHookJson: string | null;
+  readonly productionReplayAcknowledgedAt: string | null;
   readonly updatedAt: string;
 }
 
@@ -77,7 +79,9 @@ export class ProjectSettingsRepository {
       .prepare(
         `SELECT project_id AS projectId, variables_json AS variablesJson,
                 before_hook_json AS beforeHookJson,
-                after_hook_json AS afterHookJson, updated_at AS updatedAt
+                after_hook_json AS afterHookJson,
+                production_replay_acknowledged_at AS productionReplayAcknowledgedAt,
+                updated_at AS updatedAt
            FROM project_execution_settings WHERE project_id = ?`,
       )
       .get(projectId) as SettingsRow | undefined;
@@ -87,6 +91,7 @@ export class ProjectSettingsRepository {
         variables: [],
         beforeRunHook: null,
         afterRunHook: null,
+        productionReplayAcknowledgedAt: null,
         updatedAt: new Date(0).toISOString(),
       };
     }
@@ -103,8 +108,28 @@ export class ProjectSettingsRepository {
         row.afterHookJson === null
           ? null
           : httpHookSchema.parse(JSON.parse(row.afterHookJson)),
+      productionReplayAcknowledgedAt: row.productionReplayAcknowledgedAt,
       updatedAt: row.updatedAt,
     };
+  }
+
+  setProductionReplayAcknowledgement(
+    projectId: string,
+    acknowledged: boolean,
+  ): StoredProjectSettings {
+    const now = new Date().toISOString();
+    this.database
+      .prepare(
+        `INSERT INTO project_execution_settings
+          (project_id, variables_json, before_hook_json, after_hook_json,
+           production_replay_acknowledged_at, updated_at)
+         VALUES (?, '[]', NULL, NULL, ?, ?)
+         ON CONFLICT(project_id) DO UPDATE SET
+           production_replay_acknowledged_at = excluded.production_replay_acknowledged_at,
+           updated_at = excluded.updated_at`,
+      )
+      .run(projectId, acknowledged ? now : null, now);
+    return this.get(projectId);
   }
 
   save(

@@ -7,6 +7,7 @@ import type {
   Project,
   ProjectExecutionSettings,
 } from '@formcrash/contracts';
+import { externalRunSummarySchema } from '@formcrash/contracts';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ProjectOverviewScreen } from '../src/features/projects/components/project-overview-screen';
@@ -100,10 +101,11 @@ const configuration: ExternalExperimentVersion = {
   guided: true,
   requestSelectionProvenance: null,
   assertionSelectionProvenance: [],
+  outcomeCheckSnapshot: { criticalAction: null, checks: [] },
   journeySnapshot: selectedJourney,
   createdAt: '2026-07-03T00:00:00.000Z',
 };
-const persistedRun: ExternalRunSummary = {
+const persistedRun: ExternalRunSummary = externalRunSummarySchema.parse({
   runId: 'run-one',
   experimentVersionId: configuration.id,
   projectId: project.id,
@@ -124,7 +126,7 @@ const persistedRun: ExternalRunSummary = {
   assertionCount: 1,
   screenshotCount: 3,
   createdAt: '2026-07-04T00:00:00.000Z',
-};
+});
 const settings: ProjectExecutionSettings = {
   projectId: project.id,
   variables: [
@@ -209,11 +211,8 @@ describe('CRM project surfaces', () => {
       await screen.findByRole('heading', { name: 'Overview' }),
     ).toBeVisible();
     expect(
-      screen.getByRole('link', { name: 'Run Scenario Again' }),
-    ).toHaveAttribute(
-      'href',
-      `/projects/${project.id}/tests/${configuration.id}`,
-    );
+      screen.getByRole('link', { name: 'Record Scenario' }),
+    ).toHaveAttribute('href', `/projects/${project.id}/journeys/new`);
     expect(screen.getAllByText('Signed in').length).toBeGreaterThan(0);
     expect(screen.getAllByText(selectedJourney.name).length).toBeGreaterThan(0);
     expect(screen.getByText('Project controls')).toBeVisible();

@@ -13,6 +13,7 @@ import {
   compareExternalRuns,
   getExternalArtifactUrl,
 } from '../api/external-experiments';
+import { verdictLabel } from './crm-project-data';
 
 interface Props {
   readonly beforeRun: ExternalRunDetail;
@@ -108,8 +109,7 @@ export function ExternalRunComparison({ beforeRun, runs }: Props) {
                     <option value="">Select a later run</option>
                     {eligibleRuns.map((run) => (
                       <option key={run.runId} value={run.runId}>
-                        {run.experimentName} ·{' '}
-                        {outcomeLabel(run.outcomeAggregate)} ·{' '}
+                        {run.experimentName} · {verdictLabel(run)} ·{' '}
                         {new Date(run.createdAt).toLocaleString()}
                       </option>
                     ))}

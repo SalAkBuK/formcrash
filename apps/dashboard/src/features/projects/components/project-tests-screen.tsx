@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ExternalExperimentVersion } from '@formcrash/contracts';
 
 import { StateMessage } from '../../../components/ui/state-message';
-import { StatusBadge } from '../../../components/ui/status-badge';
 import { formatLocalDateTime } from '../../../lib/formatters';
 import { listProjectExternalExperiments } from '../api/external-experiments';
 
@@ -18,7 +17,6 @@ export function ProjectTestsScreen({
     readonly ExternalExperimentVersion[]
   >([]);
   const [query, setQuery] = useState('');
-  const [mode, setMode] = useState('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,7 +41,6 @@ export function ProjectTestsScreen({
     const normalized = query.trim().toLowerCase();
     const grouped = new Map<string, ExternalExperimentVersion[]>();
     for (const version of versions) {
-      if (mode !== 'all' && (mode === 'guided') !== version.guided) continue;
       if (
         normalized !== '' &&
         !`${version.name} ${version.journeySnapshot.name}`
@@ -56,7 +53,7 @@ export function ProjectTestsScreen({
       grouped.set(version.experimentId, group);
     }
     return [...grouped.values()];
-  }, [mode, query, versions]);
+  }, [query, versions]);
 
   return (
     <main className="dashboard-shell crm-screen">
@@ -70,7 +67,7 @@ export function ProjectTestsScreen({
           className="button button-primary"
           href={`/projects/${projectId}/tests/new?step=outcome`}
         >
-          Configure test
+          New test
         </Link>
       </header>
       {error !== null ? (
@@ -80,7 +77,7 @@ export function ProjectTestsScreen({
         <div className="crm-list-toolbar">
           <div>
             <h3>Saved tests</h3>
-            <span>{groups.length} test groups</span>
+            <span>{groups.length} tests</span>
           </div>
           <div className="crm-list-filters">
             <label>
@@ -92,15 +89,6 @@ export function ProjectTestsScreen({
                 value={query}
               />
             </label>
-            <select
-              aria-label="Filter test mode"
-              onChange={(event) => setMode(event.target.value)}
-              value={mode}
-            >
-              <option value="all">All modes</option>
-              <option value="guided">Guided</option>
-              <option value="advanced">Advanced</option>
-            </select>
           </div>
         </div>
         {loading ? (
@@ -114,7 +102,7 @@ export function ProjectTestsScreen({
             </h3>
             <p>
               {versions.length === 0
-                ? 'Start with Guided mode to define an outcome, review safety, and create the first test.'
+                ? 'Define the expected outcome, review safety, and create the first test.'
                 : 'Adjust the filters to see more tests.'}
             </p>
             {versions.length === 0 ? (
@@ -122,7 +110,7 @@ export function ProjectTestsScreen({
                 className="button button-primary"
                 href={`/projects/${projectId}/tests/new?step=outcome`}
               >
-                Configure test
+                New test
               </Link>
             ) : null}
           </div>
@@ -133,7 +121,7 @@ export function ProjectTestsScreen({
                 <tr>
                   <th>Test</th>
                   <th>Journey</th>
-                  <th>Mode</th>
+                  <th>Type</th>
                   <th>Latest version</th>
                   <th>Assertions</th>
                   <th>Created</th>
@@ -148,7 +136,7 @@ export function ProjectTestsScreen({
                       <td data-label="Test">
                         <Link
                           className="crm-primary-link"
-                          href={`/projects/${projectId}/tests/${latest.id}`}
+                          href={`/projects/${projectId}/tests/${latest.experimentId}`}
                         >
                           <strong>{latest.name}</strong>
                           <span>
@@ -164,11 +152,7 @@ export function ProjectTestsScreen({
                           {latest.journeySnapshot.version}
                         </Link>
                       </td>
-                      <td data-label="Mode">
-                        <StatusBadge tone={latest.guided ? 'pass' : 'neutral'}>
-                          {latest.guided ? 'Guided' : 'Advanced'}
-                        </StatusBadge>
-                      </td>
+                      <td data-label="Type">Repeated-action test</td>
                       <td data-label="Latest version">
                         Version {latest.version} · {items.length} total
                       </td>
@@ -181,7 +165,7 @@ export function ProjectTestsScreen({
                       <td data-label="Actions">
                         <Link
                           className="button button-secondary button-compact"
-                          href={`/projects/${projectId}/tests/${latest.id}`}
+                          href={`/projects/${projectId}/tests/${latest.experimentId}`}
                         >
                           Open
                         </Link>

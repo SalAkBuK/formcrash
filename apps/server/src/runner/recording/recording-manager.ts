@@ -31,6 +31,7 @@ import type { ServerConfig } from '../../app/config.js';
 import { JourneyTraceStore } from '../../artifacts/journey-trace-store.js';
 import type { ProjectJourneyRepository } from '../../persistence/project-journey-repository.js';
 import type { AuthStateStore } from '../external/auth-session.js';
+import { NetworkEvidenceCollector } from '../external/network-evidence.js';
 import {
   isAuthenticationRedirect,
   SavedAuthenticationExpiredError,
@@ -80,6 +81,7 @@ interface ActiveRecording {
   readonly traceEvents: unknown[];
   readonly pageIds: Set<string>;
   readonly framePaths: Set<string>;
+  readonly networkEvidence: NetworkEvidenceCollector;
   environment: RecordedBrowserEnvironment | null;
   readonly maximumDurationTimer: NodeJS.Timeout;
 }
@@ -93,6 +95,7 @@ interface PendingRecording {
   readonly traceEvents: unknown[];
   readonly pageIds: Set<string>;
   readonly framePaths: Set<string>;
+  readonly networkEvidence: NetworkEvidenceCollector;
   environment: RecordedBrowserEnvironment | null;
 }
 
@@ -106,6 +109,7 @@ export class RecordingNotActiveError extends Error {
 export class RecordingManager {
   private readonly browserOwner: ExternalBrowserOwner;
   private readonly traceStore: JourneyTraceStore;
+  private pending: PendingRecording | null = null;
   private active: ActiveRecording | null = null;
 
   constructor(
@@ -133,8 +137,10 @@ export class RecordingManager {
       traceEvents: [],
       pageIds: new Set(['page-1']),
       framePaths: new Set(['']),
+      networkEvidence: new NetworkEvidenceCollector(null),
       environment: null,
     };
+    this.pending = pending;
     this.repository.updateRecordingSession({
       id: created.id,
       status: 'launching',
@@ -176,6 +182,9 @@ export class RecordingManager {
           },
         },
       );
+      browser.observeNetwork?.((observation) =>
+        pending.networkEvidence.observe(observation),
+      );
       try {
         const currentUrl = browser.currentUrl?.();
         const visibleRequirement =
@@ -206,11 +215,13 @@ export class RecordingManager {
         releaseOwnership,
         maximumDurationTimer,
       };
+      this.pending = null;
       return this.repository.updateRecordingSession({
         id: created.id,
         status: 'recording',
       });
     } catch (error: unknown) {
+      if (this.pending?.sessionId === created.id) this.pending = null;
       releaseOwnership();
       this.traceStore.removeRecording(created.id);
       const failed = this.repository.updateRecordingSession({
@@ -230,12 +241,28 @@ export class RecordingManager {
   get(sessionId: string): RecordingSession | null {
     const persisted = this.repository.getRecordingSession(sessionId);
     if (persisted === null) return null;
-    if (this.active?.sessionId !== sessionId) return persisted;
+    const inMemory =
+      this.active?.sessionId === sessionId
+        ? this.active
+        : this.pending?.sessionId === sessionId
+          ? this.pending
+          : null;
+    if (inMemory === null) return persisted;
     return {
       ...persisted,
-      steps: [...this.active.steps],
-      warnings: [...this.active.warnings],
+      steps: [...inMemory.steps],
+      warnings: [...inMemory.warnings],
     };
+  }
+
+  getActiveForProject(projectId: string): RecordingSession | null {
+    const session =
+      this.active?.projectId === projectId
+        ? this.active
+        : this.pending?.projectId === projectId
+          ? this.pending
+          : null;
+    return session === null ? null : this.get(session.sessionId);
   }
 
   async stop(sessionId: string): Promise<RecordingSession> {
@@ -296,6 +323,9 @@ export class RecordingManager {
       completedAt,
       traceStatus,
       traceSummary,
+      requestEvidence: active.networkEvidence.recordingEvidence(
+        active.steps.filter((step) => ['click', 'submit'].includes(step.type)),
+      ),
     });
   }
 

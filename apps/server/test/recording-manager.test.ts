@@ -34,6 +34,30 @@ afterEach(() => {
 });
 
 describe('recording event normalization', () => {
+  it('exposes the active recording so a refreshed client can reconnect', async () => {
+    temporary = createTemporaryTestConfig();
+    database = initializePersistence(temporary.config);
+    const repository = new ProjectJourneyRepository(database.connection);
+    const project = repository.createProject({
+      name: 'Reconnectable recording',
+      targetUrl: 'https://example.test',
+      description: '',
+    });
+    const manager = new RecordingManager(
+      temporary.config,
+      repository,
+      new BrowserOwnership(),
+      new CapturingBrowserOwner(),
+    );
+
+    const started = await manager.start(project.id);
+
+    expect(manager.getActiveForProject(project.id)?.id).toBe(started.id);
+    expect(manager.getActiveForProject('another-project')).toBeNull();
+    await manager.stop(started.id);
+    expect(manager.getActiveForProject(project.id)).toBeNull();
+  });
+
   it('bounds long target names before persisting a step', async () => {
     temporary = createTemporaryTestConfig();
     database = initializePersistence(temporary.config);
@@ -162,6 +186,40 @@ describe('recording event normalization', () => {
       value: 'corrected@tenant.com',
     });
   });
+
+  it('persists only bounded sanitized mutation evidence from the original recording', async () => {
+    temporary = createTemporaryTestConfig();
+    database = initializePersistence(temporary.config);
+    const repository = new ProjectJourneyRepository(database.connection);
+    const project = repository.createProject({
+      name: 'Network recording',
+      targetUrl: 'https://example.test/form',
+      description: '',
+    });
+    const manager = new RecordingManager(
+      temporary.config,
+      repository,
+      new BrowserOwnership(),
+      new NetworkRecordingBrowserOwner(),
+    );
+
+    const started = await manager.start(project.id);
+    const stopped = await manager.stop(started.id);
+
+    expect(stopped.requestEvidence).toEqual([
+      expect.objectContaining({
+        actionStepId: stopped.steps[0]?.id,
+        method: 'POST',
+        origin: 'https://api.example.test',
+        host: 'api.example.test',
+        pathname: '/v1/tenants',
+        status: 201,
+        failed: false,
+      }),
+    ]);
+    expect(JSON.stringify(stopped.requestEvidence)).not.toContain('token');
+    expect(JSON.stringify(stopped.requestEvidence)).not.toContain('body');
+  });
 });
 
 class LongNameBrowserOwner implements ExternalBrowserOwner {
@@ -263,6 +321,50 @@ class PausedTypingBrowserOwner implements ExternalBrowserOwner {
       true,
     );
     return Promise.resolve({ close: () => Promise.resolve() });
+  }
+
+  launchReplay(): Promise<ReplayBrowserSession> {
+    return Promise.reject(new Error('Not used.'));
+  }
+}
+
+class NetworkRecordingBrowserOwner implements ExternalBrowserOwner {
+  launchRecording(
+    options: ExternalBrowserOptions,
+    callbacks: RecordingCallbacks,
+  ): Promise<RecordingBrowserSession> {
+    const timestamp = Date.now();
+    callbacks.onEvent(
+      {
+        kind: 'submit',
+        timestamp,
+        url: options.targetUrl,
+        locator: { strategy: 'id', value: 'save' },
+        fingerprint: fingerprint('button', 'save', 'Save'),
+        value: null,
+        sensitive: false,
+      },
+      true,
+    );
+    return Promise.resolve({
+      observeNetwork: (observer) => {
+        observer({
+          kind: 'started',
+          requestId: 'request-1',
+          method: 'POST',
+          url: 'https://api.example.test/v1/tenants?token=secret',
+          timestampMs: timestamp + 20,
+        });
+        observer({
+          kind: 'completed',
+          requestId: 'request-1',
+          status: 201,
+          failed: false,
+          timestampMs: timestamp + 30,
+        });
+      },
+      close: () => Promise.resolve(),
+    });
   }
 
   launchReplay(): Promise<ReplayBrowserSession> {

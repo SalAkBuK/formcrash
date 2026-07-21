@@ -292,7 +292,10 @@ The primary evidence section shows:
 
 The technical timeline, assertion IDs, recommendation scores, provenance, matcher configuration, and raw event details belong in a secondary expandable section.
 
-**Existing behavior:** The bundled sample result already demonstrates strong outcome-first language because it has an explicit target-specific created-order probe. The external `ExternalRunResult` remains assertion-first, and Guided diagnosis is derived primarily from network evidence.
+**Existing behavior:** The bundled sample has a target-specific created-order
+probe. External results now lead with immutable Outcome Checks and one canonical
+verdict, while keeping technical and network evidence secondary and preserving
+unknown backend state honestly.
 
 **Missing behavior:** External results do not have a persisted Outcome Check result or a general outcome-centered result model.
 
@@ -348,7 +351,7 @@ Playwright plus a coding agent can:
 FormCrash should not claim broader capability. It should win on a narrower repeated product workflow:
 
 - A persistent catalog of critical state-changing journeys.
-- Guided confirmation of the Critical Action.
+- Explicit confirmation of the Critical Action.
 - Opinionated resilience recipes instead of a blank scripting surface.
 - User-approved Outcome Checks.
 - Deterministic repeated execution.
@@ -400,7 +403,8 @@ Object responsibilities:
 - **Journey:** Versioned successful path through one state-changing workflow.
 - **Critical Action:** User-confirmed click or submit whose resilience is being tested.
 - **Outcome Check:** User-approved browser-visible proof of correct success.
-- **Failure Experiment:** Immutable controlled-failure recipe attached to the Critical Action.
+- **Test:** Stable saved identity for a controlled-failure recipe attached to
+  one exact Journey version. Editing appends an immutable Test version.
 - **Run:** Immutable execution snapshot plus action, network, outcome, event, and screenshot evidence.
 - **Comparison:** Compatibility-checked proof across a failed and fixed run.
 
@@ -415,8 +419,9 @@ The MVP is:
 - Confirm one Critical Action.
 - Perform one normal baseline replay.
 - Capture one or more user-approved browser-visible Outcome Checks.
-- Automatically recommend the associated request.
-- Automatically recommend supporting technical assertions.
+- Offer sanitized associated-request evidence captured during recording (or an
+  explicitly labeled prior Run) for user approval without another replay.
+- Add bounded optional browser checks in the normal editor.
 - Run the Impatient User repeated-submission experiment.
 - Evaluate and persist Outcome Check evidence separately from low-level assertion results.
 - Explain the result in plain language with observed, concluded, and unknown facts.
@@ -456,9 +461,14 @@ The product thesis is satisfied when:
 - **Existing behavior:** Journey recording and versioned persistence support navigation, click, fill, checkbox, radio, select, and submit actions for supported top-frame same-tab journeys.
 - **Existing behavior:** Saved authentication capture and restoration support signed-in journeys.
 - **Existing behavior:** Runtime variables, generated templates, guided value overrides, secret redaction, and screenshot masking provide the basis for unique outcome identity.
-- **Existing behavior:** Guided mode recommends a compatible click or submit target, though the selection is not persisted as a standalone Critical Action object.
-- **Existing behavior:** Server-owned request discovery returns deterministic ranked candidates, confidence, reasons, ambiguity handling, and bounded immutable selection provenance.
-- **Existing behavior:** Server-owned assertion recommendation produces network and supported interface checks with persisted selection provenance.
+- **Existing behavior:** The normal test editor confirms and persists a Critical
+  Action and requires every approved Outcome Check.
+- **Existing behavior:** Recording and prior-Run request evidence uses
+  deterministic ranking, explicit approval, and bounded immutable provenance;
+  the standard editor performs no discovery replay.
+- **Existing behavior:** Built-in recipes generate contract-enforced network
+  checks only after matcher approval. Optional bounded browser checks share one
+  reusable Technical checks editor.
 - **Existing behavior:** The external runner replays prior steps, repeats the selected target, observes matching requests, evaluates technical assertions, captures screenshots, persists ordered events, and separates runner errors from failed checks.
 - **Existing behavior:** Immutable experiment versions and run snapshots provide most prerequisites for compatibility checking and comparison.
 - **Existing behavior:** The bundled Sample Checkout has explicit target-specific backend-state evidence and strong outcome-first result language. It should remain the guaranteed demonstration, not be rebuilt as a generic external journey.
@@ -466,10 +476,13 @@ The product thesis is satisfied when:
 ### Existing functionality that becomes secondary
 
 - **Product decision:** Request recommendation scores, reasons, classifications, and selection provenance remain available as technical evidence but do not lead the main workflow.
-- **Product decision:** Assertion recommendation and matcher editing remain supporting configuration, primarily in Advanced mode.
+- **Product decision:** Matcher approval and bounded Technical checks remain
+  supporting configuration inside the one normal editor.
 - **Product decision:** Raw event timelines, assertion IDs, and screenshot checksums remain inspectable secondary evidence.
-- **Product decision:** Guided diagnosis should be rewritten around Outcome Check results rather than expanded as a separate diagnosis product.
-- **Product decision:** Advanced arbitrary assertion configuration remains useful but is not the canonical first-run path.
+- **Product decision:** Result diagnosis is driven by immutable Outcome Check
+  results and the canonical verdict.
+- **Product decision:** Arbitrary scripts and a separate Advanced mode are out of
+  scope; supported checks remain bounded and explicit.
 
 ### Missing behavior required by the canonical workflow
 

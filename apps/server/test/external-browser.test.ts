@@ -48,6 +48,9 @@ beforeAll(async () => {
         </style>
         <body>
           <button id="open">Open form</button>
+          <button id="building-switcher" type="button"><span>test building 2</span></button>
+          <span class="current-building">test building 2</span>
+          <output id="building-switch-count">0</output>
           <button class="unit-combobox" role="combobox">Search occupied unit...</button>
           <div id="transient-option-container"></div>
           <output id="selected-unit"></output>
@@ -67,6 +70,10 @@ beforeAll(async () => {
           <script>
             document.querySelector('#open').addEventListener('click', () => {
               document.querySelector('#profile').hidden = false;
+            });
+            document.querySelector('#building-switcher').addEventListener('click', () => {
+              const output = document.querySelector('#building-switch-count');
+              output.textContent = String(Number(output.textContent) + 1);
             });
             document.querySelector('#profile').addEventListener('submit', (event) => {
               event.preventDefault();
@@ -236,6 +243,119 @@ describe('external browser recorder injection', () => {
     await session.close();
   });
 
+  it('verifies a generated fill value instead of the literal value captured during recording', async () => {
+    let page: Page | null = null;
+    const owner = new PlaywrightExternalBrowserOwner(undefined, (created) => {
+      page = created;
+    });
+    const session = await owner.launchReplay({
+      targetUrl,
+      headless: true,
+      timeoutMs: 10_000,
+    });
+    await session.navigate(targetUrl);
+    const interaction = recordedInteractionSchema.parse({
+      id: 'generated-name-interaction',
+      stepId: 'generated-name-step',
+      sequence: 1,
+      pageId: 'page-1',
+      framePath: [],
+      startedAt: Date.now(),
+      durationMs: 0,
+      intent: 'fill',
+      pointerType: 'mouse',
+      targetCandidates: [
+        {
+          locator: { strategy: 'name', value: 'visitorName' },
+          source: 'name',
+          confidence: 0.86,
+        },
+      ],
+      fingerprint: null,
+      geometry: null,
+      postconditions: [
+        {
+          kind: 'control_value',
+          value: 'Recorded Visitor',
+          target: { strategy: 'name', value: 'visitorName' },
+        },
+      ],
+      retrySafety: 'safe',
+    });
+
+    await expect(
+      executeRecordedStep(
+        session,
+        {
+          id: 'generated-name-step',
+          name: 'Fill visitor name',
+          type: 'fill',
+          timestamp: Date.now(),
+          url: targetUrl,
+          locator: { strategy: 'name', value: 'visitorName' },
+          fingerprint: null,
+          value: { kind: 'safe', value: '{{unique.name}}' },
+          sensitive: false,
+        },
+        () => 'Generated Visitor',
+        { interaction, mode: 'adaptive' },
+      ),
+    ).resolves.toMatchObject({ status: 'verified' });
+    if (page === null) throw new Error('Replay page was not exposed.');
+    await expect(
+      (page as Page).locator('[name="visitorName"]').inputValue(),
+    ).resolves.toBe('Generated Visitor');
+    await session.close();
+  });
+
+  it('uses the recorded element fingerprint when click text also appears elsewhere', async () => {
+    let page: Page | null = null;
+    const owner = new PlaywrightExternalBrowserOwner(undefined, (created) => {
+      page = created;
+    });
+    const session = await owner.launchReplay({
+      targetUrl,
+      headless: true,
+      timeoutMs: 10_000,
+    });
+    await session.navigate(targetUrl);
+
+    await expect(
+      executeRecordedStep(
+        session,
+        {
+          id: 'switch-building',
+          name: 'Switch building',
+          type: 'click',
+          timestamp: Date.now(),
+          url: targetUrl,
+          locator: { strategy: 'text', value: 'test building 2' },
+          fingerprint: {
+            tagName: 'button',
+            inputType: null,
+            dataFormcrash: null,
+            dataTestId: null,
+            id: null,
+            role: 'combobox',
+            accessibleName: null,
+            name: null,
+            label: null,
+            text: 'test building 2',
+            cssPath: '#building-switcher',
+          },
+          value: null,
+          sensitive: false,
+        },
+        () => '',
+      ),
+    ).resolves.toMatchObject({ status: 'verified' });
+    if (page === null) throw new Error('Replay page was not exposed.');
+    await expect(
+      (page as Page).locator('#building-switch-count').textContent(),
+    ).resolves.toBe('1');
+    await session.close();
+  });
+
   it('provides the build helper required by tsx-serialized functions', async () => {
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext();
@@ -268,9 +388,7 @@ describe('external browser recorder injection', () => {
     await page.goto(targetUrl);
 
     expect(
-      await page.evaluate<number>(
-        'globalThis.__outcomeSelectorHelperResult',
-      ),
+      await page.evaluate<number>('globalThis.__outcomeSelectorHelperResult'),
     ).toBe(42);
     await context.close();
     await browser.close();

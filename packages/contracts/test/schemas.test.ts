@@ -6,14 +6,19 @@ import {
   capturedOutcomeTargetSchema,
   controlledTargetUrlSchema,
   createExternalExperimentRequestSchema,
+  createExternalExperimentSuiteRequestSchema,
+  createExternalExperimentVersionRequestSchema,
   createProjectRequestSchema,
+  deriveExternalRunVerdict,
   experimentTypeSchema,
   externalRunResultPresentationSchema,
   journeyActionTypeSchema,
   hybridTraceManifestSchema,
   outcomeCheckSchema,
+  outcomeCheckRunSnapshotSchema,
   outcomeCaptureResponseSchema,
   persistedJourneySchema,
+  networkEvidenceCandidateListSchema,
   requestDiscoveryResultSchema,
   runArtifactSchema,
   runEventEnvelopeSchema,
@@ -21,6 +26,58 @@ import {
   startSampleRunAcceptedSchema,
   startSampleRunRequestSchema,
 } from '../src/index.js';
+
+describe('canonical external run verdicts', () => {
+  it('fails when technical checks pass but an approved Outcome Check fails', () => {
+    expect(
+      deriveExternalRunVerdict({
+        status: 'passed',
+        lifecycleStatus: 'completed',
+        outcomeAggregate: 'failed',
+        assertionAggregate: 'passed',
+      }),
+    ).toEqual({
+      canonicalVerdict: 'failed',
+      verdictBasis: 'approved_outcomes_and_technical_checks',
+    });
+  });
+
+  it('cannot verify when required approved-outcome evidence is unavailable', () => {
+    expect(
+      deriveExternalRunVerdict({
+        status: 'passed',
+        lifecycleStatus: 'completed',
+        outcomeAggregate: 'could_not_verify',
+        assertionAggregate: 'passed',
+      }).canonicalVerdict,
+    ).toBe('could_not_verify');
+  });
+
+  it('keeps runner errors distinct from check failures', () => {
+    expect(
+      deriveExternalRunVerdict({
+        status: 'runner_error',
+        lifecycleStatus: 'runner_error',
+        outcomeAggregate: 'failed',
+        assertionAggregate: 'failed',
+      }).canonicalVerdict,
+    ).toBe('runner_error');
+  });
+
+  it('identifies a legacy technical-only pass without inventing Outcome Check evidence', () => {
+    expect(
+      deriveExternalRunVerdict({
+        status: 'passed',
+        lifecycleStatus: 'completed',
+        outcomeAggregate: 'not_configured',
+        assertionAggregate: 'passed',
+      }),
+    ).toEqual({
+      canonicalVerdict: 'passed',
+      verdictBasis: 'technical_checks_only',
+    });
+  });
+});
 
 describe('foundational contracts', () => {
   it('keeps semantic-v1 journeys compatible while validating hybrid-v2 manifests', () => {
@@ -222,7 +279,7 @@ describe('foundational contracts', () => {
   });
 
   it('accepts guided snapshot automation options', () => {
-    const result = createExternalExperimentRequestSchema.safeParse({
+    const input = {
       name: 'Guided submit',
       targetStepId: 'submit',
       triggerCount: 2,
@@ -232,12 +289,48 @@ describe('foundational contracts', () => {
         pathname: '/api/profile',
         host: 'example.test',
       },
+      networkEvidenceProvenance: {
+        source: 'recording',
+        sourceRunId: null,
+        actionStepId: 'submit',
+        candidateId: 'request-0123456789abcdef01234567',
+        candidateScore: 90,
+        candidateConfidence: 'high',
+        recommendationReasons: [
+          {
+            code: 'mutation_method',
+            label: 'POST can change state.',
+            scoreImpact: 50,
+          },
+        ],
+        matcher: {
+          method: 'POST',
+          pathname: '/api/profile',
+          host: 'example.test',
+        },
+        observedStatus: 201,
+        observedFailed: false,
+        relativeTimestampMs: 20,
+        observedAt: '2026-07-20T20:00:00.000Z',
+        approvedAt: '2026-07-20T20:01:00.000Z',
+      },
       assertions: [
         {
           id: 'one-request',
-          type: 'network_request_exact',
-          expected: 1,
-          description: 'Only one matching request is sent.',
+          type: 'network_request_max',
+          maximum: 2,
+          description: 'No more than two matching requests are sent.',
+        },
+        {
+          id: 'one-success',
+          type: 'network_success_max',
+          maximum: 1,
+          description: 'At most one matching request succeeds.',
+        },
+        {
+          id: 'no-server-errors',
+          type: 'network_no_server_errors',
+          description: 'No matching response returns HTTP 5xx.',
         },
       ],
       continueAfterTarget: false,
@@ -246,9 +339,122 @@ describe('foundational contracts', () => {
       stepValueOverrides: {
         'fill-name': '{{unique.name}}',
       },
-    });
+    };
+    const result = createExternalExperimentRequestSchema.safeParse(input);
 
     expect(result.success).toBe(true);
+    expect(
+      createExternalExperimentRequestSchema.safeParse({
+        ...input,
+        assertions: input.assertions.filter(
+          (assertion) => assertion.type !== 'network_no_server_errors',
+        ),
+      }).success,
+    ).toBe(false);
+  });
+
+  it('keeps explicit version creation separate from new-test identity fields', () => {
+    const configuration = {
+      targetStepId: 'submit',
+      triggerCount: 3,
+      intervalMs: 300,
+      networkMatcher: null,
+      assertions: [
+        {
+          id: 'visible',
+          type: 'text_appeared',
+          text: 'Saved',
+          description: 'Saved text appears.',
+        },
+      ],
+      continueAfterTarget: false,
+    };
+
+    expect(
+      createExternalExperimentVersionRequestSchema.safeParse(configuration)
+        .success,
+    ).toBe(true);
+    expect(
+      createExternalExperimentVersionRequestSchema.safeParse({
+        ...configuration,
+        name: 'A different stable identity',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('allows zero custom checks because required Outcome Checks are version-owned', () => {
+    expect(
+      createExternalExperimentVersionRequestSchema.safeParse({
+        targetStepId: 'submit',
+        triggerCount: 2,
+        intervalMs: 0,
+        networkMatcher: null,
+        assertions: [],
+        continueAfterTarget: false,
+      }).success,
+    ).toBe(true);
+  });
+
+  it('accepts exactly one complete three-recipe Test suite', () => {
+    const base = {
+      targetStepId: 'submit',
+      networkMatcher: null,
+      assertions: [],
+      continueAfterTarget: false,
+      guided: true,
+    };
+    const suite = {
+      tests: [
+        { ...base, name: 'Double-click: Save', triggerCount: 2, intervalMs: 0 },
+        {
+          ...base,
+          name: 'Triple-click: Save',
+          triggerCount: 3,
+          intervalMs: 100,
+        },
+        {
+          ...base,
+          name: 'Delayed repeat: Save',
+          triggerCount: 2,
+          intervalMs: 300,
+        },
+      ],
+    };
+
+    expect(
+      createExternalExperimentSuiteRequestSchema.safeParse(suite).success,
+    ).toBe(true);
+    expect(
+      createExternalExperimentSuiteRequestSchema.safeParse({
+        tests: suite.tests.map((test) => ({ ...test, intervalMs: 0 })),
+      }).success,
+    ).toBe(false);
+  });
+
+  it('requires every snapshotted Outcome Check to belong to its Critical Action', () => {
+    expect(
+      outcomeCheckRunSnapshotSchema.safeParse({
+        criticalAction: {
+          id: 'action-one',
+          journeyId: 'journey-one',
+          stepId: 'submit',
+          label: 'Submit',
+          createdAt: '2026-07-20T00:00:00.000Z',
+          updatedAt: '2026-07-20T00:00:00.000Z',
+        },
+        checks: [
+          {
+            id: 'check-one',
+            journeyId: 'journey-one',
+            criticalActionId: 'another-action',
+            type: 'final_pathname_matches',
+            description: 'The final page should remain visible.',
+            expectedPathname: '/complete',
+            createdAt: '2026-07-20T00:00:00.000Z',
+          },
+        ],
+      }).success,
+    ).toBe(false);
   });
 
   it('accepts ranked server-owned discovery evidence', () => {
@@ -347,7 +553,73 @@ describe('foundational contracts', () => {
     });
 
     expect(result.requestSelectionProvenance).toBeNull();
+    expect(result.networkEvidenceProvenance).toBeUndefined();
     expect(result.assertionSelectionProvenance).toBeUndefined();
+  });
+
+  it('requires explicit evidence approval before enabling network checks', () => {
+    const result = createExternalExperimentRequestSchema.safeParse({
+      name: 'Unapproved network test',
+      targetStepId: 'submit',
+      triggerCount: 2,
+      intervalMs: 0,
+      networkMatcher: {
+        method: 'POST',
+        pathname: '/api/tenants',
+        host: 'api.example.test',
+      },
+      assertions: [
+        {
+          id: 'request-limit',
+          type: 'network_request_max',
+          maximum: 2,
+          description: 'No more than two requests.',
+        },
+      ],
+      continueAfterTarget: false,
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts bounded recording approval and excludes unsafe request fields', () => {
+    const candidates = networkEvidenceCandidateListSchema.parse({
+      source: 'recording',
+      explanation: 'Captured once.',
+      items: [
+        {
+          candidateId: 'request-0123456789abcdef01234567',
+          rank: 1,
+          score: 58,
+          classification: 'likely_business_mutation',
+          confidence: 'review',
+          recommended: false,
+          reasons: [
+            {
+              code: 'mutation_method',
+              label: 'POST can change state.',
+              scoreImpact: 50,
+            },
+          ],
+          source: 'recording',
+          sourceRunId: null,
+          actionStepId: 'submit',
+          method: 'POST',
+          origin: 'https://api.example.test',
+          host: 'api.example.test',
+          pathname: '/api/tenants',
+          status: 201,
+          failed: false,
+          relativeTimestampMs: 14,
+          occurrences: 1,
+          observedAt: '2026-07-20T20:00:00.000Z',
+        },
+      ],
+    });
+
+    expect(candidates.items[0]).not.toHaveProperty('headers');
+    expect(candidates.items[0]).not.toHaveProperty('body');
+    expect(candidates.items[0]).not.toHaveProperty('query');
   });
 
   it('rejects selection provenance that disagrees with the saved matcher', () => {
@@ -465,6 +737,7 @@ describe('foundational contracts', () => {
             expression: 'unique.email',
             template: '{{unique.email}}',
             label: 'Generated unique email',
+            resolvedValue: 'formcrash+abc123@example.test',
           },
         ],
         status: 'awaiting_selection',
@@ -480,6 +753,9 @@ describe('foundational contracts', () => {
 
     expect(response.capture?.generatedInputs[0]?.template).toBe(
       '{{unique.email}}',
+    );
+    expect(response.capture?.generatedInputs[0]?.resolvedValue).toBe(
+      'formcrash+abc123@example.test',
     );
   });
 

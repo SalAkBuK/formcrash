@@ -209,8 +209,8 @@ function normalizationReadiness(
         : `${repairCount} noisy recording step(s) will be repaired`,
     detail:
       repairCount === 0
-        ? 'Guided replay can use the saved sequence without coalescing input.'
-        : 'Guided mode removes duplicate navigation and keeps only the final adjacent fill for the same field.',
+        ? 'Replay can use the saved sequence without coalescing input.'
+        : 'Replay removes duplicate navigation and keeps only the final adjacent fill for the same field.',
   };
 }
 

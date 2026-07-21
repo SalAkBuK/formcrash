@@ -9,6 +9,7 @@ import type {
 import {
   aggregateOutcomeChecks,
   evaluateOutcomeChecks,
+  focusOutcomeEvidence,
   normalizePathname,
 } from '../src/runner/outcomes/outcome-evaluator.js';
 import { resolveRuntime } from '../src/runner/external/runtime-values.js';
@@ -99,6 +100,22 @@ describe('Outcome Check evaluator', () => {
     expect(JSON.stringify(session.lastLocator)).not.toContain(
       '{{unique.email}}',
     );
+  });
+
+  it('centers the unique generated-identity match before final evidence capture', async () => {
+    const session = fakeSession(1);
+    const runtime = context(session).runtime;
+
+    await expect(
+      focusOutcomeEvidence({
+        snapshot: snapshot(exactlyOnce()),
+        session,
+        runtime,
+      }),
+    ).resolves.toBe(true);
+
+    expect(session.lastFocusedLocator).toEqual(locator);
+    expect(session.lastFocusedContainingText).toMatch(/^formcrash\+/u);
   });
 
   it.each([
@@ -283,6 +300,8 @@ function pathname(): OutcomeCheck {
 
 type TestSession = ReplayBrowserSession & {
   lastContainingText?: string;
+  lastFocusedContainingText?: string;
+  lastFocusedLocator?: ReplayLocator;
   lastLocator?: ReplayLocator;
 };
 
@@ -304,7 +323,10 @@ function fakeSession(
     captureScreenshot: () => Promise.resolve(),
     setScreenshotMasks: () => undefined,
     isVisible: () => Promise.resolve(count > 0),
-    countVisibleMatches: (resolvedLocator: ReplayLocator, containingText?: string) => {
+    countVisibleMatches: (
+      resolvedLocator: ReplayLocator,
+      containingText?: string,
+    ) => {
       session.lastLocator = resolvedLocator;
       if (containingText !== undefined) {
         session.lastContainingText = containingText;
@@ -317,6 +339,16 @@ function fakeSession(
             totalLocatorMatchCount: truncated ? 101 : count,
             truncated,
           });
+    },
+    focusUniqueVisibleMatch: (
+      resolvedLocator: ReplayLocator,
+      containingText?: string,
+    ) => {
+      session.lastFocusedLocator = resolvedLocator;
+      if (containingText !== undefined) {
+        session.lastFocusedContainingText = containingText;
+      }
+      return Promise.resolve(!fail && !truncated && count === 1);
     },
     isDisabled: () => Promise.resolve(false),
     textVisible: () => Promise.resolve(false),

@@ -24,7 +24,7 @@ architecture documents own technical invariants.
 - Use a persistent global application shell.
 - Keep global and project-level navigation stable.
 - Treat Projects as managed workspaces.
-- Treat Journeys, Scenarios, Experiments or Configurations, Runs, and
+- Treat Journeys, Scenarios, Tests, Runs, and
   Comparisons as related operational records.
 - Give each important record consistent list, overview, detail, status,
   activity, and related-record surfaces where applicable.
@@ -59,21 +59,58 @@ architecture documents own technical invariants.
   or disrupts.
 - **Outcome Check:** The approved user-visible or technical expectation used to
   determine whether the intended result remained correct.
-- **Experiment or Configuration:** The immutable controlled-failure setup for a
-  Scenario and one exact Journey version. The repository currently uses both
-  terms. Choosing one permanent user-facing label is a later product decision;
-  screens must explain the relationship and must not use the terms as unrelated
-  objects.
+- **Test:** A stable saved identity for one controlled-failure setup and one
+  exact Journey version. Editing a Test appends an immutable Test version;
+  creating or duplicating a Test creates a separate identity.
 - **Run:** An immutable execution record containing status, configuration
   snapshot, observations, evidence, and results.
 - **Comparison:** A compatibility-checked relationship between Runs that proves
   a meaningful before-and-after change.
 
-Until the Experiment/Configuration terminology decision is made, new UI copy
-must use one term consistently within a surface and identify the persisted
-record it represents. Journey and Scenario must not be presented as competing
-names for the same concept: Journey is the recorded version; Scenario is the
-managed operational lineage.
+`Test` is the canonical user-facing term. `Experiment` remains an internal API
+and persistence name during backward compatibility and must not appear as a
+second user-facing object. Journey and Scenario must not be presented as
+competing names for the same concept: Journey is the recorded version; Scenario
+is the managed operational lineage.
+
+## Execution ergonomics
+
+- One immutable Journey version may back multiple saved test configurations.
+  The Journey detail must expose those related tests and their Run actions.
+- Journey detail lists one record per stable test identity, not one record per
+  immutable test version. Each record exposes its current recipe, check
+  coverage, latest version and verdict, plus Run, Details, Edit, and Duplicate
+  actions.
+- When a Journey has multiple tests, its primary Run test action requires an
+  explicit test selection. Test detail owns current configuration, immutable
+  version history, and run history; Edit appends a version and Duplicate creates
+  a separately named test without executing either operation.
+- Once a test is saved, rerunning it must not send the user back through test
+  creation, Outcome capture, or request discovery.
+- The standard Scenario test path uses approved Outcome Checks as its primary
+  proof. It must not require a separate state-changing request-discovery replay
+  before the actual test when bounded browser checks can execute the test
+  honestly.
+- Saving a test version snapshots its Critical Action and every currently
+  approved Outcome Check. Those checks are mandatory for that version and are
+  never presented as a selectable subset; later journey changes affect a test
+  only after Edit creates a new immutable version.
+- The normal test editor may add an optional Technical checks section for the
+  bounded browser checks FormCrash can evaluate: visible, hidden, disabled,
+  text, retained field, and final URL. These are additions to Outcome Checks,
+  not generated duplicates, arbitrary scripts, or a separate advanced mode.
+- There is one supported test editor. The removed Guided/Advanced split must not
+  return through alternate tabs, hidden branches, or a duplicate workspace.
+- Request analysis remains a technical capability for network-specific proof;
+  it is not a mandatory lifecycle step for every browser-visible test.
+- Sanitized request candidates captured during the original recording appear in
+  the normal test editor and require one explicit approval. Legacy journeys may
+  offer candidates from existing Runs with a visible prior-run provenance label.
+  Neither path performs another setup replay. Without approval, the saved test
+  remains browser-only and does not claim server protection.
+- A Run action may perform authentication preflight and other non-mutating
+  orchestration, but any additional state-changing execution must be labeled
+  before it occurs.
 
 ## Source precedence
 

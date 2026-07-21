@@ -367,7 +367,10 @@ describe.sequential('external impatient-user experiments in Chromium', () => {
       type: 'element_disabled',
       observationWindow: 'during_repeated_action',
     });
-    const fixedVersion = createVersion(vulnerableJourney.id);
+    const fixedVersion = createVersion(
+      vulnerableJourney.id,
+      vulnerableVersion.experimentId,
+    );
     const fixedRun = await createRunner().run(fixedVersion.id, {
       SECRET_PASSWORD: 'AnotherRuntimePassword',
     });
@@ -704,50 +707,86 @@ async function discoverScenario(configured: ConfiguredScenario) {
   });
 }
 
-function createVersion(journeyId: string) {
+function createVersion(journeyId: string, testId?: string) {
   const journey = projects.getJourney(journeyId);
   if (journey === null) throw new Error('Journey is missing.');
-  return experiments.createVersion({
-    projectId: journey.projectId,
-    journey,
-    request: {
-      name: 'Double submit safety',
-      targetStepId: journey.steps.at(-1)?.id ?? '',
-      triggerCount: 2,
-      intervalMs: 0,
-      networkMatcher: {
+  const configuration = {
+    targetStepId: journey.steps.at(-1)?.id ?? '',
+    triggerCount: 2 as const,
+    intervalMs: 0 as const,
+    networkMatcher: {
+      method: 'POST',
+      pathname: '/api/profile',
+      host: new URL(fixtureUrl).host,
+    },
+    assertions: [
+      {
+        id: 'request-max-one',
+        type: 'network_request_max' as const,
+        maximum: 1,
+        description: 'No more than one create request is sent.',
+      },
+      {
+        id: 'success-max-one',
+        type: 'network_success_max' as const,
+        maximum: 1,
+        description: 'No more than one create succeeds.',
+      },
+      {
+        id: 'expected-created',
+        type: 'network_expected_status' as const,
+        expectedStatus: 201,
+        description: 'The create succeeds.',
+      },
+      {
+        id: 'completion-visible',
+        type: 'text_appeared' as const,
+        text: 'Profile fixture completed.',
+        description: 'Completion UI appears.',
+      },
+    ],
+    continueAfterTarget: false,
+    requestSelectionProvenance: null,
+    networkEvidenceProvenance: {
+      source: 'recording' as const,
+      sourceRunId: null,
+      actionStepId: journey.steps.at(-1)?.id ?? '',
+      candidateId: 'request-0123456789abcdef01234567',
+      candidateScore: 108,
+      candidateConfidence: 'high' as const,
+      recommendationReasons: [
+        {
+          code: 'mutation_method' as const,
+          label: 'POST can change server state.',
+          scoreImpact: 50,
+        },
+      ],
+      matcher: {
         method: 'POST',
         pathname: '/api/profile',
         host: new URL(fixtureUrl).host,
       },
-      assertions: [
-        {
-          id: 'request-max-one',
-          type: 'network_request_max',
-          maximum: 1,
-          description: 'No more than one create request is sent.',
-        },
-        {
-          id: 'success-max-one',
-          type: 'network_success_max',
-          maximum: 1,
-          description: 'No more than one create succeeds.',
-        },
-        {
-          id: 'expected-created',
-          type: 'network_expected_status',
-          expectedStatus: 201,
-          description: 'The create succeeds.',
-        },
-        {
-          id: 'completion-visible',
-          type: 'text_appeared',
-          text: 'Profile fixture completed.',
-          description: 'Completion UI appears.',
-        },
-      ],
-      continueAfterTarget: false,
-      requestSelectionProvenance: null,
+      observedStatus: 201,
+      observedFailed: false,
+      relativeTimestampMs: 20,
+      observedAt: '2026-07-20T20:00:00.000Z',
+      approvedAt: '2026-07-20T20:01:00.000Z',
+    },
+  };
+  if (testId !== undefined) {
+    const version = experiments.createVersion({
+      testId,
+      request: configuration,
+    });
+    if (version === null) throw new Error('Test is missing.');
+    return version;
+  }
+  return experiments.createTest({
+    projectId: journey.projectId,
+    journey,
+    request: {
+      name: 'Double submit safety',
+      ...configuration,
     },
   });
 }
@@ -761,7 +800,6 @@ function createRunner(): ExternalExperimentRunner {
     experiments,
     new BrowserOwnership(),
     undefined,
-    outcomes,
   );
 }
 

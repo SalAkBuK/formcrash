@@ -1,4 +1,4 @@
-import { JourneyWorkspaceScreen } from '../../../../../../features/projects/components/journey-workspace-screen';
+import { redirect } from 'next/navigation';
 
 export default async function JourneyOutcomesPage({
   params,
@@ -6,11 +6,7 @@ export default async function JourneyOutcomesPage({
   readonly params: Promise<{ projectId: string; journeyId: string }>;
 }) {
   const { projectId, journeyId } = await params;
-  return (
-    <JourneyWorkspaceScreen
-      journeyId={journeyId}
-      projectId={projectId}
-      view="outcomes"
-    />
+  redirect(
+    `/projects/${projectId}/tests/new?journeyId=${journeyId}&step=outcome`,
   );
 }

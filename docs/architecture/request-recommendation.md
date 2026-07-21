@@ -1,10 +1,17 @@
 # Server-owned request recommendation
 
-Request discovery executes the selected recorded click or submit once. The
-control server observes only bounded browser request metadata: method, origin,
-pathname without query parameters, response status or failure, relative start
-time, and grouped occurrence count. It does not capture request bodies, response
-bodies, cookies, authorization headers, or arbitrary headers.
+The original journey recording now observes bounded browser request metadata
+around recorded click and submit actions: method, origin and host, pathname
+without query parameters, response status or failure, relative start time, and
+grouped occurrence count. It does not capture request bodies, response bodies,
+cookies, authorization headers, arbitrary headers, or query strings. This is the
+preferred candidate source because it does not require another state-changing
+replay.
+
+Legacy journeys without recording-time evidence may rank the same sanitized
+metadata from already persisted Run observations. That fallback is labeled
+`prior_run`; it never silently becomes a matcher and requires explicit user
+approval before the next immutable test version can use it.
 
 ## Traffic boundary
 
@@ -17,8 +24,8 @@ Capture begins immediately before the selected click or submit and ends after
 the bounded post-action settle window. The selected mutation is eligible for
 automatic recommendation. Consequential read-only refresh traffic may remain
 visible as evidence, but known refresh/background traffic is classified as
-`background_refresh` and excluded from automatic recommendation. Advanced mode
-can still inspect and manually override candidates.
+`background_refresh` and excluded from approval. The normal editor displays the
+bounded ranking reasons and requires an explicit choice.
 
 ## Deterministic scoring
 
@@ -73,17 +80,15 @@ regardless of observation-array order.
 
 ## Dashboard behavior
 
-Guided Test preselects a request only for the `recommended` outcome. Review and
-ambiguous outcomes require an explicit user choice. A no-candidate outcome does
-not fabricate a matcher and directs the user to interface-only assertions in
-Advanced mode.
+The normal test editor lists recording-time candidates without replay. Every
+candidate requires the explicit `Use this request` action. Failed, incomplete,
+and read-only candidates cannot be approved. When no bounded candidate exists,
+the test remains honestly labeled `Browser outcome coverage only` and does not
+claim request-count, successful-response, status, or server-error protection.
 
-Advanced mode displays server rank, classification, confidence, score, and
-reasons while retaining manual override.
-
-Discovery also returns assertion recommendation sets tied to each candidate and
-to the no-selection case. Request ranking remains the input boundary; assertion
-generation is documented separately in
+Discovery remains available as a compatibility path outside the normal editor.
+Request ranking remains the shared input boundary for recording and prior-run
+candidates; assertion generation is documented separately in
 [`assertion-recommendation.md`](assertion-recommendation.md).
 
 ## Immutable provenance
@@ -96,7 +101,17 @@ An experiment version may store:
 - Selected candidate ID, score, confidence, and reasons.
 - Recommended and selected method/path/host matchers.
 - Whether the user overrode a recommendation.
+- Recording or prior-run evidence source, source Run identity where applicable,
+  approved candidate score/reasons/status/timing, the bounded matcher, and the
+  explicit approval timestamp.
 
 Only this bounded recommendation metadata is persisted. Raw payloads, bodies,
 headers, cookies, authentication state, and runtime secrets are excluded.
 Versions created before this capability load with `null` provenance.
+
+Built-in network recipes are contract-enforced after approval. Double-click and
+triple-click tests bound matching attempts by their trigger count, allow at most
+one successful matching response, and reject HTTP 5xx. Server duplicate
+handling additionally requires the approved successful response status and HTTP
+409 duplicate status set. Without approval, these assertions are absent rather
+than reported as protection.

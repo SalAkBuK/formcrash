@@ -137,9 +137,26 @@ describe.sequential('real Chromium Outcome Check capture', () => {
     const capture = await manager.start(journey.id, {});
     expect(capture.status).toBe('awaiting_selection');
     if (page === null) throw new Error('Replay page was not exposed.');
+    const generatedEmail = capture.generatedInputs.find(
+      (input) => input.expression === 'unique.email',
+    )?.resolvedValue;
+    if (generatedEmail === undefined) {
+      throw new Error('Outcome capture did not expose its generated email.');
+    }
+    expect(generatedEmail).toMatch(/^formcrash\+[a-f0-9]{12}@example\.test$/u);
     expect(
       await (page as Page).getByText(/FormCrash outcome capture:/u).isVisible(),
     ).toBe(true);
+    expect(
+      await (page as Page)
+        .locator('[data-formcrash-outcome-banner="true"]')
+        .textContent(),
+    ).toContain(generatedEmail);
+    expect(
+      await (page as Page)
+        .locator('[data-formcrash="profile-result"]')
+        .textContent(),
+    ).toContain(generatedEmail);
     await (page as Page).locator('[data-formcrash="profile-result"]').click();
     const selected = await waitForSelection(manager, capture.id);
 

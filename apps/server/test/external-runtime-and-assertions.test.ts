@@ -384,8 +384,23 @@ describe('external assertions', () => {
     const results = await evaluate([
       elementAssertion('visible-pass', 'element_visible', '#visible'),
       elementAssertion('visible-fail', 'element_visible', '#missing'),
+      elementAssertion('hidden-pass', 'element_not_visible', '#missing'),
       elementAssertion('disabled-pass', 'element_disabled', '#disabled'),
       elementAssertion('disabled-fail', 'element_disabled', '#visible'),
+      {
+        id: 'text-pass',
+        type: 'text_appeared',
+        text: 'Saved',
+        description: 'Saved text appears.',
+      },
+      {
+        id: 'retained-pass',
+        type: 'field_retained',
+        locator: { strategy: 'id', value: 'retained' },
+        targetDescription: 'Retained field',
+        expectedValue: { kind: 'safe', value: 'Retained' },
+        description: 'The field retains its value.',
+      },
       {
         id: 'url-pass',
         type: 'final_url_contains',
@@ -403,7 +418,10 @@ describe('external assertions', () => {
       'passed',
       'failed',
       'passed',
+      'passed',
       'failed',
+      'passed',
+      'passed',
       'passed',
       'failed',
     ]);
@@ -487,11 +505,15 @@ class AssertionSession implements ReplayBrowserSession {
       locator.strategy === 'css' && locator.value === '#disabled',
     );
   }
-  textVisible(): Promise<boolean> {
-    return Promise.resolve(true);
+  textVisible(text: string): Promise<boolean> {
+    return Promise.resolve(text === 'Saved');
   }
-  inputValue(): Promise<string | null> {
-    return Promise.resolve(null);
+  inputValue(locator: ReplayLocator): Promise<string | null> {
+    return Promise.resolve(
+      locator.strategy === 'id' && locator.value === 'retained'
+        ? 'Retained'
+        : null,
+    );
   }
   currentUrl(): string {
     return 'https://example.test/complete';
@@ -506,7 +528,7 @@ class AssertionSession implements ReplayBrowserSession {
 
 function elementAssertion(
   id: string,
-  type: 'element_visible' | 'element_disabled',
+  type: 'element_visible' | 'element_not_visible' | 'element_disabled',
   selector: string,
 ): ExternalAssertion {
   return {

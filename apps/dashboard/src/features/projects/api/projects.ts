@@ -91,6 +91,15 @@ export async function startRecording(
   );
 }
 
+export function getActiveRecording(
+  projectId: string,
+): Promise<RecordingSession | null> {
+  return requestJson(
+    `/api/projects/${projectId}/recordings/active`,
+    recordingSessionSchema.nullable(),
+  );
+}
+
 export async function getRecording(
   projectId: string,
   sessionId: string,

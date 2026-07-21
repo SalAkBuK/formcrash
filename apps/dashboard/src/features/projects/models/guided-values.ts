@@ -23,7 +23,7 @@ export function guidedStepValueOverrides(
     ) {
       overrides[step.id] = '{{unique.name}}';
     } else if (
-      /(username|reference|passport|emirates|identifier|number)/u.test(
+      /(username|reference|passport|emirates|identifier|number|code)/u.test(
         descriptor,
       )
     ) {

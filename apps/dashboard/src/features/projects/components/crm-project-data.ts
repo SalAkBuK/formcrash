@@ -230,12 +230,15 @@ export function verdictLabel(run: ExternalRunSummary | null): string {
   ) {
     return sentenceCase(run.lifecycleStatus);
   }
-  if (run.status === 'runner_error') return 'Runner error';
-  if (run.outcomeAggregate === 'passed') return 'Passed';
-  if (run.outcomeAggregate === 'failed') return 'Failed';
-  if (run.outcomeAggregate === 'could_not_verify') return 'Could not verify';
-  if (run.outcomeAggregate === 'not_configured') return 'Not configured';
-  return sentenceCase(run.status);
+  if (run.canonicalVerdict === 'runner_error') return 'Runner error';
+  if (
+    run.canonicalVerdict === 'passed' &&
+    run.verdictBasis === 'technical_checks_only'
+  ) {
+    return 'Passed — technical checks only';
+  }
+  if (run.canonicalVerdict === 'could_not_verify') return 'Could not verify';
+  return sentenceCase(run.canonicalVerdict);
 }
 
 export function isScenarioReady(lineage: ScenarioLineage): boolean {

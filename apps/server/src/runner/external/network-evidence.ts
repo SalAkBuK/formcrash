@@ -4,6 +4,8 @@ import {
   type DiscoveredRequest,
   type ExternalNetworkObservation,
   type NetworkMatcher,
+  type RecordedRequestEvidence,
+  type RecordedJourneyStep,
 } from '@formcrash/contracts';
 
 import type { NetworkObservation } from '../recording/external-browser.js';
@@ -113,6 +115,67 @@ export class NetworkEvidenceCollector {
             left.pathname.localeCompare(right.pathname) ||
             (left.status ?? 1_000) - (right.status ?? 1_000);
     });
+  }
+
+  recordingEvidence(
+    actions: readonly Pick<RecordedJourneyStep, 'id' | 'timestamp'>[],
+  ): readonly RecordedRequestEvidence[] {
+    const sortedActions = [...actions].sort(
+      (left, right) => left.timestamp - right.timestamp,
+    );
+    const grouped = new Map<string, RecordedRequestEvidence>();
+    for (const observation of this.observations.values()) {
+      const absoluteStartedAt = this.startedAt + observation.startedAtMs;
+      const action = [...sortedActions]
+        .reverse()
+        .find((candidate) => candidate.timestamp <= absoluteStartedAt);
+      if (action === undefined) continue;
+      const relativeTimestampMs = absoluteStartedAt - action.timestamp;
+      if (relativeTimestampMs < 0 || relativeTimestampMs > 5_000) continue;
+      const url = new URL(observation.origin);
+      const key = [
+        action.id,
+        observation.method,
+        observation.origin,
+        observation.pathname,
+        observation.status ?? 'pending',
+        observation.failed,
+      ].join('|');
+      const current = grouped.get(key);
+      if (current === undefined) {
+        grouped.set(key, {
+          actionStepId: action.id,
+          method: observation.method,
+          origin: observation.origin,
+          host: url.host,
+          pathname: observation.pathname,
+          status: observation.status,
+          failed: observation.failed,
+          relativeTimestampMs,
+          occurrences: 1,
+          observedAt: new Date(absoluteStartedAt).toISOString(),
+        });
+      } else {
+        grouped.set(key, {
+          ...current,
+          failed: current.failed || observation.failed,
+          relativeTimestampMs: Math.min(
+            current.relativeTimestampMs,
+            relativeTimestampMs,
+          ),
+          occurrences: current.occurrences + 1,
+        });
+      }
+    }
+    return [...grouped.values()]
+      .sort(
+        (left, right) =>
+          left.relativeTimestampMs - right.relativeTimestampMs ||
+          left.method.localeCompare(right.method) ||
+          left.origin.localeCompare(right.origin) ||
+          left.pathname.localeCompare(right.pathname),
+      )
+      .slice(0, 500);
   }
 }
 

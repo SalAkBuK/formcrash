@@ -35,6 +35,7 @@ import {
   resolveHook,
   resolveRuntime,
   resolveStepValue,
+  resolveTemplate,
   type ResolvedRuntime,
 } from '../external/runtime-values.js';
 import type { BrowserOwnership } from '../infrastructure/browser-ownership.js';
@@ -122,11 +123,19 @@ export class OutcomeCaptureManager {
       ephemeral,
       hooks: [storedSettings.beforeRunHook, storedSettings.afterRunHook],
     });
+    const generatedInputs = baseline.generatedInputs.map((input) => ({
+      ...input,
+      resolvedValue: resolveTemplate(
+        input.template,
+        runtime.values,
+        runtime.context,
+      ),
+    }));
     const session = outcomeCaptureSessionSchema.parse({
       id,
       journeyId,
       criticalActionId: criticalAction.id,
-      generatedInputs: baseline.generatedInputs,
+      generatedInputs,
       status: 'launching',
       selectedTarget: null,
       selectionWarnings: [],
@@ -206,9 +215,16 @@ export class OutcomeCaptureManager {
             'The replay browser does not support outcome selection.',
           );
         }
-        await browser.enterOutcomeSelection((selection) => {
-          this.acceptSelection(id, selection);
-        });
+        await browser.enterOutcomeSelection(
+          (selection) => {
+            this.acceptSelection(id, selection);
+          },
+          generatedInputs.map((input) => ({
+            label: input.label,
+            stepName: input.stepName,
+            value: input.resolvedValue,
+          })),
+        );
       } catch (error: unknown) {
         const detail =
           error instanceof Error && error.message.trim() !== ''

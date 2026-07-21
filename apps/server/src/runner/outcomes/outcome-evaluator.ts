@@ -23,6 +23,34 @@ import { describeOutcomeCheck } from './outcome-check-semantics.js';
 const BROWSER_ONLY_UNKNOWN =
   'FormCrash evaluated browser-visible state only; database records, hidden records, and backend side effects were not inspected.';
 
+export async function focusOutcomeEvidence(input: {
+  readonly snapshot: OutcomeCheckRunSnapshot;
+  readonly session: ReplayBrowserSession;
+  readonly runtime: ResolvedRuntime;
+}): Promise<boolean> {
+  if (input.session.focusUniqueVisibleMatch === undefined) return false;
+  for (const check of input.snapshot.checks) {
+    if (check.type !== 'matching_item_appears_exactly_once') continue;
+    try {
+      const locator = resolveOutcomeLocator(
+        check.target.locator,
+        input.runtime,
+      );
+      const binding = resolveTemplateValue(
+        check.binding.template,
+        input.runtime.values,
+        input.runtime.context,
+      ).value;
+      if (await input.session.focusUniqueVisibleMatch(locator, binding)) {
+        return true;
+      }
+    } catch {
+      // Evidence framing is best-effort and must not change the Run result.
+    }
+  }
+  return false;
+}
+
 export async function evaluateOutcomeChecks(input: {
   readonly runId: string;
   readonly snapshot: OutcomeCheckRunSnapshot;
@@ -83,7 +111,10 @@ export async function evaluateOutcomeChecks(input: {
               input.runtime.context,
             ).value
           : undefined;
-      const locator = resolveOutcomeLocator(check.target.locator, input.runtime);
+      const locator = resolveOutcomeLocator(
+        check.target.locator,
+        input.runtime,
+      );
       const matchCount = await input.session.countVisibleMatches(
         locator,
         binding,
@@ -217,20 +248,14 @@ function resolveOutcomeLocator(
   if (locator.strategy === 'role') {
     return {
       ...locator,
-      name: resolveTemplateValue(
-        locator.name,
-        runtime.values,
-        runtime.context,
-      ).value,
+      name: resolveTemplateValue(locator.name, runtime.values, runtime.context)
+        .value,
     };
   }
   return {
     ...locator,
-    value: resolveTemplateValue(
-      locator.value,
-      runtime.values,
-      runtime.context,
-    ).value,
+    value: resolveTemplateValue(locator.value, runtime.values, runtime.context)
+      .value,
   };
 }
 

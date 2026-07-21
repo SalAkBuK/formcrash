@@ -631,6 +631,7 @@ function run(options: {
       guided: true,
       requestSelectionProvenance: null,
       assertionSelectionProvenance: [],
+      outcomeCheckSnapshot: { criticalAction: null, checks: [] },
       journeySnapshot: {
         id: 'journey-v1',
         projectId: 'project-1',

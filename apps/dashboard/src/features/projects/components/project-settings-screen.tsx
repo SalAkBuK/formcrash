@@ -16,6 +16,7 @@ import {
   confirmAuthenticationCapture,
   getProjectSettings,
   saveProjectSettings,
+  saveProductionReplayAcknowledgement,
   startAuthenticationCapture,
   testAuthentication,
 } from '../api/external-experiments';
@@ -153,6 +154,22 @@ export function ProjectSettingsScreen({
     }
   }
 
+  async function saveReplayAcknowledgement(
+    acknowledged: boolean,
+  ): Promise<void> {
+    setBusy('production-replay-acknowledgement');
+    setError(null);
+    try {
+      applySettings(
+        await saveProductionReplayAcknowledgement(projectId, acknowledged),
+      );
+    } catch (reason: unknown) {
+      setError(messageOf(reason));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   if (error !== null && settings === null)
     return <StateMessage variant="error">{error}</StateMessage>;
   if (settings === null || project === null)
@@ -245,8 +262,8 @@ export function ProjectSettingsScreen({
               </StatusBadge>
             </div>
             <p>
-              Advanced management for testing, replacing, or clearing the
-              browser session shown on the project overview. Cookies, tokens,
+              Project controls for testing, replacing, or clearing the browser
+              session shown on the project overview. Cookies, tokens,
               authorization headers, and captured payloads are never displayed
               here.
             </p>
@@ -463,14 +480,29 @@ export function ProjectSettingsScreen({
               }
             >
               {project.environment === 'production'
-                ? 'Required every execution'
+                ? settings.productionReplayAcknowledged === true
+                  ? 'Browser runs acknowledged'
+                  : 'Acknowledgement required'
                 : 'Not a production target'}
             </StatusBadge>
             <p>
-              Production confirmation is deliberately not persisted. It must be
-              supplied again before every state-changing replay, discovery, or
-              Run.
+              Save one acknowledgement for browser actions against this project.
+              Normal replay, Outcome capture, and test runs still send an
+              explicit confirmation with each server request.
             </p>
+            {project.environment === 'production' ? (
+              <label className="inline-check">
+                <input
+                  checked={settings.productionReplayAcknowledged === true}
+                  disabled={busy !== null}
+                  onChange={(event) =>
+                    void saveReplayAcknowledgement(event.target.checked)
+                  }
+                  type="checkbox"
+                />{' '}
+                Remember production acknowledgement for browser runs
+              </label>
+            ) : null}
           </section>
           <section className="panel crm-boundary-card">
             <p className="eyebrow">Browser boundary</p>

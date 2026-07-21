@@ -54,16 +54,16 @@ ordered live run progress uses persisted replay plus process-local SSE publicati
 The dashboard renders server-owned state
 and never reads SQLite or artifacts by filesystem path.
 
-External request discovery also returns server-owned ranked candidates and an
-explicit recommendation outcome. The dashboard displays that evidence and may
-persist the user's selection, but it does not recompute scores or silently select
-ambiguous requests.
+The recorder captures bounded, sanitized request candidates around each click or
+submit action. The normal test editor displays recording-time evidence without
+another replay; legacy journeys can reuse already persisted Run observations.
+Every network matcher requires explicit approval, and immutable versions retain
+its recording or prior-run provenance. The historical request-discovery endpoint
+remains a compatibility API but is not part of the standard editor.
 
-The same discovery execution captures a bounded normal-action observation and
-returns server-owned assertion recommendation sets tied to each candidate.
-Guided and Advanced modes edit and select from those sets; they do not maintain
-separate recommendation algorithms. Immutable versions retain request-selection
-and per-assertion selection provenance.
+The dashboard has one test-configuration surface. Optional bounded browser
+checks are implemented by a reusable editor component; there is no separate
+Advanced assertion workspace or client-side request-selection algorithm.
 
 The sample checkout is separate because it is the system under test. Depending
 on the control server would contaminate the experiment, hide real HTTP behavior,

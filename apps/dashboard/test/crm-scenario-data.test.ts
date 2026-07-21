@@ -5,6 +5,7 @@ import type {
   OutcomeCheck,
   PersistedJourney,
 } from '@formcrash/contracts';
+import { externalRunSummarySchema } from '@formcrash/contracts';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -138,6 +139,18 @@ describe('CRM Scenario composition', () => {
     ).toBe('Runner error');
   });
 
+  it('labels legacy technical-only passes without implying approved outcome coverage', () => {
+    const selected = journey('selected', 'Checkout', 1);
+    const configuration = experiment('configuration', 'config', selected, 1);
+    const legacyRun = externalRunSummarySchema.parse({
+      ...run('legacy', configuration, 'passed', 'passed', 3),
+      outcomeAggregate: 'not_configured',
+      assertionAggregate: 'passed',
+    });
+
+    expect(verdictLabel(legacyRun)).toBe('Passed — technical checks only');
+  });
+
   it('preserves the lineage and marks derived setup unavailable when a secondary API fails', async () => {
     const selected = journey('selected', 'Checkout', 1);
     api.getCriticalAction.mockRejectedValueOnce(
@@ -170,7 +183,7 @@ describe('Project Overview dominant action', () => {
         .label,
     ).toBe('Configure Test');
     expect(dominantAction('project-one', lineageWithState('ready')).label).toBe(
-      'Run Scenario Again',
+      'Record Scenario',
     );
   });
 });
@@ -259,6 +272,7 @@ function experiment(
     guided: true,
     requestSelectionProvenance: null,
     assertionSelectionProvenance: [],
+    outcomeCheckSnapshot: { criticalAction: null, checks: [] },
     journeySnapshot: selectedJourney,
     createdAt: `2026-07-${String(version + 10).padStart(2, '0')}T00:00:00.000Z`,
   };
@@ -272,7 +286,7 @@ function run(
   day: number,
 ): ExternalRunSummary {
   const terminal = status === 'passed' || status === 'failed';
-  return {
+  return externalRunSummarySchema.parse({
     runId,
     experimentVersionId: configuration.id,
     projectId: configuration.projectId,
@@ -300,5 +314,5 @@ function run(
     assertionCount: 1,
     screenshotCount: 1,
     createdAt: `2026-07-${String(day).padStart(2, '0')}T00:00:00.000Z`,
-  };
+  });
 }

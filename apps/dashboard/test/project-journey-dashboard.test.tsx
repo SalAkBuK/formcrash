@@ -441,6 +441,7 @@ describe('external project journey workflow', () => {
           expression: 'unique.name',
           template: '{{unique.name}}',
           label: 'Generated unique name',
+          resolvedValue: 'FormCrash Person 9f8e7d6c',
         },
       ],
       status: 'awaiting_selection',
@@ -477,6 +478,12 @@ describe('external project journey workflow', () => {
     expect(
       outcome.getByText(/click the visible result that proves/u),
     ).toBeVisible();
+    expect(
+      outcome.getByLabelText('Generated values for this baseline'),
+    ).toHaveTextContent('FormCrash Person 9f8e7d6c');
+    expect(
+      outcome.getByText(/They identify this baseline only/u),
+    ).toBeVisible();
     await user.click(
       outcome.getByRole('button', { name: 'Use final page instead' }),
     );
@@ -484,10 +491,14 @@ describe('external project journey workflow', () => {
       outcome.getByLabelText(`${outcomeJourney.name} Outcome Check type`),
     ).toHaveValue('final_pathname_matches');
     expect(
-      outcome.getByLabelText(`${outcomeJourney.name} Outcome Check description`),
+      outcome.getByLabelText(
+        `${outcomeJourney.name} Outcome Check description`,
+      ),
     ).toHaveValue('The journey should finish at /complete.');
     expect(
-      outcome.getByRole('button', { name: 'Replay and choose result' }),
+      outcome.getByRole('button', {
+        name: 'Replay journey and choose result',
+      }),
     ).toBeDisabled();
   });
 
@@ -556,7 +567,9 @@ describe('external project journey workflow', () => {
     ).toBeVisible();
     expect(outcome.queryByText('Runner error')).not.toBeInTheDocument();
     expect(
-      outcome.getByRole('button', { name: 'Replay and choose result' }),
+      outcome.getByRole('button', {
+        name: 'Replay journey and choose result',
+      }),
     ).toBeEnabled();
     await user.click(
       outcome.getByRole('button', { name: 'Use captured final page' }),
@@ -700,13 +713,15 @@ describe('external project journey workflow', () => {
     await user.click(
       outcome.getByText('Define Critical Action and Outcome Checks'),
     );
-    expect(
-      outcome.getByText(/send state-changing requests and create test data/u),
-    ).toBeVisible();
-    expect(
-      outcome.getByText(/controlled non-production environment/u),
-    ).toBeVisible();
-    await user.click(outcome.getByRole('button', { name: 'Use this action' }));
+    const replayExplanation = outcome.getByText(
+      /FormCrash now replays the whole saved journey/u,
+    );
+    expect(replayExplanation).toBeVisible();
+    expect(replayExplanation).toHaveTextContent('including building changes');
+    expect(replayExplanation).toHaveTextContent('This can create test data');
+    await user.click(
+      outcome.getByRole('button', { name: 'Confirm this action' }),
+    );
     expect(mocks.approveCriticalAction).toHaveBeenCalledWith(
       journey.id,
       submitStep.id,
@@ -714,7 +729,9 @@ describe('external project journey workflow', () => {
     );
 
     await user.click(
-      outcome.getByRole('button', { name: 'Replay and choose result' }),
+      outcome.getByRole('button', {
+        name: 'Replay journey and choose result',
+      }),
     );
     expect(await outcome.findByText('Profile {{unique.email}}')).toBeVisible();
     expect(outcome.getByText('Fill unique email')).toBeVisible();
@@ -726,14 +743,18 @@ describe('external project journey workflow', () => {
       'final_pathname_matches',
     );
     expect(
-      outcome.getByLabelText(`${outcomeJourney.name} Outcome Check description`),
+      outcome.getByLabelText(
+        `${outcomeJourney.name} Outcome Check description`,
+      ),
     ).toHaveValue('The journey should finish at /complete.');
     await user.selectOptions(
       outcome.getByLabelText(`${outcomeJourney.name} Outcome Check type`),
       'matching_item_appears_exactly_once',
     );
     expect(
-      outcome.getByLabelText(`${outcomeJourney.name} Outcome Check description`),
+      outcome.getByLabelText(
+        `${outcomeJourney.name} Outcome Check description`,
+      ),
     ).toHaveValue('Exactly one matching item should appear.');
     await user.click(outcome.getByRole('button', { name: 'Approve check' }));
 

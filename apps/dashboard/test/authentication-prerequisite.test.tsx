@@ -16,6 +16,7 @@ const projectsApi = vi.hoisted(() => ({
   closeOutcomeCapture: vi.fn(),
   deleteOutcomeCheck: vi.fn(),
   deleteJourney: vi.fn(),
+  getActiveRecording: vi.fn(),
   getActiveOutcomeCapture: vi.fn(),
   getCriticalAction: vi.fn(),
   getOutcomeCapture: vi.fn(),
@@ -34,6 +35,9 @@ const authenticationApi = vi.hoisted(() => ({
   confirmAuthenticationCapture: vi.fn(),
   continueWithoutAuthentication: vi.fn(),
   getProjectSettings: vi.fn(),
+  listJourneyExternalTests: vi.fn(),
+  runExternalExperiment: vi.fn(),
+  saveProductionReplayAcknowledgement: vi.fn(),
   startAuthenticationCapture: vi.fn(),
   testAuthentication: vi.fn(),
 }));
@@ -46,8 +50,8 @@ vi.mock(
   '../src/features/projects/api/external-experiments',
   () => authenticationApi,
 );
-vi.mock('../src/features/projects/components/journey-detail', () => ({
-  JourneyDetail: ({
+vi.mock('../src/features/projects/components/saved-journey-detail', () => ({
+  SavedJourneyDetail: ({
     journeys,
     onReplay,
   }: {
@@ -170,6 +174,7 @@ beforeEach(() => {
   });
   projectsApi.listOutcomeChecks.mockResolvedValue([]);
   projectsApi.getActiveOutcomeCapture.mockResolvedValue(null);
+  projectsApi.getActiveRecording.mockResolvedValue(null);
   projectsApi.startRecording.mockResolvedValue({
     id: 'recording-auth',
     projectId: project.id,
@@ -189,6 +194,7 @@ beforeEach(() => {
     completedAt: '2026-07-19T00:02:01.000Z',
   });
   authenticationApi.getProjectSettings.mockResolvedValue(settings);
+  authenticationApi.listJourneyExternalTests.mockResolvedValue([]);
   authenticationApi.startAuthenticationCapture.mockResolvedValue(capture);
   authenticationApi.confirmAuthenticationCapture.mockResolvedValue({
     ...capture,
@@ -201,6 +207,31 @@ beforeEach(() => {
 });
 
 describe('authentication prerequisites', () => {
+  it('reconnects to an active recording after refresh without running authentication again', async () => {
+    projectsApi.getActiveRecording.mockResolvedValue({
+      id: 'recording-auth',
+      projectId: project.id,
+      status: 'recording',
+      steps: [],
+      warnings: [],
+      errorMessage: null,
+      startedAt: '2026-07-19T00:02:00.000Z',
+      completedAt: null,
+    });
+
+    render(<JourneyRecordingScreen projectId={project.id} />);
+
+    expect(await screen.findByText('Recording reconnected.')).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Start recording' }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Stop recording' }),
+    ).toBeEnabled();
+    expect(authenticationApi.testAuthentication).not.toHaveBeenCalled();
+    expect(projectsApi.startRecording).not.toHaveBeenCalled();
+  });
+
   it('blocks recording until capture completes and requires an explicit start', async () => {
     const user = userEvent.setup();
     authenticationApi.testAuthentication
@@ -376,7 +407,7 @@ describe('authentication prerequisites', () => {
     );
 
     const baseline = await screen.findByRole('button', {
-      name: 'Replay and choose result',
+      name: 'Replay journey and choose result',
     });
     await waitFor(() => expect(baseline).toBeEnabled());
     await user.click(baseline);

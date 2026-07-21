@@ -312,6 +312,18 @@ describe('external runner terminal paths', () => {
 
   it('persists could_not_verify and releases Chromium after locator evaluation fails', async () => {
     const configured = configure({ withOutcomeCheck: true });
+    const frozenVersion = experiments.getVersion(configured.versionId)!;
+    const frozenCheck = frozenVersion.outcomeCheckSnapshot.checks[0]!;
+    expect(
+      outcomes.deleteOutcomeCheck(frozenVersion.journeyId, frozenCheck.id),
+    ).toBe('deleted');
+    outcomes.saveOutcomeCheck({
+      journeyId: frozenVersion.journeyId,
+      criticalActionId: frozenVersion.outcomeCheckSnapshot.criticalAction!.id,
+      type: 'final_pathname_matches',
+      description: 'A later check belongs only to a future test version.',
+      expectedPathname: '/later',
+    });
     const owner = new FakeOwner({ failOutcomeEvaluation: true });
     const ownership = new BrowserOwnership();
     const result = await runner(owner, ownership).run(configured.versionId, {});
@@ -319,8 +331,12 @@ describe('external runner terminal paths', () => {
     expect(result.lifecycleStatus).toBe('completed');
     expect(result.outcomeAggregate).toBe('could_not_verify');
     expect(result.outcomeCheckResults).toEqual([
-      expect.objectContaining({ status: 'could_not_verify' }),
+      expect.objectContaining({
+        outcomeCheckId: frozenCheck.id,
+        status: 'could_not_verify',
+      }),
     ]);
+    expect(result.outcomeCheckSnapshot.checks).toEqual([frozenCheck]);
     expect(owner.lastSession?.closed).toBe(true);
     expect(ownership.activeWorkload).toBeNull();
   });
@@ -343,16 +359,8 @@ describe('external runner terminal paths', () => {
     });
   });
 
-  it('rejects a malformed generated binding before browser ownership or execution', async () => {
-    const configured = configure({ invalidOutcomeBinding: true });
-    const owner = new FakeOwner();
-    const ownership = new BrowserOwnership();
-
-    await expect(
-      runner(owner, ownership).run(configured.versionId, {}),
-    ).rejects.toThrow();
-    expect(owner.launchCount).toBe(0);
-    expect(ownership.activeWorkload).toBeNull();
+  it('rejects a malformed approved Outcome Check before saving a version', () => {
+    expect(() => configure({ invalidOutcomeBinding: true })).toThrow();
     expect(
       database.connection
         .prepare('SELECT COUNT(*) AS count FROM external_runs')
@@ -488,7 +496,7 @@ function configure(options: {
             timeoutMs: 100,
           },
   });
-  const version = experiments.createVersion({
+  const version = experiments.createTest({
     projectId: project.id,
     journey,
     request: {
@@ -608,7 +616,7 @@ function configureSecretScenario(
           },
     afterRunHook: null,
   });
-  const version = experiments.createVersion({
+  const version = experiments.createTest({
     projectId: project.id,
     journey,
     request: {
@@ -641,7 +649,6 @@ function runner(owner: ExternalBrowserOwner, ownership: BrowserOwnership) {
     experiments,
     ownership,
     owner,
-    outcomes,
   );
 }
 

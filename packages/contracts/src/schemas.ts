@@ -299,6 +299,19 @@ export const recordingWarningSchema = z.object({
   url: controlledTargetUrlSchema,
 });
 
+export const recordedRequestEvidenceSchema = z.object({
+  actionStepId: z.string().min(1),
+  method: z.string().regex(/^[A-Z]+$/u),
+  origin: z.string().url(),
+  host: z.string().min(1),
+  pathname: z.string().startsWith('/'),
+  status: z.number().int().min(100).max(599).nullable(),
+  failed: z.boolean().default(false),
+  relativeTimestampMs: z.number().int().min(0).max(5_000),
+  occurrences: z.number().int().positive(),
+  observedAt: z.iso.datetime({ offset: true }),
+});
+
 export const recordingSessionSchema = z.object({
   id: z.string().min(1),
   projectId: z.string().min(1),
@@ -311,6 +324,7 @@ export const recordingSessionSchema = z.object({
   captureFormat: journeyCaptureFormatSchema.optional(),
   traceStatus: traceCaptureStatusSchema.optional(),
   traceSummary: traceSummarySchema.nullable().optional(),
+  requestEvidence: z.array(recordedRequestEvidenceSchema).max(500).default([]),
 });
 
 export const startRecordingResponseSchema = recordingSessionSchema;
@@ -386,6 +400,7 @@ export const generatedBaselineInputSchema = z.object({
   expression: generatedValueExpressionSchema,
   template: generatedValueBindingSchema.shape.template,
   label: generatedValueBindingSchema.shape.label,
+  resolvedValue: z.string().min(1).max(1_000).optional(),
 });
 
 export const outcomeElementFingerprintSchema = z.object({
@@ -508,6 +523,37 @@ export const outcomeCheckListSchema = z.object({
   items: z.array(outcomeCheckSchema),
 });
 
+export const outcomeCheckRunSnapshotSchema = z
+  .object({
+    criticalAction: criticalActionSchema.nullable(),
+    checks: z.array(outcomeCheckSchema),
+  })
+  .superRefine((value, context) => {
+    if (value.checks.length > 0 && value.criticalAction === null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['criticalAction'],
+        message: 'Outcome Checks require an approved Critical Action.',
+      });
+      return;
+    }
+    if (
+      value.criticalAction !== null &&
+      value.checks.some(
+        (check) =>
+          check.journeyId !== value.criticalAction?.journeyId ||
+          check.criticalActionId !== value.criticalAction.id,
+      )
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['checks'],
+        message:
+          'Every Outcome Check must belong to the snapshotted Critical Action.',
+      });
+    }
+  });
+
 export const replayFailureSchema = z.object({
   stepId: z.string().min(1),
   stepName: z.string().min(1),
@@ -578,6 +624,10 @@ export const projectExecutionSettingsInputSchema = z.object({
   afterRunHook: httpHookSchema.nullable(),
 });
 
+export const productionReplayAcknowledgementInputSchema = z.object({
+  acknowledged: z.boolean(),
+});
+
 export const projectAuthStatusSchema = z.object({
   configured: z.boolean(),
   available: z.boolean(),
@@ -598,6 +648,11 @@ export const projectExecutionSettingsSchema = z.object({
   beforeRunHook: httpHookSchema.nullable(),
   afterRunHook: httpHookSchema.nullable(),
   authentication: projectAuthStatusSchema,
+  productionReplayAcknowledged: z.boolean().optional(),
+  productionReplayAcknowledgedAt: z.iso
+    .datetime({ offset: true })
+    .nullable()
+    .optional(),
   updatedAt: z.iso.datetime({ offset: true }),
 });
 
@@ -710,6 +765,42 @@ export const rankedRequestCandidateSchema = discoveredRequestSchema.extend({
   confidence: requestRecommendationConfidenceSchema,
   recommended: z.boolean(),
   reasons: z.array(requestRecommendationReasonSchema).min(1).max(30),
+});
+
+export const networkEvidenceSourceSchema = z.enum(['recording', 'prior_run']);
+
+export const networkEvidenceCandidateSchema =
+  rankedRequestCandidateSchema.extend({
+    source: networkEvidenceSourceSchema,
+    sourceRunId: z.string().min(1).nullable().default(null),
+    actionStepId: z.string().min(1),
+    host: z.string().min(1),
+    observedAt: z.iso.datetime({ offset: true }),
+  });
+
+export const networkEvidenceCandidateListSchema = z.object({
+  items: z.array(networkEvidenceCandidateSchema).max(100),
+  source: networkEvidenceSourceSchema.nullable(),
+  explanation: z.string().min(1).max(1_000),
+});
+
+export const networkEvidenceProvenanceSchema = z.object({
+  source: networkEvidenceSourceSchema,
+  sourceRunId: z.string().min(1).nullable().default(null),
+  actionStepId: z.string().min(1),
+  candidateId: z.string().regex(/^request-[a-f0-9]{24}$/u),
+  candidateScore: z.number().int().min(-1_000).max(1_000),
+  candidateConfidence: requestRecommendationConfidenceSchema,
+  recommendationReasons: z
+    .array(requestRecommendationReasonSchema)
+    .min(1)
+    .max(30),
+  matcher: networkMatcherSchema,
+  observedStatus: z.number().int().min(100).max(599).nullable(),
+  observedFailed: z.boolean(),
+  relativeTimestampMs: z.number().int().min(0).max(5_000),
+  observedAt: z.iso.datetime({ offset: true }),
+  approvedAt: z.iso.datetime({ offset: true }),
 });
 
 export const requestDiscoveryOutcomeSchema = z.enum([
@@ -1032,87 +1123,232 @@ export const assertionSelectionProvenanceEntrySchema = z.object({
   evidenceIds: z.array(z.string().min(1).max(160)).max(20),
 });
 
-export const createExternalExperimentRequestSchema = z
-  .object({
-    name: z.string().trim().min(1).max(160),
-    targetStepId: z.string().min(1),
-    triggerCount: z.union([z.literal(2), z.literal(3)]),
-    intervalMs: z.union([z.literal(0), z.literal(100), z.literal(300)]),
-    networkMatcher: networkMatcherSchema.nullable().default(null),
-    assertions: z.array(externalAssertionSchema).min(1).max(20),
-    continueAfterTarget: z.boolean().default(false),
-    guided: z.boolean().optional(),
-    normalizeJourney: z.boolean().optional(),
-    requestSelectionProvenance: requestSelectionProvenanceSchema
-      .nullable()
-      .optional()
-      .default(null),
-    assertionSelectionProvenance: z
-      .array(assertionSelectionProvenanceEntrySchema)
-      .max(40)
-      .optional(),
-    stepValueOverrides: z
-      .record(z.string().min(1), z.string().max(10_000))
-      .optional(),
-  })
-  .superRefine((value, context) => {
+const externalExperimentConfigurationRequestObjectSchema = z.object({
+  targetStepId: z.string().min(1),
+  triggerCount: z.union([z.literal(2), z.literal(3)]),
+  intervalMs: z.union([z.literal(0), z.literal(100), z.literal(300)]),
+  networkMatcher: networkMatcherSchema.nullable().default(null),
+  assertions: z.array(externalAssertionSchema).max(20),
+  continueAfterTarget: z.boolean().default(false),
+  guided: z.boolean().optional(),
+  requestSelectionProvenance: requestSelectionProvenanceSchema
+    .nullable()
+    .optional()
+    .default(null),
+  networkEvidenceProvenance: networkEvidenceProvenanceSchema
+    .nullable()
+    .optional(),
+  assertionSelectionProvenance: z
+    .array(assertionSelectionProvenanceEntrySchema)
+    .max(40)
+    .optional(),
+});
+
+type ExternalExperimentConfigurationRequest = z.infer<
+  typeof externalExperimentConfigurationRequestObjectSchema
+>;
+type ExternalExperimentConfigurationRefinementContext = Parameters<
+  Parameters<
+    typeof externalExperimentConfigurationRequestObjectSchema.superRefine
+  >[0]
+>[1];
+
+function refineExternalExperimentConfiguration(
+  value: ExternalExperimentConfigurationRequest,
+  context: ExternalExperimentConfigurationRefinementContext,
+): void {
+  if (
+    value.networkMatcher === null &&
+    value.assertions.some((assertion) => assertion.type.startsWith('network_'))
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['networkMatcher'],
+      message:
+        'A discovered network request matcher is required for network assertions.',
+    });
+  }
+  if (
+    value.assertions.some((assertion) =>
+      assertion.type.startsWith('network_'),
+    ) &&
+    value.requestSelectionProvenance === null &&
+    value.networkEvidenceProvenance == null
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['networkEvidenceProvenance'],
+      message:
+        'Network assertions require an explicitly approved recording or prior-run request candidate.',
+    });
+  }
+  if (
+    value.requestSelectionProvenance?.selectedMatcher !== null &&
+    value.requestSelectionProvenance?.selectedMatcher !== undefined &&
+    (value.networkMatcher === null ||
+      value.requestSelectionProvenance.selectedMatcher.method !==
+        value.networkMatcher.method ||
+      value.requestSelectionProvenance.selectedMatcher.pathname !==
+        value.networkMatcher.pathname ||
+      value.requestSelectionProvenance.selectedMatcher.host !==
+        value.networkMatcher.host)
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['requestSelectionProvenance', 'selectedMatcher'],
+      message:
+        'The persisted selected matcher must match the experiment network matcher.',
+    });
+  }
+  if (
+    value.networkEvidenceProvenance != null &&
+    (value.networkMatcher === null ||
+      !sameNetworkMatcher(
+        value.networkEvidenceProvenance.matcher,
+        value.networkMatcher,
+      ))
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['networkEvidenceProvenance', 'matcher'],
+      message:
+        'The approved evidence matcher must match the experiment network matcher.',
+    });
+  }
+  if (
+    value.guided === true &&
+    value.networkMatcher !== null &&
+    (value.requestSelectionProvenance !== null ||
+      value.networkEvidenceProvenance != null)
+  ) {
+    const requestLimit = value.assertions.find(
+      (assertion) => assertion.type === 'network_request_max',
+    );
+    const successLimit = value.assertions.find(
+      (assertion) => assertion.type === 'network_success_max',
+    );
+    const noServerErrors = value.assertions.some(
+      (assertion) => assertion.type === 'network_no_server_errors',
+    );
     if (
-      value.networkMatcher === null &&
-      value.assertions.some((assertion) =>
-        assertion.type.startsWith('network_'),
+      requestLimit?.type !== 'network_request_max' ||
+      requestLimit.maximum !== value.triggerCount ||
+      successLimit?.type !== 'network_success_max' ||
+      successLimit.maximum !== 1 ||
+      !noServerErrors
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['assertions'],
+        message:
+          'An approved guided network recipe must bound all trigger attempts, allow at most one successful response, and reject HTTP 5xx.',
+      });
+    }
+    if (value.triggerCount === 2 && value.intervalMs === 300) {
+      const statuses = value.assertions.find(
+        (assertion) => assertion.type === 'network_all_status',
+      );
+      const observedStatus = value.networkEvidenceProvenance?.observedStatus;
+      if (
+        statuses?.type !== 'network_all_status' ||
+        !statuses.allowedStatuses.includes(409) ||
+        (observedStatus != null &&
+          !statuses.allowedStatuses.includes(observedStatus)) ||
+        (observedStatus == null &&
+          !statuses.allowedStatuses.some(
+            (status) => status >= 200 && status < 400,
+          ))
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['assertions'],
+          message:
+            'Server duplicate handling requires the approved successful status and HTTP 409 duplicate response set.',
+        });
+      }
+    }
+  }
+  if ((value.assertionSelectionProvenance?.length ?? 0) > 0) {
+    const persistedAssertionIds = value.assertions.map(
+      (assertion) => assertion.id,
+    );
+    const provenanceAssertionIds = (value.assertionSelectionProvenance ?? [])
+      .map((entry) => entry.assertionId)
+      .filter((id): id is string => id !== null);
+    if (
+      new Set(provenanceAssertionIds).size !== provenanceAssertionIds.length ||
+      persistedAssertionIds.some(
+        (assertionId) => !provenanceAssertionIds.includes(assertionId),
+      ) ||
+      provenanceAssertionIds.some(
+        (assertionId) => !persistedAssertionIds.includes(assertionId),
       )
     ) {
       context.addIssue({
         code: 'custom',
-        path: ['networkMatcher'],
+        path: ['assertionSelectionProvenance'],
         message:
-          'A discovered network request matcher is required for network assertions.',
+          'Assertion provenance must identify every saved assertion exactly once.',
       });
     }
+  }
+}
+
+export const createExternalExperimentRequestSchema =
+  externalExperimentConfigurationRequestObjectSchema
+    .extend({
+      name: z.string().trim().min(1).max(160),
+      normalizeJourney: z.boolean().optional(),
+      stepValueOverrides: z
+        .record(z.string().min(1), z.string().max(10_000))
+        .optional(),
+    })
+    .superRefine(refineExternalExperimentConfiguration);
+
+export const createExternalExperimentSuiteRequestSchema = z
+  .object({
+    tests: z.array(createExternalExperimentRequestSchema).length(3),
+  })
+  .superRefine((value, context) => {
+    const names = value.tests.map((test) => test.name);
+    if (new Set(names).size !== names.length) {
+      context.addIssue({
+        code: 'custom',
+        path: ['tests'],
+        message: 'Every generated Test in a suite must have a distinct name.',
+      });
+    }
+    const targetStepIds = new Set(value.tests.map((test) => test.targetStepId));
+    if (targetStepIds.size !== 1) {
+      context.addIssue({
+        code: 'custom',
+        path: ['tests'],
+        message: 'Every generated Test must use the same Critical Action.',
+      });
+    }
+    const configurations = new Set(
+      value.tests.map((test) => `${test.triggerCount}:${test.intervalMs}`),
+    );
+    const requiredConfigurations = ['2:0', '3:100', '2:300'];
     if (
-      value.requestSelectionProvenance?.selectedMatcher !== null &&
-      value.requestSelectionProvenance?.selectedMatcher !== undefined &&
-      (value.networkMatcher === null ||
-        value.requestSelectionProvenance.selectedMatcher.method !==
-          value.networkMatcher.method ||
-        value.requestSelectionProvenance.selectedMatcher.pathname !==
-          value.networkMatcher.pathname ||
-        value.requestSelectionProvenance.selectedMatcher.host !==
-          value.networkMatcher.host)
+      configurations.size !== requiredConfigurations.length ||
+      requiredConfigurations.some(
+        (configuration) => !configurations.has(configuration),
+      )
     ) {
       context.addIssue({
         code: 'custom',
-        path: ['requestSelectionProvenance', 'selectedMatcher'],
+        path: ['tests'],
         message:
-          'The persisted selected matcher must match the experiment network matcher.',
+          'A generated Test suite must include double-click, triple-click, and delayed-repeat configurations exactly once.',
       });
     }
-    if ((value.assertionSelectionProvenance?.length ?? 0) > 0) {
-      const persistedAssertionIds = value.assertions.map(
-        (assertion) => assertion.id,
-      );
-      const provenanceAssertionIds = (value.assertionSelectionProvenance ?? [])
-        .map((entry) => entry.assertionId)
-        .filter((id): id is string => id !== null);
-      if (
-        new Set(provenanceAssertionIds).size !==
-          provenanceAssertionIds.length ||
-        persistedAssertionIds.some(
-          (assertionId) => !provenanceAssertionIds.includes(assertionId),
-        ) ||
-        provenanceAssertionIds.some(
-          (assertionId) => !persistedAssertionIds.includes(assertionId),
-        )
-      ) {
-        context.addIssue({
-          code: 'custom',
-          path: ['assertionSelectionProvenance'],
-          message:
-            'Assertion provenance must identify every saved assertion exactly once.',
-        });
-      }
-    }
   });
+
+export const createExternalExperimentVersionRequestSchema =
+  externalExperimentConfigurationRequestObjectSchema
+    .strict()
+    .superRefine(refineExternalExperimentConfiguration);
 
 export const externalExperimentVersionSchema = z.object({
   id: z.string().min(1),
@@ -1126,15 +1362,22 @@ export const externalExperimentVersionSchema = z.object({
   triggerCount: z.union([z.literal(2), z.literal(3)]),
   intervalMs: z.union([z.literal(0), z.literal(100), z.literal(300)]),
   networkMatcher: networkMatcherSchema.nullable(),
-  assertions: z.array(externalAssertionSchema).min(1),
+  assertions: z.array(externalAssertionSchema).max(20),
   continueAfterTarget: z.boolean(),
   guided: z.boolean().default(false),
   requestSelectionProvenance: requestSelectionProvenanceSchema
     .nullable()
     .default(null),
+  networkEvidenceProvenance: networkEvidenceProvenanceSchema
+    .nullable()
+    .optional(),
   assertionSelectionProvenance: z
     .array(assertionSelectionProvenanceEntrySchema)
     .default([]),
+  outcomeCheckSnapshot: outcomeCheckRunSnapshotSchema.default({
+    criticalAction: null,
+    checks: [],
+  }),
   journeySnapshot: persistedJourneySchema,
   createdAt: z.iso.datetime({ offset: true }),
 });
@@ -1184,11 +1427,6 @@ export const externalAssertionResultSchema = z.object({
   evaluatedAt: z.iso.datetime({ offset: true }),
 });
 
-export const outcomeCheckRunSnapshotSchema = z.object({
-  criticalAction: criticalActionSchema.nullable(),
-  checks: z.array(outcomeCheckSchema),
-});
-
 export const outcomeEvaluationStatusSchema = z.enum([
   'passed',
   'failed',
@@ -1210,6 +1448,72 @@ export const externalRunLifecycleStatusSchema = z.enum([
   'completed',
   'runner_error',
 ]);
+
+export const externalRunCanonicalVerdictSchema = z.enum([
+  'passed',
+  'failed',
+  'could_not_verify',
+  'runner_error',
+]);
+
+export const externalRunVerdictBasisSchema = z.enum([
+  'approved_outcomes_and_technical_checks',
+  'approved_outcomes_only',
+  'technical_checks_only',
+  'no_required_checks',
+]);
+
+export function deriveExternalRunVerdict(input: {
+  status:
+    | 'created'
+    | 'starting'
+    | 'running'
+    | 'evaluating'
+    | 'passed'
+    | 'failed'
+    | 'runner_error';
+  lifecycleStatus?: z.infer<typeof externalRunLifecycleStatusSchema>;
+  outcomeAggregate: z.infer<typeof outcomeAggregateSchema>;
+  assertionAggregate: z.infer<typeof outcomeAggregateSchema>;
+}): {
+  canonicalVerdict: z.infer<typeof externalRunCanonicalVerdictSchema>;
+  verdictBasis: z.infer<typeof externalRunVerdictBasisSchema>;
+} {
+  const hasApprovedOutcomes = input.outcomeAggregate !== 'not_configured';
+  const hasTechnicalChecks = input.assertionAggregate !== 'not_configured';
+  const verdictBasis = hasApprovedOutcomes
+    ? hasTechnicalChecks
+      ? 'approved_outcomes_and_technical_checks'
+      : 'approved_outcomes_only'
+    : hasTechnicalChecks
+      ? 'technical_checks_only'
+      : 'no_required_checks';
+
+  if (
+    input.status === 'runner_error' ||
+    input.lifecycleStatus === 'runner_error'
+  ) {
+    return { canonicalVerdict: 'runner_error', verdictBasis };
+  }
+
+  const configuredAggregates = [
+    input.outcomeAggregate,
+    input.assertionAggregate,
+  ].filter((aggregate) => aggregate !== 'not_configured');
+
+  if (configuredAggregates.includes('failed')) {
+    return { canonicalVerdict: 'failed', verdictBasis };
+  }
+
+  if (
+    configuredAggregates.length === 0 ||
+    configuredAggregates.includes('could_not_verify')
+  ) {
+    return { canonicalVerdict: 'could_not_verify', verdictBasis };
+  }
+
+  return { canonicalVerdict: 'passed', verdictBasis };
+}
 
 export const outcomeEvidenceReferencesSchema = z.object({
   triggerEventIds: z.array(z.string().min(1)).max(3),
@@ -1386,40 +1690,55 @@ const externalRunDetailObjectSchema = z.object({
 });
 
 export const externalRunDetailSchema = externalRunDetailObjectSchema.transform(
-  (run) => ({
-    ...run,
-    lifecycleStatus:
+  (run) => {
+    const lifecycleStatus =
       run.lifecycleStatus ??
       (run.status === 'runner_error'
         ? 'runner_error'
         : run.status === 'passed' || run.status === 'failed'
           ? 'completed'
-          : run.status),
-  }),
+          : run.status);
+
+    return {
+      ...run,
+      lifecycleStatus,
+      ...deriveExternalRunVerdict({
+        status: run.status,
+        lifecycleStatus,
+        outcomeAggregate: run.outcomeAggregate,
+        assertionAggregate: run.assertionAggregate,
+      }),
+    };
+  },
 );
 
-export const externalRunSummarySchema = z.object({
-  runId: z.string().min(1),
-  experimentVersionId: z.string().min(1),
-  projectId: z.string().min(1),
-  journeyId: z.string().min(1),
-  status: externalRunDetailObjectSchema.shape.status,
-  lifecycleStatus: externalRunLifecycleStatusSchema,
-  outcomeAggregate: outcomeAggregateSchema,
-  assertionAggregate: outcomeAggregateSchema,
-  startedAt: z.iso.datetime({ offset: true }),
-  completedAt: z.iso.datetime({ offset: true }).nullable(),
-  durationMs: z.number().int().nonnegative().nullable(),
-  projectName: z.string().min(1),
-  journeyName: z.string().min(1),
-  experimentName: z.string().min(1),
-  triggerAttempts: z.number().int().nonnegative(),
-  matchedRequestCount: z.number().int().nonnegative(),
-  passedAssertionCount: z.number().int().nonnegative(),
-  assertionCount: z.number().int().nonnegative(),
-  screenshotCount: z.number().int().nonnegative(),
-  createdAt: z.iso.datetime({ offset: true }),
-});
+export const externalRunSummarySchema = z
+  .object({
+    runId: z.string().min(1),
+    experimentVersionId: z.string().min(1),
+    projectId: z.string().min(1),
+    journeyId: z.string().min(1),
+    status: externalRunDetailObjectSchema.shape.status,
+    lifecycleStatus: externalRunLifecycleStatusSchema,
+    outcomeAggregate: outcomeAggregateSchema,
+    assertionAggregate: outcomeAggregateSchema,
+    startedAt: z.iso.datetime({ offset: true }),
+    completedAt: z.iso.datetime({ offset: true }).nullable(),
+    durationMs: z.number().int().nonnegative().nullable(),
+    projectName: z.string().min(1),
+    journeyName: z.string().min(1),
+    experimentName: z.string().min(1),
+    triggerAttempts: z.number().int().nonnegative(),
+    matchedRequestCount: z.number().int().nonnegative(),
+    passedAssertionCount: z.number().int().nonnegative(),
+    assertionCount: z.number().int().nonnegative(),
+    screenshotCount: z.number().int().nonnegative(),
+    createdAt: z.iso.datetime({ offset: true }),
+  })
+  .transform((run) => ({
+    ...run,
+    ...deriveExternalRunVerdict(run),
+  }));
 
 export const externalRunListQuerySchema = z.object({
   projectId: z.string().min(1).optional(),
@@ -1432,6 +1751,27 @@ export const externalRunListSchema = z.object({
   items: z.array(externalRunSummarySchema),
   limit: z.number().int().positive(),
   offset: z.number().int().nonnegative(),
+});
+
+export const externalTestSummarySchema = z.object({
+  testId: z.string().min(1),
+  projectId: z.string().min(1),
+  journeyId: z.string().min(1),
+  name: z.string().min(1),
+  experimentType: z.literal('impatient_user'),
+  latestVersion: externalExperimentVersionSchema,
+  versionCount: z.number().int().positive(),
+  latestRun: externalRunSummarySchema.nullable(),
+  runCount: z.number().int().nonnegative(),
+});
+
+export const externalTestSummaryListSchema = z.object({
+  items: z.array(externalTestSummarySchema),
+});
+
+export const externalTestDetailSchema = externalTestSummarySchema.extend({
+  versions: z.array(externalExperimentVersionSchema).min(1),
+  runs: z.array(externalRunSummarySchema).max(100),
 });
 
 export const externalRunComparisonRequestSchema = z
@@ -1896,6 +2236,9 @@ export type RecordedValue = z.infer<typeof recordedValueSchema>;
 export type RecordedJourneyStep = z.infer<typeof recordedJourneyStepSchema>;
 export type RecordingWarningCode = z.infer<typeof recordingWarningCodeSchema>;
 export type RecordingWarning = z.infer<typeof recordingWarningSchema>;
+export type RecordedRequestEvidence = z.infer<
+  typeof recordedRequestEvidenceSchema
+>;
 export type RecordingSession = z.infer<typeof recordingSessionSchema>;
 export type SaveRecordedJourneyRequest = z.infer<
   typeof saveRecordedJourneyRequestSchema
@@ -1951,6 +2294,12 @@ export type OutcomeAggregate = z.infer<typeof outcomeAggregateSchema>;
 export type ExternalRunLifecycleStatus = z.infer<
   typeof externalRunLifecycleStatusSchema
 >;
+export type ExternalRunCanonicalVerdict = z.infer<
+  typeof externalRunCanonicalVerdictSchema
+>;
+export type ExternalRunVerdictBasis = z.infer<
+  typeof externalRunVerdictBasisSchema
+>;
 export type OutcomeEvidenceReferences = z.infer<
   typeof outcomeEvidenceReferencesSchema
 >;
@@ -1973,6 +2322,9 @@ export type HookMethod = z.infer<typeof hookMethodSchema>;
 export type HttpHook = z.infer<typeof httpHookSchema>;
 export type ProjectExecutionSettingsInput = z.infer<
   typeof projectExecutionSettingsInputSchema
+>;
+export type ProductionReplayAcknowledgementInput = z.infer<
+  typeof productionReplayAcknowledgementInputSchema
 >;
 export type ProjectAuthStatus = z.infer<typeof projectAuthStatusSchema>;
 export type ProjectExecutionSettings = z.infer<
@@ -2000,6 +2352,16 @@ export type RequestRecommendationReason = z.infer<
 >;
 export type RankedRequestCandidate = z.infer<
   typeof rankedRequestCandidateSchema
+>;
+export type NetworkEvidenceSource = z.infer<typeof networkEvidenceSourceSchema>;
+export type NetworkEvidenceCandidate = z.infer<
+  typeof networkEvidenceCandidateSchema
+>;
+export type NetworkEvidenceCandidateList = z.infer<
+  typeof networkEvidenceCandidateListSchema
+>;
+export type NetworkEvidenceProvenance = z.infer<
+  typeof networkEvidenceProvenanceSchema
 >;
 export type RequestDiscoveryOutcome = z.infer<
   typeof requestDiscoveryOutcomeSchema
@@ -2055,6 +2417,12 @@ export type ExternalAssertion = z.infer<typeof externalAssertionSchema>;
 export type CreateExternalExperimentRequest = z.infer<
   typeof createExternalExperimentRequestSchema
 >;
+export type CreateExternalExperimentSuiteRequest = z.infer<
+  typeof createExternalExperimentSuiteRequestSchema
+>;
+export type CreateExternalExperimentVersionRequest = z.infer<
+  typeof createExternalExperimentVersionRequestSchema
+>;
 export type ExternalExperimentVersion = z.infer<
   typeof externalExperimentVersionSchema
 >;
@@ -2091,6 +2459,11 @@ export type ExternalRunDetail = z.infer<typeof externalRunDetailSchema>;
 export type ExternalRunSummary = z.infer<typeof externalRunSummarySchema>;
 export type ExternalRunListQuery = z.infer<typeof externalRunListQuerySchema>;
 export type ExternalRunList = z.infer<typeof externalRunListSchema>;
+export type ExternalTestSummary = z.infer<typeof externalTestSummarySchema>;
+export type ExternalTestSummaryList = z.infer<
+  typeof externalTestSummaryListSchema
+>;
+export type ExternalTestDetail = z.infer<typeof externalTestDetailSchema>;
 export type ExternalRunComparisonRequest = z.infer<
   typeof externalRunComparisonRequestSchema
 >;

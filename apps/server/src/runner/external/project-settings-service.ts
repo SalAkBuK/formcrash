@@ -31,8 +31,22 @@ export class ProjectSettingsService {
       beforeRunHook: stored.beforeRunHook,
       afterRunHook: stored.afterRunHook,
       authentication: this.authStore.status(projectId),
+      productionReplayAcknowledged:
+        stored.productionReplayAcknowledgedAt !== null,
+      productionReplayAcknowledgedAt: stored.productionReplayAcknowledgedAt,
       updatedAt: stored.updatedAt,
     });
+  }
+
+  setProductionReplayAcknowledgement(
+    projectId: string,
+    acknowledged: boolean,
+  ): ProjectExecutionSettings {
+    if (this.projects.getProject(projectId) === null) {
+      throw new Error('Project was not found.');
+    }
+    this.repository.setProductionReplayAcknowledgement(projectId, acknowledged);
+    return this.get(projectId);
   }
 
   save(

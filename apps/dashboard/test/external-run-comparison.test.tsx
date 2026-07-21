@@ -7,6 +7,7 @@ import type {
   ExternalRunDetail,
   ExternalRunSummary,
 } from '@formcrash/contracts';
+import { externalRunSummarySchema } from '@formcrash/contracts';
 
 import { ExternalRunComparison } from '../src/features/projects/components/external-run-comparison';
 
@@ -208,7 +209,7 @@ function summary(
   createdAt: string,
   overrides: Partial<ExternalRunSummary> = {},
 ): ExternalRunSummary {
-  return {
+  return externalRunSummarySchema.parse({
     runId,
     experimentVersionId: `${runId}-version`,
     projectId: 'project-1',
@@ -230,7 +231,7 @@ function summary(
     screenshotCount: 3,
     createdAt,
     ...overrides,
-  };
+  });
 }
 
 function compatibleComparison(): ExternalRunComparisonResponse {

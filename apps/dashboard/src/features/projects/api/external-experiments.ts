@@ -7,11 +7,15 @@ import {
   externalRunDetailSchema,
   externalRunComparisonResponseSchema,
   externalRunListSchema,
+  externalTestDetailSchema,
+  externalTestSummaryListSchema,
+  networkEvidenceCandidateListSchema,
   projectExecutionSettingsSchema,
-  requestDiscoveryResultSchema,
   type AuthCaptureSession,
   type AuthValidationResult,
   type CreateExternalExperimentRequest,
+  type CreateExternalExperimentSuiteRequest,
+  type CreateExternalExperimentVersionRequest,
   type EphemeralRuntimeValues,
   type ReplayMode,
   type ReplayPacing,
@@ -19,10 +23,11 @@ import {
   type ExternalRunDetail,
   type ExternalRunComparisonResponse,
   type ExternalRunList,
+  type ExternalTestDetail,
+  type ExternalTestSummary,
+  type NetworkEvidenceCandidateList,
   type ProjectExecutionSettings,
   type ProjectExecutionSettingsInput,
-  type RequestDiscoveryRequest,
-  type RequestDiscoveryResult,
 } from '@formcrash/contracts';
 
 import { requestJson, resolveApiUrl } from '../../../lib/api-client';
@@ -47,6 +52,21 @@ export function saveProjectSettings(
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
+    },
+  );
+}
+
+export function saveProductionReplayAcknowledgement(
+  projectId: string,
+  acknowledged: boolean,
+): Promise<ProjectExecutionSettings> {
+  return requestJson(
+    `/api/projects/${projectId}/settings/production-replay-acknowledgement`,
+    projectExecutionSettingsSchema,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ acknowledged }),
     },
   );
 }
@@ -113,32 +133,6 @@ export function testAuthentication(
   );
 }
 
-export function discoverRequests(
-  journeyId: string,
-  targetStepId: string,
-  variables: EphemeralRuntimeValues,
-  confirmProduction: boolean,
-  options: Pick<
-    RequestDiscoveryRequest,
-    'recipe' | 'normalizeJourney' | 'stepValueOverrides'
-  >,
-): Promise<RequestDiscoveryResult> {
-  return requestJson(
-    `/api/journeys/${journeyId}/request-discovery`,
-    requestDiscoveryResultSchema,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        targetStepId,
-        variables,
-        confirmProduction,
-        ...options,
-      }),
-    },
-  );
-}
-
 export async function listExternalExperiments(
   journeyId: string,
 ): Promise<readonly ExternalExperimentVersion[]> {
@@ -148,6 +142,34 @@ export async function listExternalExperiments(
       externalExperimentListSchema,
     )
   ).items;
+}
+
+export async function listJourneyExternalTests(
+  journeyId: string,
+): Promise<readonly ExternalTestSummary[]> {
+  return (
+    await requestJson(
+      `/api/journeys/${journeyId}/tests`,
+      externalTestSummaryListSchema,
+    )
+  ).items;
+}
+
+export function listNetworkEvidenceCandidates(
+  journeyId: string,
+  targetStepId: string,
+): Promise<NetworkEvidenceCandidateList> {
+  const query = new URLSearchParams({ targetStepId });
+  return requestJson(
+    `/api/journeys/${journeyId}/network-evidence-candidates?${query.toString()}`,
+    networkEvidenceCandidateListSchema,
+  );
+}
+
+export function getExternalTestDetail(
+  testId: string,
+): Promise<ExternalTestDetail> {
+  return requestJson(`/api/external-tests/${testId}`, externalTestDetailSchema);
 }
 
 export async function listProjectExternalExperiments(
@@ -185,11 +207,51 @@ export function createExternalExperiment(
   );
 }
 
+export async function createExternalExperimentSuite(
+  journeyId: string,
+  input: CreateExternalExperimentSuiteRequest,
+): Promise<readonly ExternalExperimentVersion[]> {
+  return (
+    await requestJson(
+      `/api/journeys/${journeyId}/experiment-suite`,
+      externalExperimentListSchema,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      },
+    )
+  ).items;
+}
+
+export function createExternalExperimentVersion(
+  testId: string,
+  input: CreateExternalExperimentVersionRequest,
+): Promise<ExternalExperimentVersion> {
+  return requestJson(
+    `/api/external-experiments/${testId}/versions`,
+    externalExperimentVersionSchema,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    },
+  );
+}
+
 export async function deleteExternalExperimentVersion(
   experimentVersionId: string,
 ): Promise<void> {
   await requestJson(
     `/api/external-experiments/${experimentVersionId}`,
+    deleteResourceResponseSchema,
+    { method: 'DELETE' },
+  );
+}
+
+export async function deleteExternalTest(testId: string): Promise<void> {
+  await requestJson(
+    `/api/external-tests/${testId}`,
     deleteResourceResponseSchema,
     { method: 'DELETE' },
   );

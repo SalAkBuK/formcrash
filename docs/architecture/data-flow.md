@@ -64,29 +64,41 @@ sequenceDiagram
 REST is used for finite commands and queries. SSE is used for one-way ordered
 progress because the MVP does not require bidirectional socket messaging.
 
-## External request recommendation flow
+## External network-evidence approval flow
 
 ```mermaid
 sequenceDiagram
   actor Developer
   participant Dashboard
   participant Server as Control server
-  participant Browser as Chromium
-  participant Target as Controlled target
   participant Store as SQLite
 
-  Developer->>Dashboard: Analyze selected action
-  Dashboard->>Server: POST request discovery
-  Server->>Browser: Replay prior steps and execute target once
-  Browser->>Target: Normal browser requests
-  Server->>Server: Group and score bounded request metadata
-  Server-->>Dashboard: Ranked candidates plus recommendation outcome
-  Developer->>Dashboard: Confirm or override selection
-  Dashboard->>Server: Create immutable experiment version
-  Server->>Store: Persist matcher and selection provenance
+  Server->>Store: Recording stores sanitized action request evidence
+  Developer->>Dashboard: Open the normal test editor
+  Dashboard->>Server: GET ranked recording/prior-run candidates
+  Server-->>Dashboard: Bounded candidates with provenance
+  Developer->>Dashboard: Approve one eligible request
+  Dashboard->>Server: Create immutable Test version
+  Server->>Store: Persist matcher, enforced checks, and provenance
 ```
 
-Discovery never executes the target more than once per request. The dashboard
-auto-selects only a server-declared high-confidence recommendation. Review and
-ambiguous outcomes require an explicit choice, and no-candidate results do not
-invent a matcher.
+This standard flow performs no extra replay. Every matcher requires explicit
+approval, and no-candidate results remain browser-only rather than inventing
+network protection. The historical request-discovery command remains available
+for backward compatibility outside the normal editor.
+
+## External Outcome Check ownership
+
+1. New test and Edit operations read the exact Journey version's approved
+   Critical Action and complete Outcome Check list inside the version-creation
+   transaction.
+2. The server persists those records on the immutable external experiment
+   version. Optional bounded browser checks are stored separately as custom
+   technical assertions.
+3. A Run copies the version-owned snapshot into the immutable Run before
+   Chromium launches and evaluates only that snapshot.
+4. Changes to the Journey's current Outcome Checks do not alter saved versions
+   or historical Runs. Edit is the only operation that adopts them into a new
+   version.
+5. Outcome checks prove only their bounded browser-visible conditions. Hidden
+   database records and unobserved backend effects remain explicitly unknown.

@@ -255,11 +255,14 @@ function setupTone(state: ScenarioLineage['setupState']): StatusTone {
 
 function verdictTone(run: ScenarioLineage['latestCompatibleRun']): StatusTone {
   if (run === null) return 'neutral';
-  if (run.status === 'runner_error' || run.outcomeAggregate === 'failed')
+  if (
+    run.canonicalVerdict === 'runner_error' ||
+    run.canonicalVerdict === 'failed'
+  ) {
     return 'failure';
-  if (run.outcomeAggregate === 'passed') return 'pass';
-  if (run.outcomeAggregate === 'could_not_verify') return 'warning';
-  return 'neutral';
+  }
+  if (run.canonicalVerdict === 'passed') return 'pass';
+  return 'warning';
 }
 
 function messageOf(reason: unknown): string {

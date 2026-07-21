@@ -28,13 +28,13 @@ import type { ServerConfig } from '../../app/config.js';
 import type { ExternalExperimentRepository } from '../../persistence/external-experiment-repository.js';
 import type { ProjectJourneyRepository } from '../../persistence/project-journey-repository.js';
 import type { ProjectSettingsRepository } from '../../persistence/project-settings-repository.js';
-import type { OutcomeCheckRepository } from '../../persistence/outcome-check-repository.js';
 import { RunPersistenceError } from '../../persistence/run-repository.js';
 import { RunEventLog } from '../engine/event-log.js';
 import {
   aggregateOutcomeChecks,
   createUnverifiedOutcomeResults,
   evaluateOutcomeChecks,
+  focusOutcomeEvidence,
 } from '../outcomes/outcome-evaluator.js';
 import type { BrowserOwnership } from '../infrastructure/browser-ownership.js';
 import {
@@ -84,7 +84,6 @@ export class ExternalExperimentRunner {
     private readonly repository: ExternalExperimentRepository,
     private readonly ownership: BrowserOwnership,
     browserOwner?: ExternalBrowserOwner,
-    private readonly outcomes?: OutcomeCheckRepository,
   ) {
     this.browserOwner = browserOwner ?? new PlaywrightExternalBrowserOwner();
     this.screenshotStore = new ScreenshotStore(config.artifactRoot, repository);
@@ -128,7 +127,8 @@ export class ExternalExperimentRunner {
         interaction,
       ]),
     );
-    const outcomeCheckSnapshot = this.resolveOutcomeCheckSnapshot(experiment);
+    const outcomeCheckSnapshot = experiment.outcomeCheckSnapshot;
+    this.validateOutcomeCheckSnapshot(experiment);
     const storedSettings = this.settings.get(project.id);
     const runId = randomUUID();
     const startedAtMs = Date.now();
@@ -156,7 +156,6 @@ export class ExternalExperimentRunner {
           runtime,
           outcomeCheckSnapshot,
         ),
-        outcomeCheckSnapshot,
         startedAt,
       });
     } catch (error: unknown) {
@@ -392,6 +391,11 @@ export class ExternalExperimentRunner {
         events,
         disabledDuringRepeatedActionAssertionIds,
       });
+      await focusOutcomeEvidence({
+        snapshot: outcomeCheckSnapshot,
+        session,
+        runtime,
+      });
       const finalArtifact = await this.capture(
         session,
         runId,
@@ -543,39 +547,32 @@ export class ExternalExperimentRunner {
     }
   }
 
-  private resolveOutcomeCheckSnapshot(
+  private validateOutcomeCheckSnapshot(
     experiment: ExternalExperimentVersion,
-  ): OutcomeCheckRunSnapshot {
-    if (this.outcomes === undefined) {
-      return { criticalAction: null, checks: [] };
-    }
-    const criticalAction = this.outcomes.getCriticalAction(
-      experiment.journeyId,
-    );
-    const checks = this.outcomes.listOutcomeChecks(experiment.journeyId);
-    if (checks.length === 0) return { criticalAction, checks: [] };
-    if (criticalAction === null) {
+  ): void {
+    const snapshot = experiment.outcomeCheckSnapshot;
+    if (snapshot.checks.length === 0) return;
+    if (snapshot.criticalAction === null) {
       throw new ConfigurationError(
-        'Outcome Checks exist without an approved Critical Action.',
+        'The test version has Outcome Checks without a snapshotted Critical Action.',
       );
     }
-    if (criticalAction.stepId !== experiment.targetStepId) {
+    if (snapshot.criticalAction.stepId !== experiment.targetStepId) {
       throw new ConfigurationError(
-        'The experiment target must be the approved Critical Action for these Outcome Checks.',
+        'The test target must match its snapshotted Critical Action.',
       );
     }
     if (
-      checks.some(
+      snapshot.checks.some(
         (check) =>
           check.journeyId !== experiment.journeyId ||
-          check.criticalActionId !== criticalAction.id,
+          check.criticalActionId !== snapshot.criticalAction?.id,
       )
     ) {
       throw new ConfigurationError(
-        'Outcome Checks are not owned by this exact journey version and Critical Action.',
+        'The snapshotted Outcome Checks are not owned by this exact journey version and Critical Action.',
       );
     }
-    return { criticalAction, checks: [...checks] };
   }
 
   private async settleAfterDisruption(

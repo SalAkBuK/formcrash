@@ -5,6 +5,9 @@
 > `docs/product/ui-direction.md` governs current information architecture.
 > Verified historical behavior and regression evidence in this document must
 > still be preserved.
+> References below to Guided/Advanced modes describe the historical audit state.
+> The current product has one test editor; see `ui-direction.md` and the
+> multi-test implementation checklist.
 
 **Audit date:** 2026-07-16  
 **Branch:** `main`  

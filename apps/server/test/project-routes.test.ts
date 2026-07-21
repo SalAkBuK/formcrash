@@ -39,6 +39,13 @@ describe('project API', () => {
       targetUrl: 'http://localhost:4300/settings',
     });
 
+    const activeRecording = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${created.id}/recordings/active`,
+    });
+    expect(activeRecording.statusCode).toBe(200);
+    expect(activeRecording.json()).toBeNull();
+
     const list = projectListSchema.parse(
       (await app.inject({ method: 'GET', url: '/api/projects' })).json(),
     );

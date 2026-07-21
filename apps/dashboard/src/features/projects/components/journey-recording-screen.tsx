@@ -13,6 +13,7 @@ import { StateMessage } from '../../../components/ui/state-message';
 import { StatusBadge } from '../../../components/ui/status-badge';
 import { FormCrashApiError } from '../../../lib/api-client';
 import {
+  getActiveRecording,
   getProject,
   getRecording,
   saveJourney,
@@ -34,6 +35,10 @@ export function JourneyRecordingScreen({
   const [recording, setRecording] = useState<RecordingSession | null>(null);
   const [steps, setSteps] = useState<readonly RecordedJourneyStep[]>([]);
   const [journeyName, setJourneyName] = useState('');
+  const [recordingRecovery, setRecordingRecovery] = useState<
+    'loading' | 'ready' | 'failed'
+  >('loading');
+  const [reconnected, setReconnected] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const authentication = useAuthenticationGate({ projectId });
@@ -53,7 +58,29 @@ export function JourneyRecordingScreen({
   }, [projectId]);
 
   useEffect(() => {
-    if (recording?.status !== 'recording') return;
+    let current = true;
+    setRecordingRecovery('loading');
+    setReconnected(false);
+    void getActiveRecording(projectId)
+      .then((session) => {
+        if (!current) return;
+        setRecording(session);
+        setSteps(session?.steps ?? []);
+        setReconnected(session !== null);
+        setRecordingRecovery('ready');
+      })
+      .catch((reason: unknown) => {
+        if (!current) return;
+        setError(messageOf(reason));
+        setRecordingRecovery('failed');
+      });
+    return () => {
+      current = false;
+    };
+  }, [projectId]);
+
+  useEffect(() => {
+    if (recording === null || !isRecordingInProgress(recording.status)) return;
     const timer = window.setInterval(() => {
       void getRecording(projectId, recording.id)
         .then((next) => {
@@ -180,6 +207,18 @@ export function JourneyRecordingScreen({
       {error !== null ? (
         <StateMessage variant="error">{error}</StateMessage>
       ) : null}
+      {reconnected &&
+      recording !== null &&
+      isRecordingInProgress(recording.status) ? (
+        <StateMessage variant="neutral">
+          <strong>Recording reconnected.</strong>{' '}
+          {recording.status === 'launching'
+            ? 'Chromium is still opening. This page will update automatically.'
+            : recording.status === 'stopping'
+              ? 'Chromium is finishing the recording. This page will update automatically.'
+              : 'Continue the journey in the open Chromium window, then stop the recording here.'}
+        </StateMessage>
+      ) : null}
       <AuthenticationRecoveryPanel
         gate={authentication}
         onRetry={(operation) => {
@@ -200,7 +239,8 @@ export function JourneyRecordingScreen({
             className="button button-primary"
             disabled={
               busy !== null ||
-              recording?.status === 'recording' ||
+              recordingRecovery !== 'ready' ||
+              (recording !== null && isRecordingInProgress(recording.status)) ||
               authentication.pending !== null
             }
             onClick={() => void begin()}
@@ -412,6 +452,10 @@ export function JourneyRecordingScreen({
       ) : null}
     </main>
   );
+}
+
+function isRecordingInProgress(status: RecordingSession['status']): boolean {
+  return ['launching', 'recording', 'stopping'].includes(status);
 }
 
 function formatLocator(locator: ReplayLocator | null): string {
