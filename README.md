@@ -1,14 +1,14 @@
-# FormCrash Lab
+# FormCrash
 
-FormCrash Lab is a local pre-production resilience-testing workbench for transactional web journeys.
+FormCrash is a local-first, pre-production resilience-testing application for transactional browser journeys.
 
-It records or replays a critical user flow, deliberately repeats one important action, evaluates explicit recovery expectations, and captures evidence showing whether the application handled the failure safely.
+It records a successful browser journey, identifies the critical state-changing action, deliberately repeats that action under controlled timing, and evaluates approved Outcome Checks. Projects, Journeys, Tests, and Runs remain durable records instead of disappearing into a one-time automation wizard.
 
 The bundled demo focuses on a common production bug:
 
 > What happens when an impatient user submits checkout twice?
 
-FormCrash runs the same experiment against a vulnerable checkout and a fixed checkout so the failure and the recovery are both visible.
+FormCrash runs the same Test against a vulnerable checkout and a fixed checkout so the failure and the recovery are both visible.
 
 ## Why this exists
 
@@ -25,7 +25,7 @@ Examples include:
 
 These failures are difficult to reproduce consistently with manual testing.
 
-FormCrash turns one of those failure modes into a repeatable local experiment with:
+FormCrash turns one of those failure modes into a repeatable Test with:
 
 - a controlled Chromium browser;
 - deterministic repeated-action injection;
@@ -42,7 +42,7 @@ It contains:
 
 - a vulnerable checkout that creates two orders when submitted twice;
 - a fixed checkout with client locking and server idempotency;
-- one deterministic **Impatient User** experiment;
+- one deterministic **Impatient User** Test;
 - one recovery assertion: no more than one order should be created;
 - three screenshots captured during each run;
 - persisted events, assertions, and observed request evidence.
@@ -97,12 +97,29 @@ This starts:
 
 Application startup never downloads a browser. Chromium must be installed explicitly before the first run.
 
-## Judge walkthrough
+## Hackathon walkthrough
+
+Use a staging or otherwise controlled target that you are authorized to modify. Rehearse the full path before recording because journey replay and Test execution can create real target data.
+
+1. Open **Projects** and select the controlled target.
+2. Record the successful browser journey, then review and save its immutable version.
+3. From the Saved Journey, choose **Configure test suite**.
+4. Confirm the Critical Action that creates or updates the business record.
+5. Replay the journey to capture the successful outcome.
+6. When Chromium enters Outcome selection, use the exact generated name, email, phone, or identifier shown in both the dashboard and Chromium banner to locate the newly created record among older rows.
+7. Click the matching row, confirmation, or other visible proof and approve the Outcome Check.
+8. Review and save. FormCrash creates the Double-click, Triple-click, and Delayed repeat Tests without running them, then returns to their Saved Journey.
+9. Run a Test directly from the Journey and open its latest **Run details** without detouring through the Runs directory.
+10. Review the immutable configuration, approved browser and request evidence, verdict, timeline, and screenshots.
+
+Generated literals are scoped to the active baseline capture. Reusable Outcome Checks persist templates such as `{{unique.name}}`, not a one-off tenant or customer value.
+
+## Bundled fallback walkthrough
 
 1. Start the workspace with `pnpm dev`.
 2. Open http://localhost:3000.
 3. Select **Vulnerable**.
-4. Choose **Run Sample Experiment**.
+4. Choose **Run Sample Experiment** (the bundled legacy demo label).
 5. Watch FormCrash open Chromium and replay the checkout.
 6. Confirm the result shows:
    - a failed recovery assertion;
@@ -111,14 +128,14 @@ Application startup never downloads a browser. Chromium must be installed explic
    - before, disruption, and settled-state screenshots.
 7. Return to the dashboard.
 8. Select **Fixed**.
-9. Run the identical experiment again.
+9. Run the identical Test again.
 10. Confirm the result passes with one created order.
 
 Recent runs are persisted and can be reopened after refreshing the dashboard or restarting the server.
 
 ## How it works
 
-The sample experiment follows this sequence:
+The sample Test follows this sequence:
 
 ```text
 Reset sample state
@@ -162,7 +179,7 @@ Generated runtime data under `var/` is ignored by Git.
 
 ## Testing an external application
 
-The bundled checkout is the guaranteed demo path.
+The bundled checkout is the guaranteed deterministic path. The reusable external workflow is designed for authorized local, staging, and controlled pre-production targets.
 
 The reusable external workflow is available at:
 
@@ -172,14 +189,15 @@ It supports:
 
 1. creating a project for a controlled HTTP or HTTPS target;
 2. recording a same-tab journey in visible Chromium;
-3. reviewing and saving the journey;
-4. selecting a recorded click or form submission as the critical action;
-5. discovering requests caused by that action;
-6. creating an Impatient User experiment;
-7. running the experiment with network and interface assertions;
-8. reviewing persisted events, evidence, warnings, and screenshots.
+3. reviewing and saving an immutable Journey version;
+4. approving a recorded click or form submission as the Critical Action;
+5. replaying the Journey once to approve browser-visible Outcome Checks, with exact synthetic identities displayed during selection;
+6. explicitly approving sanitized request evidence captured during recording, or bounded evidence from an existing prior Run, without another discovery replay;
+7. atomically saving Double-click, Triple-click, and Delayed repeat as three sibling Tests;
+8. returning to the Saved Journey, where each Test can be run and its latest Run details opened directly;
+9. reviewing immutable Test versions, canonical verdicts, events, evidence, warnings, and screenshots.
 
-Guided Test is the default workflow. Advanced mode exposes the full matcher, assertion, variable, authentication, and hook configuration.
+There is one supported Test editor. Optional Technical checks add bounded browser assertions for visibility, hidden or disabled state, text, retained fields, and final URLs. They supplement approved Outcome Checks rather than replacing them.
 
 ### Supported recorded actions
 
@@ -219,7 +237,7 @@ Example:
 FORMCRASH_VAR_API_TOKEN
 ```
 
-Values may also be supplied ephemerally for a replay or experiment run.
+Values may also be supplied ephemerally for a replay or Test run.
 
 Secret values and values derived from them are resolved in memory and excluded from persisted snapshots, API responses, events, errors, and screenshot metadata. Sensitive browser fields are added to the screenshot mask list when their target locator remains available.
 
@@ -227,7 +245,7 @@ Secret values and values derived from them are resolved in memory and excluded f
 
 FormCrash is intended for local, staging, and controlled pre-production environments.
 
-Production targets require explicit confirmation before replay, discovery, or repeated-action execution.
+Production targets require explicit confirmation before replay, Outcome capture, or repeated-action execution. Prefer staging for demonstrations.
 
 Before-run and cleanup hooks accept only bounded `POST` or `DELETE` requests. They should only be used against controlled test environments.
 
@@ -292,22 +310,27 @@ POST http://localhost:4200/api/test-support/reset
 Implemented:
 
 - vulnerable and fixed sample checkout;
-- deterministic duplicate-submit experiment;
+- deterministic duplicate-submit Test;
 - visible Playwright execution;
 - persisted runs, events, assertions, and screenshots;
 - replayable SSE progress;
 - external project creation;
-- journey recording and replay;
+- immutable Journey recording and replay;
 - authentication capture;
 - runtime variables and secret redaction;
-- request discovery and deterministic ranking;
-- Guided and Advanced experiment configuration;
+- Critical Action and Outcome Check approval;
+- generated safe identities with exact active-capture guidance and template-only persistence;
+- recording-time and prior-Run request evidence with deterministic ranking and explicit approval;
+- one Test editor that atomically creates three reusable sibling Tests;
+- stable Test identities with immutable version and Run history;
+- Saved Journey Test actions for Run, latest Run details, record details, and editing;
+- canonical verdicts that distinguish failed, passed, could-not-verify, and runner-error outcomes;
 - network, UI, field-retention, and URL assertions;
 - persisted external-run evidence.
 
 Not currently implemented:
 
-- dedicated failed-versus-fixed comparison reports;
+- complete generic before-and-after proof across arbitrary external targets;
 - PDF or HTML exports;
 - CI orchestration;
 - cloud execution;
@@ -320,7 +343,10 @@ FormCrash was built with Codex, but it has no runtime AI dependency.
 ## Documentation
 
 - Product requirements: `docs/product/prd.md`
-- Implementation roadmap: `docs/implementation/roadmap.md`
+- Product UI direction: `docs/product/ui-direction.md`
+- Active bugs and verification gaps: `docs/product/active-bugs.md`
+- Multi-Test acceptance record: `docs/product/multi-test-acceptance.md`
+- Architecture and data flow: `docs/architecture/data-flow.md`
 - High-fidelity replay contract: `docs/architecture/high-fidelity-replay.md`
 - Request recommendation model: `docs/architecture/request-recommendation.md`
 - Assertion recommendation model: `docs/architecture/assertion-recommendation.md`
