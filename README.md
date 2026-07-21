@@ -10,6 +10,24 @@ The bundled demo focuses on a common production bug:
 
 FormCrash runs the same Test against a vulnerable checkout and a fixed checkout so the failure and the recovery are both visible.
 
+## Built with Codex and GPT-5.6
+
+FormCrash was designed and implemented during OpenAI Build Week using Codex with GPT-5.6.
+
+Codex and GPT-5.6 accelerated:
+
+- product scoping and architecture planning;
+- breaking the implementation into verifiable vertical slices;
+- building the dashboard, control server, browser runner, contracts, and persistence layers;
+- designing deterministic request-ranking and assertion-recommendation rules;
+- writing and reviewing automated tests;
+- debugging authentication, replay, navigation, selector, and network-evidence problems;
+- refactoring the product around Projects, Journeys, Tests, and Runs.
+
+The main human decisions included narrowing the product thesis, defining the Critical Journey workflow, choosing deterministic recommendations instead of a runtime AI dependency, reviewing generated implementations, and deciding which sensitive evidence could safely be persisted.
+
+FormCrash does not require an OpenAI API key or an AI model while running. Codex and GPT-5.6 were used to build the application rather than as a required service inside the finished product.
+
 ## Why this exists
 
 Many damaging bugs are caused by timing and repeated user actions rather than a complete application crash.
@@ -56,6 +74,20 @@ It contains:
 
 The failed assertion in vulnerable mode is an expected product result, not a server error.
 
+## Judge testing path
+
+No external SaaS application, account, or test data is required to evaluate the core project.
+
+After completing the [Quick start](#quick-start), use the bundled checkout to run the same repeated-submit Test against both modes:
+
+1. Run the **Vulnerable** checkout and confirm that two orders are created and the recovery assertion fails.
+2. Run the **Fixed** checkout and confirm that one order is created and the recovery assertion passes.
+3. Open either saved Run to inspect screenshots, ordered events, assertions, and observed request evidence.
+
+The full click-by-click process is documented in the [Bundled fallback walkthrough](#bundled-fallback-walkthrough).
+
+Demo video: https://www.youtube.com/watch?v=S9u86oqdPD4
+
 ## Quick start
 
 ### Prerequisites
@@ -64,6 +96,12 @@ The failed assertion in vulnerable mode is an expected product result, not a ser
 - Corepack
 - pnpm `11.13.0`
 - Chromium installed through Playwright
+
+### Supported platforms
+
+The submission build was developed and verified on Windows with Node.js `24.11.0` and Playwright Chromium.
+
+macOS and Linux have not been fully verified for this submission.
 
 ### Install
 
@@ -378,7 +416,6 @@ Not currently implemented:
 - generic business-record count inference;
 - runtime OpenAI or other LLM features.
 
-FormCrash was built with Codex, but it has no runtime AI dependency.
 
 ## Documentation
 
